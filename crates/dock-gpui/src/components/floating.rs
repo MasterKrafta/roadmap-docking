@@ -256,7 +256,6 @@ struct FloatingTabPress {
 #[derive(Clone, Copy)]
 struct FloatingGroupPress {
     group: NodeId,
-    origin: Point,
     layout_version: u64,
 }
 
@@ -632,6 +631,7 @@ impl Render for FloatingHost {
         let manager = self.manager.clone();
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
+        let group_press = self.group_press.clone();
         let pointer_capture = self.pointer_capture.clone();
         let pointer_capture_for_escape = pointer_capture.clone();
         let input_window_id = window_id;
@@ -769,7 +769,6 @@ impl Render for FloatingHost {
                             );
                             group_press_for_down.set(Some(FloatingGroupPress {
                                 group: dock_group,
-                                origin: point,
                                 layout_version,
                             }));
                             if !DockInteractionCoordinator::capture(
@@ -835,6 +834,20 @@ impl Render for FloatingHost {
                             return;
                         }
                         if let Some(group_press) = group_press_for_move.get() {
+                            let layout_is_current = controller_for_move.update(app, |controller, _| {
+                                controller.layout().version() == group_press.layout_version
+                            });
+                            if !layout_is_current {
+                                group_press_for_move.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
                             let manager_entity = manager_for_move.upgrade();
                             let drag_host_active = manager_entity
                                 .as_ref()
@@ -1154,6 +1167,19 @@ impl Render for FloatingHost {
                         }
                         if let Some(group_press) = group_press_for_up.get() {
                             group_press_for_up.set(None);
+                            let layout_is_current = controller_for_up.update(app, |controller, _| {
+                                controller.layout().version() == group_press.layout_version
+                            });
+                            if !layout_is_current {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
                             let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
                                 DockInteractionCoordinator::release(window, &pointer_capture_for_up);
                                 app.stop_propagation();
