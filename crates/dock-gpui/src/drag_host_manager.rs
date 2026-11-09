@@ -13,7 +13,7 @@ use gpui::{
 use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    DragHandle, DragPayload, DragState, DropSource, DropTarget, PanelId, Point, Rect, Size,
+    DragHandle, DragPayload, DragState, DropTarget, PanelId, Point, Rect, Size,
 };
 
 use crate::{
