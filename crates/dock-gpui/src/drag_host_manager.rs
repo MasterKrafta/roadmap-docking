@@ -10,10 +10,10 @@ use gpui::{
     AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
     WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
-use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
+use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    DragHandle, DragPayload, DragState, DropTarget, PanelId, Point, Rect, Size,
+    DragDropAction, DragHandle, DragPayload, DragState, DropTarget, PanelId, Point, Rect, Size,
 };
 
 use crate::{
@@ -443,6 +443,10 @@ impl DragHostManager {
         let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
             return false;
         };
+        if self.native_ops.key_down(NativeKey::Escape).unwrap_or(false) {
+            self.cancel_active_drag(id, cx);
+            return false;
+        }
         let native_drag_host = active.native_window;
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
@@ -609,9 +613,114 @@ impl DragHostManager {
             active.free_area_bounds = screen_free_area_bounds;
         }
 
-        if !self.native_ops.left_button_down().unwrap_or(false) {
-            return false;
+        match self.native_ops.left_button_down() {
+            Ok(true) => true,
+            Ok(false) => {
+                self.finish_active_drag(id, cx);
+                false
+            }
+            Err(error) => {
+                tracing::warn!(?id, %error, "could not read mouse button state for DragHost");
+                self.cancel_active_drag(id, cx);
+                false
+            }
         }
+    }
+
+    fn finish_active_drag(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
+            return;
+        };
+        let target = active.drop_target;
+        let free_area_bounds = active.free_area_bounds;
+        let panel = active.panel;
+
+        let finished = self.controller.update(cx, |controller, controller_cx| {
+            let Some(preview) = controller.drag().session().preview() else {
+                let _ = controller.cancel_pointer_interaction();
+                controller.drag_mut().clear_resolver();
+                controller.drag_mut().clear_layout_version();
+                controller.drag_mut().finish_host_session();
+                controller_cx.notify();
+                return false;
+            };
+
+            let request = match controller
+                .drag_mut()
+                .session_mut()
+                .pointer_up(preview.point, target)
+            {
+                Ok(request) => request,
+                Err(error) => {
+                    tracing::debug!(?id, %error, "DragHost release did not produce a drop request");
+                    None
+                }
+            };
+
+            if let Some(mut request) = request {
+                if request.target == Some(DropTarget::FreeArea) {
+                    if let Some(bounds) = free_area_bounds {
+                        request.floating_bounds = Some(bounds);
+                    } else {
+                        tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
+                    }
+                }
+
+                let can_resolve = request.target != Some(DropTarget::FreeArea)
+                    || request.floating_bounds.is_some();
+                if can_resolve {
+                    let action = {
+                        let metrics = controller.metrics();
+                        controller.layout().resolve_drag_drop(&request, &metrics)
+                    };
+                    match action {
+                        Ok(DragDropAction::NoOp) => {}
+                        Ok(DragDropAction::Command(command)) => {
+                            if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                                tracing::warn!(?id, %error, "DragHost drop command was rejected");
+                            }
+                        }
+                        Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
+                    }
+                }
+            }
+
+            let _ = controller.drag_mut().session_mut().reset();
+            controller.drag_mut().clear_resolver();
+            controller.drag_mut().clear_layout_version();
+            controller.drag_mut().finish_host_session();
+            controller_cx.notify();
+            true
+        });
+
+        if let Some(panel) = panel
+            && !finished
+        {
+            tracing::debug!(?id, ?panel, "DragHost release was cancelled; source view will be restored");
+        }
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(?id, %error, "could not close DragHost after release");
+        }
+    }
+
+    fn cancel_active_drag(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        self.controller.update(cx, |controller, controller_cx| {
+            if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
+                tracing::debug!(?id, %error, "could not cancel DragHost pointer interaction");
+            }
+            controller_cx.notify();
+        });
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(?id, %error, "could not close DragHost after cancellation");
+        }
+    }
+
+    /// Cancels the active content drag and restores its cached PanelView.
+    pub(crate) fn cancel_active(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(id) = self.active.as_ref().map(|active| active.id) else {
+            return false;
+        };
+        self.cancel_active_drag(id, cx);
         true
     }
 
