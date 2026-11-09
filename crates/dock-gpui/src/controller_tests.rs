@@ -1,8 +1,8 @@
 use super::{DockController, DockEvent, ResolverCacheKey};
 use dock_core::{
-    CommandError, DockCommand, DockMetrics, DockSide, DragHandle, DragPayload, DragState, DropSource,
-    HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
-    Node, Profile, Rect, Size,
+    CommandError, DockCommand, DockMetrics, DockSide, DragDropAction, DragHandle, DragPayload,
+    DragState, DropSource, DropTarget, HitResult, InitialLayoutError, LayoutRects,
+    PanelConstraints, PanelId, PanelKey, Point, Node, Profile, Rect, Size,
 };
 use crate::drag_host::{DragHostId, DragSourceHost};
 use gpui::WindowId;
@@ -33,6 +33,22 @@ fn controller() -> DockController {
         Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
     )
     .expect("empty Photoshop controller should be valid")
+}
+
+fn populated_controller() -> DockController {
+    let metrics = DockMetrics::default();
+    let registry = baseline_registry();
+    let descriptors = registry.descriptors_for_core();
+    let layout = dock_core::create_initial_layout(Profile::Photoshop, &descriptors, metrics)
+        .expect("baseline workspace should be valid");
+
+    DockController::new(
+        layout,
+        metrics,
+        registry,
+        Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+    )
+    .expect("controller should accept the baseline workspace")
 }
 
 #[test]
@@ -121,6 +137,121 @@ fn content_drag_cancel_after_drag_host_attachment_preserves_layout_and_history()
     assert_eq!(controller.layout().version(), version_before);
     assert_eq!(controller.drag().session().state(), DragState::Idle);
     assert!(controller.drag().host_session().is_none());
+}
+
+#[test]
+fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
+    let mut controller = populated_controller();
+    let source_group = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
+        .expect("baseline workspace should contain a tab group");
+    let metrics = controller.metrics();
+
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Group { group: source_group },
+            DragHandle::GroupGrip,
+            Point::new(40.0, 20.0),
+            DragSourceHost::Main,
+            WindowId::from(101),
+        )
+        .expect("first content drag should start");
+    assert!(!controller.can_undo());
+    assert!(controller
+        .drag_mut()
+        .attach_transport_host(DragHostId::from_raw(101)));
+
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(48.0, 20.0))
+        .unwrap();
+    controller
+        .drag_mut()
+        .session_mut()
+        .set_drop_target(Some(DropTarget::FreeArea))
+        .unwrap();
+
+    let mut request = controller
+        .drag_mut()
+        .session_mut()
+        .pointer_up(Point::new(56.0, 20.0), Some(DropTarget::FreeArea))
+        .unwrap()
+        .expect("valid FreeArea release should produce one request");
+    request.floating_bounds = Some(Rect::new(
+        Point::new(1500.0, 500.0),
+        Size::new(440.0, 360.0),
+    ));
+
+    let action = controller
+        .layout()
+        .resolve_drag_drop(&request, &metrics)
+        .expect("Core should resolve the completed drag request");
+    let DragDropAction::Command(command) = action else {
+        panic!("FreeArea release should resolve to one Float command");
+    };
+    controller
+        .dispatch(command)
+        .expect("successful drop command should be applied");
+
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert!(controller.can_undo());
+    assert!(!controller.can_redo());
+
+    // Match DragHostManager's terminal cleanup before another pointer-down.
+    controller.drag_mut().session_mut().reset().unwrap();
+    controller.drag_mut().clear_resolver();
+    controller.drag_mut().clear_layout_version();
+    controller.drag_mut().finish_host_session();
+
+    let floating_group = controller
+        .layout()
+        .floating_groups()
+        .next()
+        .map(|(id, _)| id)
+        .expect("the dropped group should now belong to a FloatingHost");
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Group { group: source_group },
+            DragHandle::GroupGrip,
+            Point::new(40.0, 20.0),
+            DragSourceHost::Floating {
+                group: floating_group,
+            },
+            WindowId::from(102),
+        )
+        .expect("a second drag should start after the successful drop");
+    assert!(controller
+        .drag_mut()
+        .attach_transport_host(DragHostId::from_raw(102)));
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(48.0, 20.0))
+        .unwrap();
+
+    let layout_after_drop = format!("{:?}", controller.layout());
+    controller
+        .cancel_pointer_interaction_on_focus_loss()
+        .expect("focus loss should cancel the follow-up drag");
+    assert_eq!(format!("{:?}", controller.layout()), layout_after_drop);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
+    assert!(!controller.has_active_pointer_interaction());
+    assert!(controller.can_undo());
+    assert!(!controller.can_redo());
+
+    assert!(controller.undo().unwrap(), "the successful drop must undo once");
+    assert_eq!(controller.layout().floating_groups().count(), 0);
+    assert!(!controller.can_undo(), "a second undo would reveal duplicate history");
+    assert!(controller.can_redo());
+
+    assert!(!controller.undo().unwrap(), "one drop must create exactly one undo entry");
+    assert!(controller.redo().unwrap());
+    assert_eq!(controller.layout().floating_groups().count(), 1);
+    assert!(!controller.can_redo());
 }
 
 #[test]
