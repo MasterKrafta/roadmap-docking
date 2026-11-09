@@ -23,6 +23,7 @@ impl MainDockView {
         groups: &[GroupRect],
         panels: Vec<(PanelRect, Option<AnyView>)>,
         dragged_group: Option<NodeId>,
+        dragged_column: Option<NodeId>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -86,6 +87,7 @@ impl MainDockView {
                 None,
                 true,
                 dragged_group,
+                dragged_column,
             ));
         }
 

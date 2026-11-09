@@ -456,18 +456,28 @@ impl Render for DockHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(source_window_id)
         });
-        let pending_transfer = self.controller.update(cx, |controller, _| {
-            controller.pending_panel_view_transfer_from(source_window_id)
+        let dragged_column = self.controller.update(cx, |controller, _| {
+            controller.dragged_column_from(source_window_id)
         });
-        if let Some(panel) = pending_transfer
-            && panel_views
-                .iter()
-                .all(|(rect, view)| rect.panel != panel || view.is_none())
+        let pending_transfers = self.controller.update(cx, |controller, _| {
+            controller.pending_panel_view_transfers_from(source_window_id)
+        });
+        if !pending_transfers.is_empty()
+            && pending_transfers.iter().all(|panel| {
+                panel_views
+                    .iter()
+                    .all(|(rect, view)| rect.panel != *panel || view.is_none())
+            })
         {
             let controller = self.controller.clone();
             window.on_next_frame(move |_, app| {
                 controller.update(app, |controller, controller_cx| {
-                    if controller.confirm_panel_view_source_detached(panel, source_window_id) {
+                    let mut confirmed = false;
+                    for panel in pending_transfers {
+                        confirmed |= controller
+                            .confirm_panel_view_source_detached(panel, source_window_id);
+                    }
+                    if confirmed {
                         controller_cx.notify();
                     }
                 });
@@ -825,6 +835,7 @@ impl Render for DockHost {
                 &rects.groups,
                 main_panel_views,
                 dragged_group,
+                dragged_column,
                 &rects.tab_strips,
                 &rects.tab_headers,
                 &rects.tab_overflows,
