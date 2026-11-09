@@ -4,7 +4,7 @@ use dock_core::{
     Axis, CommandError, CommandValue, DockCommand, DockMetrics, DragCancelReason, DragHandle,
     DragPayload, DragSession, DragSessionError, DragState, DropSource, DropZoneResolver,
     FloatingGroupId, FlyoutState, GeometryError, HitResult, InitialLayoutError, Layout,
-    LayoutRects, Node, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile,
+    LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelId, PanelKey, Point, Profile,
     Rect, ValidationError, create_initial_layout,
 };
 use gpui::{AnyView, EventEmitter, WindowId};
