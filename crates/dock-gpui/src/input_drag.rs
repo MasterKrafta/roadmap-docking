@@ -187,6 +187,12 @@ pub(crate) fn begin_panel_drag_host(
     });
     let Some((panel, grab_offset, preferred_size)) = candidate else {
         tracing::debug!("PanelTab drag has no valid source geometry for DragHost");
+        controller.update(app, |controller, cx| {
+            if let Err(error) = controller.cancel_pointer_interaction() {
+                tracing::debug!(%error, "could not cancel Panel drag without source geometry");
+            }
+            cx.notify();
+        });
         return false;
     };
 
@@ -325,118 +331,6 @@ pub(crate) fn update_floating_tab_drag(
         cx.notify();
         true
     })
-}
-
-/// Detaches one tab after it leaves the source strip or enters another
-/// docking window. The temporary native window moves, but the drag payload
-/// remains the individual Panel so it can join an existing Tabs group.
-pub(crate) fn begin_floating_tab_tearoff(
-    controller: &Entity<DockController>,
-    manager: &Entity<FloatingWindowManager>,
-    drag: FloatingTabDrag,
-    pointer: Point,
-    app: &mut App,
-) -> bool {
-    let candidate = controller.update(app, |controller, _| {
-        let (active_panel, origin) = match controller.drag().session().state() {
-            DragState::Dragging {
-                payload: DragPayload::Panel { panel },
-                origin,
-                ..
-            } => (panel, origin),
-            _ => return None,
-        };
-        if active_panel != drag.panel || origin != drag.press_origin {
-            return None;
-        }
-
-        let (panel_node, preferred_size) = {
-            let layout = controller.layout();
-            let panel_node = layout.nodes().find_map(|(id, node)| {
-                matches!(node, Node::Panel(value) if value.panel_id == drag.panel).then_some(id)
-            })?;
-            let preferred_size = layout.panel_instance(drag.panel)?.constraints.preferred_size;
-            (panel_node, preferred_size)
-        };
-        let header_rect = controller
-            .floating_geometry(drag.source_window_id, drag.source_group)
-            .ok()?
-            .tab_headers
-            .iter()
-            .find(|header| header.panel == drag.panel)?
-            .rect;
-        Some((panel_node, header_rect, preferred_size, origin))
-    });
-    let Some((panel_node, header_rect, preferred_size, origin)) = candidate else {
-        return false;
-    };
-    eprintln!(
-        "[DOCK-INPUT][floating] tab_tearoff_candidate source_group={:?} panel={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1})",
-        drag.source_group, drag.panel, origin.x, origin.y, pointer.x, pointer.y
-    );
-
-    let Some(local_bounds) =
-        desired_floating_bounds(header_rect, preferred_size, origin, pointer)
-    else {
-        return false;
-    };
-    let model_bounds = manager
-        .update(app, |manager, _| {
-            manager.screen_bounds_from_floating_local(drag.source_group, local_bounds)
-        });
-    let Some(model_bounds) = model_bounds else {
-        tracing::warn!("could not convert floating tab bounds into screen coordinates");
-        return false;
-    };
-
-    let detached = controller.update(app, |controller, cx| {
-        if !controller.begin_tearoff_transaction() {
-            return None;
-        }
-        let outcome = match controller.dispatch_tearoff_float_in(
-            DockCommand::Float {
-                node: panel_node,
-                bounds: model_bounds,
-            },
-            cx,
-        ) {
-            Ok(outcome) => outcome,
-            Err(_) => return None,
-        };
-        match outcome.actual_value {
-            Some(CommandValue::FloatingGroup(group))
-                if controller.continue_tearoff_drag().is_ok() =>
-            {
-                Some(group)
-            }
-            _ => {
-                let _ = controller.cancel_pointer_interaction_on_escape();
-                controller.flush_events(cx);
-                cx.notify();
-                None
-            }
-        }
-    });
-    let Some(group) = detached else {
-        eprintln!("[DOCK-INPUT][floating] tab_tearoff_result=detach_failed panel={:?}", drag.panel);
-        return false;
-    };
-
-    let started = manager.update(app, |manager, manager_cx| {
-        manager.begin_floating_tab_tearoff_move(group, model_bounds, manager_cx)
-    });
-    if !started {
-        eprintln!("[DOCK-INPUT][floating] tab_tearoff_result=window_move_start_failed group={:?} panel={:?}", group, drag.panel);
-        let _ = controller.update(app, |controller, cx| {
-            let result = controller.cancel_pointer_interaction_on_escape();
-            controller.flush_events(cx);
-            cx.notify();
-            result
-        });
-        return false;
-    }
-    eprintln!("[DOCK-INPUT][floating] tab_tearoff_started group={:?} panel={:?}", group, drag.panel);
-    true
 }
 
 /// Finishes a tab drag that remains inside its source TabStrip region. Leaving
