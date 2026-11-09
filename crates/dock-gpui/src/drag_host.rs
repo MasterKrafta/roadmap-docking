@@ -8,7 +8,7 @@
 //! FloatingWindowManager. Both managers receive the same DockController entity;
 //! neither manager owns or duplicates the Core Layout.
 
-use dock_core::{FloatingGroupId, PanelId};
+use dock_core::{FloatingGroupId, NodeId, PanelId};
 use gpui::WindowId;
 
 /// Runtime identity of one temporary drag-presentation window.
@@ -135,6 +135,30 @@ impl DragHostSession {
         self.handle == dock_core::DragHandle::PanelTab
             && matches!(self.payload, dock_core::DragPayload::Panel { panel: active } if active == panel)
             && self.transferred_panel.is_none()
+    }
+
+    pub(crate) fn can_begin_group_view_transfer(
+        &self,
+        group: NodeId,
+        panel: PanelId,
+    ) -> bool {
+        self.handle == dock_core::DragHandle::GroupGrip
+            && matches!(self.payload, dock_core::DragPayload::Group { group: active } if active == group)
+            && self.transferred_panel.is_none()
+            && panel != PanelId::null()
+    }
+
+    pub(crate) fn begin_group_view_transfer(
+        &mut self,
+        group: NodeId,
+        panel: PanelId,
+    ) -> bool {
+        if self.transport_host.is_none() || !self.can_begin_group_view_transfer(group, panel) {
+            return false;
+        }
+        self.transferred_panel = Some(panel);
+        self.source_detached = false;
+        true
     }
 
     pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
