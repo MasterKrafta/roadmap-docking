@@ -67,7 +67,7 @@ pub(crate) fn source_root(
         DropSource::Column { column } => {
             if matches!(layout.node(column), Some(Node::Column(_)))
                 && (layout.main_column_position(column).is_some()
-                    || source_is_floating_root(layout, column))
+                    || layout.find_floating_root_containing(column).is_some())
             {
                 Ok(column)
             } else {
