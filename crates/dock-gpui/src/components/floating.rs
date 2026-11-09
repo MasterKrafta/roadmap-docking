@@ -59,6 +59,7 @@ impl FloatingWindowContent {
         groups: &[GroupRect],
         panels: Vec<(PanelRect, Option<AnyView>)>,
         dragged_group: Option<NodeId>,
+        dragged_column: Option<NodeId>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -144,6 +145,7 @@ impl FloatingWindowContent {
                 Some(floating.group),
                 !hide_header,
                 dragged_group,
+                dragged_column,
             ));
         }
 
@@ -1566,18 +1568,28 @@ impl Render for FloatingHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window_id)
         });
-        let pending_transfer = self.controller.update(cx, |controller, _| {
-            controller.pending_panel_view_transfer_from(window_id)
+        let dragged_column = self.controller.update(cx, |controller, _| {
+            controller.dragged_column_from(window_id)
         });
-        if let Some(panel) = pending_transfer
-            && panel_views
-                .iter()
-                .all(|(rect, view)| rect.panel != panel || view.is_none())
+        let pending_transfers = self.controller.update(cx, |controller, _| {
+            controller.pending_panel_view_transfers_from(window_id)
+        });
+        if !pending_transfers.is_empty()
+            && pending_transfers.iter().all(|panel| {
+                panel_views
+                    .iter()
+                    .all(|(rect, view)| rect.panel != *panel || view.is_none())
+            })
         {
             let controller = self.controller.clone();
             window.on_next_frame(move |_, app| {
                 controller.update(app, |controller, controller_cx| {
-                    if controller.confirm_panel_view_source_detached(panel, window_id) {
+                    let mut confirmed = false;
+                    for panel in pending_transfers {
+                        confirmed |= controller
+                            .confirm_panel_view_source_detached(panel, window_id);
+                    }
+                    if confirmed {
                         controller_cx.notify();
                     }
                 });
@@ -1645,6 +1657,7 @@ impl Render for FloatingHost {
             &snapshot.rects.groups,
             panel_views,
             dragged_group,
+            dragged_column,
             &snapshot.rects.tab_strips,
             &snapshot.rects.tab_headers,
             &snapshot.rects.tab_overflows,
