@@ -2042,6 +2042,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &HashMap::new(),
                 Point::new(100.0, 30.0),
                 metrics,
             ),
@@ -2051,6 +2052,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &HashMap::new(),
                 Point::new(240.0, 30.0),
                 metrics,
             ),
@@ -2060,6 +2062,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &HashMap::new(),
                 Point::new(100.0, 60.0),
                 metrics,
             ),
