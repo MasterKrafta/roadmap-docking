@@ -687,8 +687,8 @@ impl DockController {
 
     /// Begins the Core pointer state without changing adapter source/transport context.
     ///
-    /// Used when the legacy tear-off restarts Core's DragSession after applying
-    /// its temporary Float command: the original adapter source must survive.
+    /// Both the persistent source Host and DragHost retain the same semantic
+    /// payload; the temporary transport window never replaces the drag source.
     fn begin_core_drag_interaction(
         &mut self,
         payload: DragPayload,
@@ -1058,10 +1058,10 @@ impl DockController {
     ) -> Result<(), CommandError> {
         self.drag.cancel_gesture_with_reason(reason);
         let interaction = self.interaction;
-        let tearoff_was_active = self.native_window_move_transaction_active;
+        let native_window_move_was_active = self.native_window_move_transaction_active;
         let previous_version = self.layout.version();
 
-        let cancel_result = if interaction.is_some() || tearoff_was_active {
+        let cancel_result = if interaction.is_some() || native_window_move_was_active {
             self.history
                 .cancel_transaction(&mut self.layout, &self.metrics)
         } else {
@@ -1082,7 +1082,7 @@ impl DockController {
             self.native_window_move_transaction_active = false;
             return Err(error);
         }
-        if tearoff_was_active {
+        if native_window_move_was_active {
             self.native_window_move_transaction_active = false;
             if self.layout.version() != previous_version {
                 self.pending_events.push_back(DockEvent::LayoutChanged {
