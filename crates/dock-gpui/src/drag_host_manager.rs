@@ -17,8 +17,8 @@ use dock_core::{
 };
 
 use crate::{
-    DockController, DockTheme, DockWindowRole, DockGroupView, DragHostId, DragSourceHost,
-    FloatingWindowManager, components::{PanelHost, context_menu::GroupMenuToggle}, dock_components::{GroupPresentation, collect_group_presentations}, floating_manager::DockingWindowAtPoint,
+    DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost,
+    FloatingWindowManager, components::{PanelHost, context_menu::GroupMenuToggle}, dock_components::{DockGroupView, GroupPresentation, collect_group_presentations}, floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
 };
 
