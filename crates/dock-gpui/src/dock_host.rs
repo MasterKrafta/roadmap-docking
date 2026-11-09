@@ -212,9 +212,15 @@ impl Render for DockHost {
             self.floating_manager = Some(manager.clone());
             manager
         };
-        if self.floating_manager_enabled && !self.floating_manager_attached {
+        if !self.floating_manager_attached {
             floating_manager.update(cx, |manager, manager_cx| {
-                manager.attach_main_window(window, manager_cx);
+                if self.floating_manager_enabled {
+                    manager.attach_main_window(window, manager_cx);
+                } else {
+                    // The registry still needs the Main HWND for DragHost target
+                    // routing even when persistent Floating windows are disabled.
+                    manager.attach_main_window_for_drag_routing(window);
+                }
             });
             self.floating_manager_attached = true;
         }
@@ -232,7 +238,10 @@ impl Render for DockHost {
         };
         if !self.drag_host_manager_attached {
             self.drag_host_manager_attached = drag_host_manager
-                .update(cx, |manager, _| manager.attach_main_window(window));
+                .update(cx, |manager, _| {
+                    manager.attach_floating_window_manager(floating_manager.clone());
+                    manager.attach_main_window(window)
+                });
         }
 
         let focus_handle = self
