@@ -3,6 +3,10 @@
 //! These types describe GPUI adapter windows only. A DragHost is a temporary
 //! presentation surface; it is not a Core DockArea, FloatingGroup, or workspace
 //! entity and must never be inserted into or serialized with Layout.
+//!
+//! The future DragHostManager is owned by DockHost as a sibling of
+//! FloatingWindowManager. Both managers receive the same DockController entity;
+//! neither manager owns or duplicates the Core Layout.
 
 use dock_core::FloatingGroupId;
 
@@ -49,6 +53,7 @@ pub enum DockWindowRole {
 #[cfg(test)]
 mod tests {
     use dock_core::FloatingGroupId;
+    use slotmap::Key as _;
 
     use super::{DockWindowRole, DragHostId};
 
@@ -74,6 +79,5 @@ mod tests {
                 group: FloatingGroupId::null(),
             }
         );
-        assert_eq!(DockWindowRole::Main, DockWindowRole::Main);
     }
 }
