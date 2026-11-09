@@ -405,12 +405,13 @@ Core не менялся. Native move/resize заголовка постоянн
 
 Основная область:
 
-- `input_drag.rs`;
-- `dock_host.rs`;
-- `floating_manager.rs) — только для определения исходного FloatingHost;
-- `dock-components/tab.rs);
-- `controller.rs);
-- Core-команда из этапа 5.
+- `input_drag.rs` — общий запуск Panel DragHost и расчёт FreeArea bounds из геометрии исходного Host;
+- `input_pointer.rs` — подключение Main PanelTab;
+- `components/floating.rs` — подключение Floating PanelTab и отмена через Escape;
+- `drag_host_manager.rs` — завершение/отмена Panel drop одной Core-командой;
+- `floating_manager.rs` — поиск исходного и целевого постоянных Host;
+- `dock_host.rs` — связь менеджеров и Main Escape;
+- Core-команда прямого переноса Panel из этапа 5.
 
 Сценарии:
 
@@ -423,9 +424,19 @@ Core не менялся. Native move/resize заголовка постоянн
 7. Panel → собственная исходная Group: no-op либо корректное сохранение исходного положения.
 8. Escape до отпускания: PanelView возвращается в источник без изменения Layout.
 
-Старая ветка `begin_floating_tab_tearoff` больше не должна создавать FloatingGroup на пороге для этих сценариев. Удалять её разрешено только после подтверждения всех перечисленных вариантов.
+**Фактически внедрено:**
 
-**Критерий готовности:** Panel переносится через DragHost между всеми четырьмя сочетаниями Main/Floating; свободный drop создаёт FloatingHost только в конце; состояние и фокус PanelView сохраняются.
+- Main PanelTab запускает DragHost, когда курсор покидает drag-зону DockTab или входит в зарегистрированный FloatingHost.
+- Floating PanelTab сохраняет прежнее поведение внутри своей полосы вкладок; при выходе из полосы или наведении на другое Dock-окно запускается тот же DragHost.
+- Общая функция `begin_panel_drag_host` получает Panel, исходный Host, WindowId и точку захвата из исходной `DragHostSession`; размер берётся из PanelConstraints.
+- Для переноса используется та же cached `PanelView`. Исходный Host сохраняет геометрию и подтверждает placeholder после кадра. Подтверждение работает и для неактивной вкладки, у которой нет собственного PanelRect в текущем снимке.
+- DragHost Manager на отпускании выполняет `pointer_up`, передаёт последнюю DropTarget и при FreeArea — экранные bounds, рассчитанные по геометрии исходного Main/Floating Host. После этого выполняется одна Core-команда, затем DragHost закрывается и view становится доступен конечному Host.
+- Escape обрабатывается MainHost, FloatingHost и native polling. Отмена закрывает DragHost и возвращает ту же PanelView без изменения Layout.
+- Удалён старый `begin_floating_tab_tearoff`, который создавал временный FloatingGroup для Floating PanelTab. Group/Column/DockArea пока остаются на прежнем механизме и будут переведены на следующих этапах.
+
+Core не менялся. `dock-components/tab.rs` не требовал изменений: семантический запуск по-прежнему выполняется общим Host pointer pipeline.
+
+**Критерий готовности:** Panel переносится через DragHost между Main и Floating Host; свободный drop создаёт постоянный FloatingHost только на отпускании; состояние и фокус cached PanelView сохраняются.
 
 ---
 
@@ -598,4 +609,4 @@ Core не менялся. Native move/resize заголовка постоянн
 
 Новый план заменяет именно эту транспортную часть. Уже реализованные Core-правила DropTarget, геометрии и стыковки нужно сохранить там, где они подходят новой схеме. Код предыдущих этапов не удаляется заранее: его судьба определяется на Этапе 10 после локальной проверки DragHost.
 
-**Текущая точка: Этап 6 — маршрутизация Main/Floating drop-целей реализована и ожидает локальных проверок; после подтверждения начинается Этап 7.**
+**Текущая точка: Этап 7 — перенос Panel через DragHost реализован и ожидает локальных проверок; после подтверждения начинается Этап 8.**
