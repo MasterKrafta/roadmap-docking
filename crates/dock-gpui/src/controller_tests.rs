@@ -1,10 +1,10 @@
 use super::{DockController, DockEvent, ResolverCacheKey};
-use dock_core::{
-    CommandError, DockCommand, DockMetrics, DockSide, DragDropAction, DragHandle, DragPayload,
-    DragState, DropSource, DropTarget, HitResult, InitialLayoutError, LayoutRects,
-    PanelConstraints, PanelId, PanelKey, Point, Node, Profile, Rect, Size,
-};
 use crate::drag_host::{DragHostId, DragSourceHost};
+use dock_core::{
+    CommandError, DockCommand, DockMetrics, DragDropAction, DragHandle, DragPayload, DragState,
+    DropSource, DropTarget, HitResult, InitialLayoutError, LayoutRects, Node, PanelConstraints,
+    PanelId, PanelKey, Point, Profile, Rect, Size,
+};
 use gpui::WindowId;
 use slotmap::Key;
 
@@ -151,7 +151,9 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
 
     controller
         .begin_content_drag_interaction(
-            DragPayload::Group { group: source_group },
+            DragPayload::Group {
+                group: source_group,
+            },
             DragHandle::GroupGrip,
             Point::new(40.0, 20.0),
             DragSourceHost::Main,
@@ -159,9 +161,11 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
         )
         .expect("first content drag should start");
     assert!(!controller.can_undo());
-    assert!(controller
-        .drag_mut()
-        .attach_transport_host(DragHostId::from_raw(101)));
+    assert!(
+        controller
+            .drag_mut()
+            .attach_transport_host(DragHostId::from_raw(101))
+    );
 
     controller
         .drag_mut()
@@ -214,7 +218,9 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
         .expect("the dropped group should now belong to a FloatingHost");
     controller
         .begin_content_drag_interaction(
-            DragPayload::Group { group: source_group },
+            DragPayload::Group {
+                group: source_group,
+            },
             DragHandle::GroupGrip,
             Point::new(40.0, 20.0),
             DragSourceHost::Floating {
@@ -223,9 +229,11 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
             WindowId::from(102),
         )
         .expect("a second drag should start after the successful drop");
-    assert!(controller
-        .drag_mut()
-        .attach_transport_host(DragHostId::from_raw(102)));
+    assert!(
+        controller
+            .drag_mut()
+            .attach_transport_host(DragHostId::from_raw(102))
+    );
     controller
         .drag_mut()
         .session_mut()
@@ -243,12 +251,21 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
     assert!(controller.can_undo());
     assert!(!controller.can_redo());
 
-    assert!(controller.undo().unwrap(), "the successful drop must undo once");
+    assert!(
+        controller.undo().unwrap(),
+        "the successful drop must undo once"
+    );
     assert_eq!(controller.layout().floating_groups().count(), 0);
-    assert!(!controller.can_undo(), "a second undo would reveal duplicate history");
+    assert!(
+        !controller.can_undo(),
+        "a second undo would reveal duplicate history"
+    );
     assert!(controller.can_redo());
 
-    assert!(!controller.undo().unwrap(), "one drop must create exactly one undo entry");
+    assert!(
+        !controller.undo().unwrap(),
+        "one drop must create exactly one undo entry"
+    );
     assert!(controller.redo().unwrap());
     assert_eq!(controller.layout().floating_groups().count(), 1);
     assert!(!controller.can_redo());
@@ -816,7 +833,11 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .filter_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
         .take(2)
         .collect::<Vec<_>>();
-    assert_eq!(source_nodes.len(), 2, "the baseline workspace has two tab groups");
+    assert_eq!(
+        source_nodes.len(),
+        2,
+        "the baseline workspace has two tab groups"
+    );
 
     for (index, node) in source_nodes.iter().copied().enumerate() {
         controller
@@ -842,14 +863,26 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
     let first_window = WindowId::from(81);
     let second_window = WindowId::from(82);
 
-    controller.floating_geometry(first_window, first_group).unwrap();
-    controller.floating_geometry(second_window, second_group).unwrap();
+    controller
+        .floating_geometry(first_window, first_group)
+        .unwrap();
+    controller
+        .floating_geometry(second_window, second_group)
+        .unwrap();
     assert_eq!(controller.floating_rects.len(), 2);
-    assert_eq!(controller.floating_rects[&first_window].key.group, first_group);
-    assert_eq!(controller.floating_rects[&second_window].key.group, second_group);
+    assert_eq!(
+        controller.floating_rects[&first_window].key.group,
+        first_group
+    );
+    assert_eq!(
+        controller.floating_rects[&second_window].key.group,
+        second_group
+    );
 
     assert!(controller.geometry().unwrap().floating_groups.is_empty());
-    let first_rects = controller.floating_geometry(first_window, first_group).unwrap();
+    let first_rects = controller
+        .floating_geometry(first_window, first_group)
+        .unwrap();
     assert_eq!(first_rects.floating_groups.len(), 1);
     assert_eq!(first_rects.floating_groups[0].rect.origin, Point::ZERO);
     let first_root = controller
@@ -867,9 +900,17 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
     ));
 
     // A hidden Floating host can be rebound to another group without retaining its old snapshot.
-    controller.floating_geometry(first_window, second_group).unwrap();
-    assert_eq!(controller.floating_rects[&first_window].key.group, second_group);
-    assert_eq!(controller.floating_rects[&second_window].key.group, second_group);
+    controller
+        .floating_geometry(first_window, second_group)
+        .unwrap();
+    assert_eq!(
+        controller.floating_rects[&first_window].key.group,
+        second_group
+    );
+    assert_eq!(
+        controller.floating_rects[&second_window].key.group,
+        second_group
+    );
     let first_cache = &controller.floating_rects[&first_window].rects as *const LayoutRects;
     let second_cache = &controller.floating_rects[&second_window].rects as *const LayoutRects;
     assert_ne!(first_cache, second_cache);
@@ -880,10 +921,14 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .and_then(|floating| controller.layout().dock_area(floating.area))
         .map(|area| area.root)
         .unwrap();
-    let source = DropSource::Group { group: floating_root };
+    let source = DropSource::Group {
+        group: floating_root,
+    };
     controller
         .begin_drag_interaction(
-            DragPayload::Group { group: floating_root },
+            DragPayload::Group {
+                group: floating_root,
+            },
             DragHandle::GroupGrip,
             Point::new(40.0, 20.0),
         )
@@ -893,28 +938,43 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .session_mut()
         .pointer_move(Point::new(120.0, 100.0))
         .unwrap();
-    assert!(matches!(controller.drag().session().state(), DragState::Dragging { .. }));
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Dragging { .. }
+    ));
 
     controller
         .prepare_floating_window_drop_resolver(first_window, second_group, source)
         .unwrap();
-    assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Floating(_))));
+    assert!(matches!(
+        controller.drag.resolver_key,
+        Some(ResolverCacheKey::Floating(_))
+    ));
     assert!(controller.main_drop_resolver().is_none());
     assert!(controller.main_drag_preview().is_none());
-    assert!(controller
-        .floating_window_drop_resolver(first_window, second_group)
-        .is_some());
-    assert!(controller
-        .floating_window_drag_preview(first_window, second_group)
-        .is_some());
+    assert!(
+        controller
+            .floating_window_drop_resolver(first_window, second_group)
+            .is_some()
+    );
+    assert!(
+        controller
+            .floating_window_drag_preview(first_window, second_group)
+            .is_some()
+    );
 
     controller.prepare_drop_resolver(source).unwrap();
-    assert!(matches!(controller.drag.resolver_key, Some(ResolverCacheKey::Main(_))));
+    assert!(matches!(
+        controller.drag.resolver_key,
+        Some(ResolverCacheKey::Main(_))
+    ));
     assert!(controller.main_drop_resolver().is_some());
     assert!(controller.main_drag_preview().is_some());
-    assert!(controller
-        .floating_window_drop_resolver(first_window, second_group)
-        .is_none());
+    assert!(
+        controller
+            .floating_window_drop_resolver(first_window, second_group)
+            .is_none()
+    );
 }
 
 #[test]
@@ -971,7 +1031,9 @@ fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
     // Flyout-specific command is deferred to Core resolution on mouse-up.
     controller
         .begin_content_drag_interaction(
-            DragPayload::Panel { panel: source_panel },
+            DragPayload::Panel {
+                panel: source_panel,
+            },
             DragHandle::FlyoutPanel,
             Point::new(40.0, 20.0),
             DragSourceHost::Main,
@@ -1024,7 +1086,9 @@ fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
     // temporary FloatingGroup or history transaction was left behind.
     controller
         .begin_content_drag_interaction(
-            DragPayload::Group { group: source_group },
+            DragPayload::Group {
+                group: source_group,
+            },
             DragHandle::GroupGrip,
             Point::new(60.0, 20.0),
             DragSourceHost::Main,
