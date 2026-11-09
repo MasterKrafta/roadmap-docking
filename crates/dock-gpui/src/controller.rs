@@ -163,21 +163,25 @@ impl DragController {
     }
 
     pub(crate) fn attach_transport_host(&mut self, id: crate::DragHostId) -> bool {
-        self.host_session.as_mut().is_some_and(|session| session.attach_transport_host(id))
+        self.host_session
+            .as_mut()
+            .is_some_and(|session| session.attach_transport_host(id))
     }
 
     pub(crate) fn clear_transport_host(&mut self, id: crate::DragHostId) -> bool {
-        self.host_session.as_mut().is_some_and(|session| session.clear_transport_host(id))
+        self.host_session
+            .as_mut()
+            .is_some_and(|session| session.clear_transport_host(id))
     }
 
     /// Finishes a successfully released content drag and discards its adapter context.
-    pub(crate) fn finish_host_session(&mut self) -> Option<DragHostSession> {
-        self.host_session.take()
+    pub(crate) fn finish_host_session(&mut self) {
+        self.host_session = None;
     }
 
     /// Cancels a content drag and discards its adapter context.
-    pub(crate) fn cancel_host_session(&mut self) -> Option<DragHostSession> {
-        self.host_session.take()
+    pub(crate) fn cancel_host_session(&mut self) {
+        self.host_session = None;
     }
 
     fn set_resolver(&mut self, resolver: DropZoneResolver, key: ResolverCacheKey, source: DropSource) {
@@ -392,7 +396,9 @@ impl DockController {
         handle: DragHandle,
         point: Point,
     ) -> Result<(), DragSessionError> {
-        self.drag.session_mut().pointer_down_with_handle(payload, handle, point)?;
+        self.drag
+            .session_mut()
+            .pointer_down_with_handle(payload, handle, point)?;
         self.drag.clear_resolver();
         self.drag.layout_version = Some(self.layout.version());
         Ok(())
