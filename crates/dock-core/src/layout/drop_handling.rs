@@ -312,44 +312,20 @@ impl Layout {
         let target = request.target.ok_or(CommandError::InvalidTarget {
             reason: "Column header drag requires a resolved drop target",
         })?;
-
-        // A Main Column is detached into a real Floating root as soon as its
-        // native tear-off begins. Keep the original Column payload, but finish
-        // its drag through the same DockFloating path as any other Floating
-        // composition instead of looking for a Main Dock owner that no longer exists.
-        if let Some(group) = self.floating_groups().find_map(|(group, floating)| {
-            self.dock_area(floating.area)
-                .filter(|area| area.root == column)
-                .map(|_| group)
-        }) {
-            if matches!(target, DropTarget::FreeArea)
-                || target
-                    .referenced_node_id()
-                    .is_some_and(|node| self.is_descendant_or_same(column, node))
-            {
-                // The detached composition is already floating. FreeArea means
-                // release it at its current native bounds, not create another host.
-                // A target inside the same Column is also a no-op.
-                return Ok(DragDropAction::NoOp);
-            }
-            self.validate_floating_dock_target(column, target, metrics)?;
-            self.validate_panel_ids_allowed_for_target(
-                &self.panel_ids_in_subtree(column),
-                target,
-            )?;
-            return Ok(DragDropAction::Command(DockCommand::DockFloating {
-                group,
-                target,
-            }));
+        let source_position = self.main_column_position(column);
+        let source_is_floating = self.find_floating_root_containing(column).is_some();
+        if source_position.is_none() && !source_is_floating {
+            return Err(CommandError::InvalidTarget {
+                reason: "Column header drag source must belong to a Main or Floating dock area",
+            });
         }
 
-        let (source_side, source_index) = self
-            .main_column_position(column)
-            .ok_or(CommandError::InvalidTarget {
-                reason: "Column header drag source must belong to a main dock or be a Floating root",
-            })?;
-
         if matches!(target, DropTarget::FreeArea) {
+            // An already-floating Column is already in a persistent native window.
+            // FreeArea therefore leaves it in place instead of creating another one.
+            if source_is_floating {
+                return Ok(DragDropAction::NoOp);
+            }
             let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
                 reason: "FreeArea Float requests require explicit window bounds",
             })?;
@@ -370,36 +346,61 @@ impl Layout {
         }
 
         self.validate_drop_target(target, metrics)?;
-        let DropTarget::MainColumn { side, index } = target else {
-            return Err(CommandError::InvalidTarget {
-                reason: "a Main Column can only dock into a Main Dock insertion slot",
-            });
-        };
-        let target_columns = self.main_columns(side)?;
         self.validate_panel_ids_allowed_for_target(
             &self.panel_ids_in_subtree(column),
             target,
         )?;
 
-        if source_side == side && (index == source_index || index == source_index + 1) {
+        if target
+            .referenced_node_id()
+            .is_some_and(|node| self.is_descendant_or_same(column, node))
+        {
             return Ok(DragDropAction::NoOp);
         }
-        if self.profile == Profile::Photoshop
-            && source_side != side
-            && target_columns.len() >= metrics.max_columns
-        {
-            return Err(CommandError::InvalidTarget {
-                reason: "destination Main Dock has reached max_columns",
-            });
+
+        match target {
+            DropTarget::MainColumn { side, index } => {
+                let target_columns = self.main_columns(side)?;
+                if source_position.is_some_and(|(source_side, source_index)| {
+                    source_side == side && (index == source_index || index == source_index + 1)
+                }) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                let source_is_already_on_target_side =
+                    source_position.is_some_and(|(source_side, _)| source_side == side);
+                if self.profile == Profile::Photoshop
+                    && !source_is_already_on_target_side
+                    && target_columns.len() >= metrics.max_columns
+                {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "destination Main Dock has reached max_columns",
+                    });
+                }
+            }
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Left | DropZone::Right,
+            } => {
+                let target_column = self.find_owner_column(group).ok_or(
+                    CommandError::InvalidTarget {
+                        reason: "Column edge target must belong to a Column",
+                    },
+                )?;
+                if target_column == column {
+                    return Ok(DragDropAction::NoOp);
+                }
+            }
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "a Column can only dock into a MainColumn or a horizontal GroupEdge",
+                });
+            }
         }
 
-        Ok(DragDropAction::Command(
-            DockCommand::MoveColumnToMainColumn {
-                column,
-                side,
-                index,
-            },
-        ))
+        Ok(DragDropAction::Command(DockCommand::MoveColumnToTarget {
+            column,
+            target,
+        }))
     }
 
     pub(super) fn resolve_group_grip_drag(
@@ -815,6 +816,38 @@ impl Layout {
         self.validate_panel_ids_allowed_for_area(panels, area)
     }
 
+    fn floating_column_composition_edge_is_valid(
+        &self,
+        column: NodeId,
+        zone: DropZone,
+    ) -> bool {
+        let Some(root) = self.find_floating_root_containing(column) else {
+            return false;
+        };
+        match self.nodes.get(root) {
+            Some(Node::Column(_)) => root == column,
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split
+                        .children
+                        .iter()
+                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+            {
+                let Some(index) = split.children.iter().position(|child| *child == column) else {
+                    return false;
+                };
+                if zone == DropZone::Left {
+                    index == 0
+                } else if zone == DropZone::Right {
+                    index + 1 == split.children.len()
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn validate_drop_target(
         &self,
         target: DropTarget,
@@ -884,13 +917,15 @@ impl Layout {
                                     reason: if self.find_floating_root_containing(group).is_some() {
                                         "horizontal splits are not supported inside a floating stack"
                                     } else {
-                                        "horizontal group splits require a main-dock column"
+                                        "horizontal group splits require a dock Column"
                                     },
                                 });
                             };
-                            if self.main_column_position(column).is_none() {
+                            if self.main_column_position(column).is_none()
+                                && !self.floating_column_composition_edge_is_valid(column, zone)
+                            {
                                 return Err(CommandError::InvalidTarget {
-                                    reason: "horizontal group splits require a column in a main dock",
+                                    reason: "horizontal group splits require a Main Column or the outer edge of a Floating Column composition",
                                 });
                             }
                         }
