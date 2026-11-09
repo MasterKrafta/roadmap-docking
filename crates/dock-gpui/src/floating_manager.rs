@@ -11,7 +11,7 @@ use dock_core::{
     Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
-    AppContext, Bounds, Context, Entity, Subscription, Window, WindowBounds,
+    AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
