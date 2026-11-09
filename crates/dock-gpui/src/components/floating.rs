@@ -59,7 +59,7 @@ impl FloatingWindowContent {
         floating: FloatingGroupRect,
         columns: &[ColumnRect],
         groups: &[GroupRect],
-        panels: Vec<(PanelRect, AnyView)>,
+        panels: Vec<(PanelRect, Option<AnyView>)>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -217,7 +217,7 @@ impl FloatingWindowContent {
                 Some((panel, view))
             })
             .collect();
-        root = root.child(PanelHost::render(loose_panels, origin));
+        root = root.child(PanelHost::render(loose_panels, origin, theme));
 
         if !hide_header {
             root = root.child(DockAreaView::render_header(
@@ -1166,12 +1166,13 @@ impl Render for FloatingHost {
             .rects
             .panels
             .iter()
-            .filter_map(|panel_rect| {
+            .map(|panel_rect| {
                 let panel_rect = *panel_rect;
                 self.controller.update(cx, |controller, panel_cx| {
-                    controller
-                        .panel_view(panel_rect.panel, window, panel_cx)
-                        .map(|view| (panel_rect, view))
+                    (
+                        panel_rect,
+                        controller.panel_view(panel_rect.panel, window, panel_cx),
+                    )
                 })
             })
             .collect::<Vec<_>>();

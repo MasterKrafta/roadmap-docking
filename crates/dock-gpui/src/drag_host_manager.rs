@@ -10,7 +10,7 @@ use gpui::{
 };
 use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
-use dock_core::{Point, Size};
+use dock_core::{PanelId, Point, Size};
 
 use crate::{
     DockController, DockTheme, DockWindowRole, DragHostId,
@@ -22,6 +22,7 @@ struct ActiveDragHost {
     window: WindowHandle<DragHostSurface>,
     window_id: WindowId,
     native_window: NativeWindowId,
+    panel: Option<PanelId>,
 }
 
 /// Creates, positions, and closes the single temporary DragHost allowed during
@@ -92,6 +93,36 @@ impl DragHostManager {
         logical_size: Size,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
+        self.open_at_cursor_with_panel(grab_offset, logical_size, None, cx)
+    }
+
+    /// Opens DragHost with the existing cached view for one active Panel drag.
+    ///
+    /// The source host stops mounting that Panel before the new surface is shown.
+    /// Its unchanged Core rectangle is rendered there as a placeholder.
+    pub fn open_panel_at_cursor(
+        &mut self,
+        panel: PanelId,
+        grab_offset: Point,
+        logical_size: Size,
+        cx: &mut Context<Self>,
+    ) -> Result<DragHostId, DragHostError> {
+        let can_transfer = self.controller.update(cx, |controller, _| {
+            controller.can_begin_panel_view_transfer(panel)
+        });
+        if !can_transfer {
+            return Err(DragHostError::PanelTransferUnavailable(panel));
+        }
+        self.open_at_cursor_with_panel(grab_offset, logical_size, Some(panel), cx)
+    }
+
+    fn open_at_cursor_with_panel(
+        &mut self,
+        grab_offset: Point,
+        logical_size: Size,
+        panel: Option<PanelId>,
+        cx: &mut Context<Self>,
+    ) -> Result<DragHostId, DragHostError> {
         if self.active.is_some() {
             return Err(DragHostError::AlreadyActive);
         }
@@ -142,9 +173,14 @@ impl DragHostManager {
             ..Default::default()
         };
         let theme = self.theme;
+        let controller = self.controller.clone();
         let window = cx
             .open_window(options, move |_, app| {
-                app.new(|_| DragHostSurface { theme })
+                app.new(|_| DragHostSurface {
+                    theme,
+                    controller,
+                    panel,
+                })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
 
@@ -250,7 +286,32 @@ impl DragHostManager {
             return Err(DragHostError::Native(error));
         }
 
+        let host_state_ready = self.controller.update(cx, |controller, controller_cx| {
+            let attached = controller.drag_mut().attach_transport_host(id);
+            let transferred =
+                panel.is_none_or(|panel| controller.begin_panel_view_transfer(panel));
+            if transferred {
+                controller_cx.notify();
+            }
+            attached && transferred
+        });
+        if let Some(panel) = panel
+            && !host_state_ready
+        {
+            self.controller.update(cx, |controller, _| {
+                controller.drag_mut().clear_transport_host(id);
+            });
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::PanelTransferUnavailable(panel));
+        }
+
         if let Err(error) = self.native_ops.show_no_activate(native_window) {
+            self.controller.update(cx, |controller, _| {
+                controller.drag_mut().clear_transport_host(id);
+                if let Some(panel) = panel {
+                    controller.finish_panel_view_transfer(panel);
+                }
+            });
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::Native(error));
         }
@@ -260,14 +321,7 @@ impl DragHostManager {
             window,
             window_id,
             native_window,
-        });
-        self.controller.update(cx, |controller, _| {
-            if !controller.drag_mut().attach_transport_host(id) {
-                tracing::debug!(
-                    ?id,
-                    "DragHost opened without an active content-drag source session"
-                );
-            }
+            panel,
         });
         Ok(id)
     }
@@ -311,10 +365,6 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
 
-        self.controller.update(cx, |controller, _| {
-            controller.drag_mut().clear_transport_host(id);
-        });
-
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(
                 ?id,
@@ -322,10 +372,19 @@ impl DragHostManager {
                 "DragHost was already hidden or unavailable during close"
             );
         }
-        active
+        let remove_result = active
             .window
-            .update(cx, |_, window, _| window.remove_window())
-            .map_err(|error| DragHostError::WindowUpdate(error.to_string()))?;
+            .update(cx, |_, window, _| window.remove_window());
+
+        self.controller.update(cx, |controller, controller_cx| {
+            controller.drag_mut().clear_transport_host(id);
+            if let Some(panel) = active.panel {
+                controller.finish_panel_view_transfer(panel);
+            }
+            controller_cx.notify();
+        });
+
+        remove_result.map_err(|error| DragHostError::WindowUpdate(error.to_string()))?;
         Ok(())
     }
 
@@ -376,6 +435,8 @@ pub enum DragHostError {
     InvalidScreenPosition,
     #[error("no active DragHost matches {0:?}")]
     NotActive(DragHostId),
+    #[error("Panel {0:?} has no cached view or matching active Panel drag session")]
+    PanelTransferUnavailable(PanelId),
     #[error("DragHost runtime identifiers are exhausted")]
     IdExhausted,
     #[error("GPUI could not create a DragHost window: {0}")]
@@ -388,13 +449,25 @@ pub enum DragHostError {
 
 struct DragHostSurface {
     theme: DockTheme,
+    controller: Entity<DockController>,
+    panel: Option<PanelId>,
 }
 
 impl Render for DragHostSurface {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut root = div()
             .size_full()
-            .bg(rgb(self.theme.colors.window_background))
+            .bg(rgb(self.theme.colors.window_background));
+
+        if let Some(panel) = self.panel
+            && let Some(view) = self.controller.update(cx, |controller, _| {
+                controller.panel_view_for_drag(panel)
+            })
+        {
+            root = root.child(div().size_full().overflow_hidden().child(view));
+        }
+
+        root
     }
 }
 

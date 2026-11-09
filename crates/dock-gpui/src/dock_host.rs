@@ -428,13 +428,11 @@ impl Render for DockHost {
                         main_active_panels.contains(&panel_rect.panel)
                             || active_flyout.is_some_and(|flyout| flyout.panel == panel_rect.panel)
                     })
-                    .filter_map(|panel_rect| {
+                    .map(|panel_rect| {
                         let panel = panel_rect.panel;
                         let rect = *panel_rect;
                         self.controller.update(cx, |controller, panel_cx| {
-                            controller
-                                .panel_view(panel, window, panel_cx)
-                                .map(|view| (rect, view))
+                            (rect, controller.panel_view(panel, window, panel_cx))
                         })
                     })
                     .collect::<Vec<_>>()

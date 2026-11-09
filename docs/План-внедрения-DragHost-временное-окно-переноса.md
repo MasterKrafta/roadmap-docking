@@ -300,7 +300,17 @@ Runtime-сессия должна хранить как минимум:
 
 Проверить на реальной панели с состоянием: текстовый ввод, локальное состояние Entity, фокус и повторное перемещение между окнами.
 
-**Критерий готовности:** одна PanelView визуально переезжает в DragHost и обратно; на исходном месте нет дублирующего содержимого; Layout и его версия не изменяются от начала drag до drop.
+**Фактически внедрено (API и presentation path):**
+
+- `DragHostSession` хранит идентификатор Panel, передаваемой во временное окно, не меняя исходные `DragPayload`, source Host и его WindowId.
+- `DragHostManager::open_panel_at_cursor` открывает DragHost с существующим cached `AnyView` выбранной Panel. Повторный вызов factory не требуется.
+- Обычный `DockController::panel_view` временно перестаёт выдавать этот view исходным Main/Floating Host; тот же `AnyView` доступен DragHost через отдельный путь.
+- Main и Floating рендереры сохраняют исходный `PanelRect` и показывают placeholder в том же прямоугольнике, пока Panel отображается в DragHost.
+- Закрытие DragHost сначала удаляет временную поверхность, затем снимает transfer-state и возвращает PanelView в обычную отрисовку. Core Layout не изменяется.
+
+**Пока не подключено:** открытие/перемещение DragHost из реального pointer lifecycle и возврат по mouse-up/cancel будут включены при подключении drag pipeline. На этом этапе API передачи и общий presentation path подготовлены для одной Panel.
+
+**Критерий готовности:** при вызове `open_panel_at_cursor` одна cached PanelView отображается в DragHost, а исходный Host рисует placeholder с прежними размерами; после `close` исходный Host снова показывает тот же view. Layout и его версия не изменяются.
 
 ---
 
