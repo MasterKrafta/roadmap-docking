@@ -952,19 +952,6 @@ impl DragHostManager {
         true
     }
 
-    fn clear_drop_preview(&mut self, id: DragHostId, cx: &mut Context<Self>) {
-        if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
-            active.drop_target = None;
-            active.target_role = None;
-            active.free_area_bounds = None;
-        }
-        self.controller.update(cx, |controller, controller_cx| {
-            controller.drag_mut().clear_resolver();
-            let _ = controller.drag_mut().session_mut().set_drop_target(None);
-            controller_cx.notify();
-        });
-    }
-
     fn show_pending_drag_host(&mut self, id: DragHostId) -> Result<(), DragHostError> {
         let active = self.active.as_mut().ok_or(DragHostError::NotActive(id))?;
         if active.id != id {
