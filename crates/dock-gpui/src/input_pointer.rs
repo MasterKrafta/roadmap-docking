@@ -462,7 +462,7 @@ pub(crate) fn register_pointer_events(
             }
 
             let should_tearoff =
-                controller.update(app, |controller, _| native_tearoff_required(controller, point));
+                controller.update(app, |controller, _| host_transition_required(controller, point));
             let panel_tab_active = controller.update(app, |controller, _| {
                 matches!(
                     controller.drag().session().state(),
@@ -644,7 +644,7 @@ pub(crate) fn register_pointer_events(
                     pointer_press.set(None);
                 }
                 let should_tearoff = controller
-                    .update(app, |controller, _| native_tearoff_required(controller, point));
+                    .update(app, |controller, _| host_transition_required(controller, point));
                 let panel_tab_active = controller.update(app, |controller, _| {
                     matches!(
                         controller.drag().session().state(),
@@ -813,7 +813,7 @@ pub(crate) fn register_pointer_events(
 /// Selects which semantic drag areas start a host transition after the drag threshold.
 /// PanelTab and GroupGrip start DragHost after leaving their source drag zones.
 /// Column and DockArea headers still use the legacy persistent-Floating tear-off.
-fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
+fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
@@ -823,14 +823,14 @@ fn native_tearoff_enabled_for(handle: Option<DragHandle>, payload: DragPayload) 
     }
 }
 
-/// Checks whether the active drag has reached the semantic boundary for a
-/// native floating window. A PanelTab must leave its DockTab drag zone first.
-fn native_tearoff_required(controller: &mut DockController, pointer: Point) -> bool {
+/// Checks whether the active drag has reached the semantic boundary for a host transition.
+/// PanelTab and GroupGrip leave their source drag zones; Column/DockArea start at threshold.
+fn host_transition_required(controller: &mut DockController, pointer: Point) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
     let handle = controller.drag().session().handle();
-    if !native_tearoff_enabled_for(handle, payload) {
+    if !host_transition_enabled_for(handle, payload) {
         return false;
     }
 
@@ -1261,7 +1261,7 @@ mod hit_dispatch_tests {
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, PointerPressTarget, native_tearoff_enabled_for,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget, host_transition_enabled_for,
         pointer_click_intent_for_hit, pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
 
@@ -1362,28 +1362,28 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn native_tearoff_routing_enables_dock_areas_columns_groups_and_tabs() {
+    fn host_transition_routing_enables_dock_areas_columns_groups_and_tabs() {
         let column = NodeId::null();
         let group = NodeId::null();
         let panel = PanelId::null();
 
-        assert!(native_tearoff_enabled_for(
+        assert!(host_transition_enabled_for(
             Some(DragHandle::ColumnHeader),
             DragPayload::Column { column },
         ));
-        assert!(native_tearoff_enabled_for(
+        assert!(host_transition_enabled_for(
             Some(DragHandle::DockAreaHeader),
             DragPayload::DockArea { side: DockSide::Right },
         ));
-        assert!(native_tearoff_enabled_for(
+        assert!(host_transition_enabled_for(
             Some(DragHandle::PanelTab),
             DragPayload::Panel { panel },
         ));
-        assert!(native_tearoff_enabled_for(
+        assert!(host_transition_enabled_for(
             Some(DragHandle::GroupGrip),
             DragPayload::Group { group },
         ));
-        assert!(!native_tearoff_enabled_for(
+        assert!(!host_transition_enabled_for(
             Some(DragHandle::ColumnHeader),
             DragPayload::Group { group },
         ));
