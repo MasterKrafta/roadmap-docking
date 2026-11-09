@@ -647,7 +647,7 @@ Core не менялся. Этап 8.2 пользователь локально
 
 - вызов `DockCommand::Float` при пересечении drag-порога в `begin_native_tearoff`;
 - промежуточную tear-off transaction, если она больше не нужна для нового жизненного цикла;
-- `begin_tearoff_move` и `begin_floating_tab_tearoff_move) в части транспортировки содержимого;
+- `begin_tearoff_move` и `begin_floating_tab_tearoff_move` в части транспортировки содержимого;
 - ветки, которые трактуют временный FloatingGroup как транспортный Host;
 - специальные обходы, добавленные только из-за того, что источник уже был временно преобразован в Floating.
 
@@ -687,6 +687,7 @@ Core не менялся. Этап 8.2 пользователь локально
 | Источник | Цель | Ожидаемый результат |
 |---|---|---|
 | Panel Main | Group Main | Прямой перенос Panel |
+| FlyoutPanel Main | Group Main/Floating или FreeArea | MovePanelFromFlyout/FloatPanelFromFlyout только на release |
 | Panel Main | Group Floating | Прямой перенос Panel |
 | Panel Floating | Group Main | Прямой перенос Panel |
 | Panel Floating | Group другого Floating | Прямой перенос Panel |
