@@ -330,7 +330,7 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
         })
         .expect("the target group should have a top-edge zone");
     let top_point = Point::new(
-        top_zone.rect.origin.x + top_zone.rect.size.width * 0.75,
+        top_zone.rect.origin.x + top_zone.rect.size.width * 0.95,
         top_zone.rect.origin.y + top_zone.rect.size.height / 2.0,
     );
     assert_eq!(
