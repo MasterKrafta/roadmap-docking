@@ -365,6 +365,16 @@ impl DragHostManager {
                         %error,
                         "could not show DragHost after source placeholder was rendered"
                     );
+                    manager.controller.update(manager_cx, |controller, controller_cx| {
+                        if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                            tracing::debug!(
+                                ?id,
+                                %cancel_error,
+                                "could not cancel Panel drag after DragHost show failure"
+                            );
+                        }
+                        controller_cx.notify();
+                    });
                     if let Err(close_error) = manager.close(id, manager_cx) {
                         tracing::warn!(
                             ?id,
