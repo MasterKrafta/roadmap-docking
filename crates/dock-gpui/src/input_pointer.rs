@@ -472,8 +472,8 @@ pub(crate) fn register_pointer_events(
                 }
             }
 
-            let should_tearoff =
-                controller.update(app, |controller, _| host_transition_required(controller, point));
+            let should_start_drag_host =
+                controller.update(app, |controller, _| drag_host_transition_required(controller, point));
             let panel_drag_active = controller.update(app, |controller, _| {
                 matches!(
                     controller.drag().session().state(),
@@ -508,7 +508,7 @@ pub(crate) fn register_pointer_events(
                 && manager.update(app, |manager, _| {
                     manager.cursor_over_floating_window_from_main()
                 });
-            if panel_drag_active && (should_tearoff || over_floating) {
+            if panel_drag_active && (should_start_drag_host || over_floating) {
                 let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!("Panel drag could not start DragHost; source gesture was cancelled");
@@ -518,7 +518,7 @@ pub(crate) fn register_pointer_events(
                 app.stop_propagation();
                 return;
             }
-            if group_grip_active && (should_tearoff || over_floating) {
+            if group_grip_active && (should_start_drag_host || over_floating) {
                 let started = begin_group_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!("Group drag could not start DragHost; source gesture was cancelled");
@@ -528,7 +528,7 @@ pub(crate) fn register_pointer_events(
                 app.stop_propagation();
                 return;
             }
-            if column_header_active && should_tearoff {
+            if column_header_active && should_start_drag_host {
                 let started = begin_column_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!(
@@ -670,8 +670,8 @@ pub(crate) fn register_pointer_events(
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
-                let should_tearoff = controller
-                    .update(app, |controller, _| host_transition_required(controller, point));
+                let should_start_drag_host = controller
+                    .update(app, |controller, _| drag_host_transition_required(controller, point));
                 let panel_drag_active = controller.update(app, |controller, _| {
                     matches!(
                         controller.drag().session().state(),
@@ -706,7 +706,7 @@ pub(crate) fn register_pointer_events(
                     && manager.update(app, |manager, _| {
                         manager.cursor_over_floating_window_from_main()
                     });
-                if panel_drag_active && (should_tearoff || over_floating) {
+                if panel_drag_active && (should_start_drag_host || over_floating) {
                     let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Panel drag could not start DragHost on release");
@@ -716,7 +716,7 @@ pub(crate) fn register_pointer_events(
                     app.stop_propagation();
                     return;
                 }
-                if group_grip_active && (should_tearoff || over_floating) {
+                if group_grip_active && (should_start_drag_host || over_floating) {
                     let started = begin_group_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Group drag could not start DragHost on release");
@@ -726,7 +726,7 @@ pub(crate) fn register_pointer_events(
                     app.stop_propagation();
                     return;
                 }
-                if column_header_active && should_tearoff {
+                if column_header_active && should_start_drag_host {
                     let started = begin_column_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Column drag could not start DragHost on release");
@@ -851,10 +851,10 @@ pub(crate) fn register_pointer_events(
     });
 }
 
-/// Selects which semantic drag areas start a DragHost transition after the drag threshold.
-/// PanelTab and GroupGrip start after leaving their source drag zones.
-/// Column and DockArea start DragHost as soon as the common threshold is crossed.
-fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
+/// Selects which semantic drag areas start a DragHost after the common drag threshold.
+/// PanelTab and GroupGrip wait until the pointer leaves their source zones; FlyoutPanel,
+/// Column and DockArea start immediately after the threshold.
+fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
@@ -864,14 +864,14 @@ fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload)
     }
 }
 
-/// Checks whether the active drag has reached the semantic boundary for a host transition.
-/// PanelTab and GroupGrip leave their source drag zones; Column/DockArea start at threshold.
-fn host_transition_required(controller: &mut DockController, pointer: Point) -> bool {
+/// Checks whether the active drag has reached the point where content must move to DragHost.
+/// PanelTab and GroupGrip leave their source zones; FlyoutPanel/Column/DockArea start at threshold.
+fn drag_host_transition_required(controller: &mut DockController, pointer: Point) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
     };
     let handle = controller.drag().session().handle();
-    if !host_transition_enabled_for(handle, payload) {
+    if !drag_host_transition_enabled_for(handle, payload) {
         return false;
     }
 
@@ -1332,7 +1332,7 @@ mod hit_dispatch_tests {
     use slotmap::Key;
 
     use super::{
-        PointerClickIntent, PointerDownIntent, PointerPressTarget, host_transition_enabled_for,
+        PointerClickIntent, PointerDownIntent, PointerPressTarget, drag_host_transition_enabled_for,
         pointer_click_intent_for_hit, pointer_down_intent_for_hit, pointer_press_target_for_hit,
     };
 
@@ -1438,23 +1438,23 @@ mod hit_dispatch_tests {
         let group = NodeId::null();
         let panel = PanelId::null();
 
-        assert!(host_transition_enabled_for(
+        assert!(drag_host_transition_enabled_for(
             Some(DragHandle::ColumnHeader),
             DragPayload::Column { column },
         ));
-        assert!(host_transition_enabled_for(
+        assert!(drag_host_transition_enabled_for(
             Some(DragHandle::DockAreaHeader),
             DragPayload::DockArea { side: DockSide::Right },
         ));
-        assert!(host_transition_enabled_for(
+        assert!(drag_host_transition_enabled_for(
             Some(DragHandle::PanelTab),
             DragPayload::Panel { panel },
         ));
-        assert!(host_transition_enabled_for(
+        assert!(drag_host_transition_enabled_for(
             Some(DragHandle::GroupGrip),
             DragPayload::Group { group },
         ));
-        assert!(!host_transition_enabled_for(
+        assert!(!drag_host_transition_enabled_for(
             Some(DragHandle::ColumnHeader),
             DragPayload::Group { group },
         ));
