@@ -1,8 +1,8 @@
 //! Runtime owner of temporary native windows used to present dragged dock content.
 //!
 //! A DragHost is deliberately independent from Core Layout and the persistent
-//! FloatingWindowManager. Stage 2 creates only an empty surface; content transfer
-//! and pointer-pipeline integration are introduced in later stages.
+//! FloatingWindowManager. It can host one cached PanelView during the isolated
+//! transfer prototype; pointer-pipeline integration is introduced later.
 
 use gpui::{
     AppContext, Bounds, Context, Entity, IntoElement, Render, Styled, Window, WindowBounds,
@@ -23,14 +23,15 @@ struct ActiveDragHost {
     window_id: WindowId,
     native_window: NativeWindowId,
     panel: Option<PanelId>,
+    visible: bool,
 }
 
 /// Creates, positions, and closes the single temporary DragHost allowed during
 /// one pointer interaction.
 ///
-/// The manager is owned by DockHost, alongside FloatingWindowManager. It keeps
-/// the shared controller entity only as an architectural link; it never reads
-/// or mutates Layout and never creates PanelView instances.
+/// The manager is owned by DockHost, alongside FloatingWindowManager. It uses
+/// the shared controller to transfer an existing cached PanelView, but never
+/// creates views or reads/mutates Core Layout directly.
 pub struct DragHostManager {
     controller: Entity<DockController>,
     theme: DockTheme,
@@ -306,12 +307,12 @@ impl DragHostManager {
             return Err(DragHostError::PanelTransferUnavailable(panel));
         }
 
-        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+        let visible = panel.is_none();
+        if visible
+            && let Err(error) = self.native_ops.show_no_activate(native_window)
+        {
             self.controller.update(cx, |controller, _| {
                 controller.drag_mut().clear_transport_host(id);
-                if let Some(panel) = panel {
-                    controller.finish_panel_view_transfer(panel);
-                }
             });
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::Native(error));
@@ -323,7 +324,33 @@ impl DragHostManager {
             window_id,
             native_window,
             panel,
+            visible,
         });
+
+        if let Some(panel) = panel {
+            let controller = self.controller.clone();
+            cx.observe(&controller, move |manager, controller, manager_cx| {
+                if !controller.drag().panel_view_source_detached(panel) {
+                    return;
+                }
+                if let Err(error) = manager.show_pending_drag_host(id) {
+                    tracing::warn!(
+                        ?id,
+                        %error,
+                        "could not show DragHost after source placeholder was rendered"
+                    );
+                    if let Err(close_error) = manager.close(id, manager_cx) {
+                        tracing::warn!(
+                            ?id,
+                            %close_error,
+                            "could not close DragHost after its delayed show failed"
+                        );
+                    }
+                }
+            })
+            .detach();
+        }
+
         Ok(id)
     }
 
@@ -352,6 +379,20 @@ impl DragHostManager {
         Ok(())
     }
 
+    fn show_pending_drag_host(&mut self, id: DragHostId) -> Result<(), DragHostError> {
+        let active = self.active.as_mut().ok_or(DragHostError::NotActive(id))?;
+        if active.id != id {
+            return Err(DragHostError::NotActive(id));
+        }
+        if active.visible {
+            return Ok(());
+        }
+
+        self.native_ops.show_no_activate(active.native_window)?;
+        active.visible = true;
+        Ok(())
+    }
+
     /// Closes the matching DragHost. Repeated close calls are harmless.
     pub fn close(
         &mut self,
@@ -366,16 +407,26 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
 
-        if let Err(error) = self.native_ops.hide(active.native_window) {
-            tracing::debug!(
-                ?id,
-                %error,
-                "DragHost was already hidden or unavailable during close"
-            );
+        if active.visible {
+            if let Err(error) = self.native_ops.hide(active.native_window) {
+                tracing::debug!(
+                    ?id,
+                    %error,
+                    "DragHost was already hidden or unavailable during close"
+                );
+            }
         }
-        let remove_result = active
+
+        if let Err(error) = active
             .window
-            .update(cx, |_, window, _| window.remove_window());
+            .update(cx, |_, window, _| window.remove_window())
+        {
+            self.active = Some(ActiveDragHost {
+                visible: false,
+                ..active
+            });
+            return Err(DragHostError::WindowUpdate(error.to_string()));
+        }
 
         self.controller.update(cx, |controller, controller_cx| {
             controller.drag_mut().clear_transport_host(id);
@@ -384,8 +435,6 @@ impl DragHostManager {
             }
             controller_cx.notify();
         });
-
-        remove_result.map_err(|error| DragHostError::WindowUpdate(error.to_string()))?;
         Ok(())
     }
 

@@ -306,7 +306,8 @@ Runtime-сессия должна хранить как минимум:
 - `DragHostManager::open_panel_at_cursor` открывает DragHost с существующим cached `AnyView` выбранной Panel. Повторный вызов factory не требуется.
 - Обычный `DockController::panel_view` временно перестаёт выдавать этот view исходным Main/Floating Host; тот же `AnyView` доступен DragHost через отдельный путь.
 - Main и Floating рендереры сохраняют исходный `PanelRect` и показывают placeholder в том же прямоугольнике, пока Panel отображается в DragHost.
-- Закрытие DragHost сначала удаляет временную поверхность, затем снимает transfer-state и возвращает PanelView в обычную отрисовку. Core Layout не изменяется.
+- Исходный Host подтверждает placeholder после следующего кадра. DragHost остаётся скрытым до этого подтверждения и получает view только после него, поэтому два окна не монтируют одну PanelView одновременно.
+- Закрытие DragHost сначала удаляет временную поверхность; только после успешного удаления снимается transfer-state и view возвращается в обычную отрисовку. Core Layout не изменяется.
 
 **Пока не подключено:** открытие/перемещение DragHost из реального pointer lifecycle и возврат по mouse-up/cancel будут включены при подключении drag pipeline. На этом этапе API передачи и общий presentation path подготовлены для одной Panel.
 
