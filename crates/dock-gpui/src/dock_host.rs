@@ -213,8 +213,9 @@ impl Render for DockHost {
             manager
         };
         if !self.floating_manager_attached {
+            let floating_manager_enabled = self.floating_manager_enabled;
             floating_manager.update(cx, |manager, manager_cx| {
-                if self.floating_manager_enabled {
+                if floating_manager_enabled {
                     manager.attach_main_window(window, manager_cx);
                 } else {
                     // The registry still needs the Main HWND for DragHost target
