@@ -465,7 +465,7 @@ Core не менялся. `dock-components/tab.rs` не требовал изм�
 - В исходном Main/Floating Host вся Group заменяется placeholder с тем же Core-прямоугольником. Активная `PanelView` передаётся по уже используемому протоколу: source placeholder → подтверждение следующего кадра → показ DragHost.
 - Для Main и Floating используется общий drop tracking: Main → Main, Main → Floating, Floating → Main, Floating → Floating и FreeArea разрешаются через существующий Core resolver. Для FreeArea границы вычисляются по исходному прямоугольнику Group, а постоянное Floating создаётся только финальной командой при отпускании.
 - Escape и ошибки запуска используют общий путь отмены DragHost; перемещение заголовка уже существующего FloatingHost не менялось.
-- Удалена ветка `GroupGrip → DockCommand::Float` из старого `begin_native_tearoff`. Старый механизм остаётся только для ещё не переведённых Column и Main DockArea.
+- Удалена ветка `GroupGrip → DockCommand::Float` из старого `begin_native_tearoff`. Старый механизм остаётся только для ещё не переведённых FlyoutPanel, Column и Main DockArea.
 
 Core не менялся.
 
