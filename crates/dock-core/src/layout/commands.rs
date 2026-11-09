@@ -210,7 +210,8 @@ impl Layout {
                     }
                 }
             }
-            DockCommand::MoveColumnToMainColumn { column, .. } => {
+            DockCommand::MoveColumnToMainColumn { column, .. }
+            | DockCommand::MoveColumnToTarget { column, .. } => {
                 affected.push(*column);
             }
             DockCommand::SetChrome { .. } => {
