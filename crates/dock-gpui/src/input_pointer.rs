@@ -474,14 +474,17 @@ pub(crate) fn register_pointer_events(
 
             let should_tearoff =
                 controller.update(app, |controller, _| host_transition_required(controller, point));
-            let panel_tab_active = controller.update(app, |controller, _| {
+            let panel_drag_active = controller.update(app, |controller, _| {
                 matches!(
                     controller.drag().session().state(),
                     DragState::Dragging {
                         payload: DragPayload::Panel { .. },
                         ..
                     }
-                ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
+                ) && matches!(
+                    controller.drag().session().handle(),
+                    Some(DragHandle::PanelTab | DragHandle::FlyoutPanel)
+                )
             });
             let group_grip_active = controller.update(app, |controller, _| {
                 matches!(
@@ -501,11 +504,11 @@ pub(crate) fn register_pointer_events(
                     }
                 ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
             });
-            let over_floating = (panel_tab_active || group_grip_active)
+            let over_floating = (panel_drag_active || group_grip_active)
                 && manager.update(app, |manager, _| {
                     manager.cursor_over_floating_window_from_main()
                 });
-            if panel_tab_active && (should_tearoff || over_floating) {
+            if panel_drag_active && (should_tearoff || over_floating) {
                 let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                 if !started {
                     tracing::debug!("Panel drag could not start DragHost; source gesture was cancelled");
@@ -532,14 +535,6 @@ pub(crate) fn register_pointer_events(
                         "Column drag could not start DragHost; source gesture was cancelled"
                     );
                 }
-                DockInteractionCoordinator::release(window, &pointer_capture);
-                pointer_press.set(None);
-                app.stop_propagation();
-                return;
-            }
-            if should_tearoff
-                && super::drag::begin_native_tearoff(&controller, &manager, point, app)
-            {
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
                 app.stop_propagation();
@@ -677,14 +672,17 @@ pub(crate) fn register_pointer_events(
                 }
                 let should_tearoff = controller
                     .update(app, |controller, _| host_transition_required(controller, point));
-                let panel_tab_active = controller.update(app, |controller, _| {
+                let panel_drag_active = controller.update(app, |controller, _| {
                     matches!(
                         controller.drag().session().state(),
                         DragState::Dragging {
                             payload: DragPayload::Panel { .. },
                             ..
                         }
-                    ) && controller.drag().session().handle() == Some(DragHandle::PanelTab)
+                    ) && matches!(
+                        controller.drag().session().handle(),
+                        Some(DragHandle::PanelTab | DragHandle::FlyoutPanel)
+                    )
                 });
                 let group_grip_active = controller.update(app, |controller, _| {
                     matches!(
@@ -704,11 +702,11 @@ pub(crate) fn register_pointer_events(
                         }
                     ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
                 });
-                let over_floating = (panel_tab_active || group_grip_active)
+                let over_floating = (panel_drag_active || group_grip_active)
                     && manager.update(app, |manager, _| {
                         manager.cursor_over_floating_window_from_main()
                     });
-                if panel_tab_active && (should_tearoff || over_floating) {
+                if panel_drag_active && (should_tearoff || over_floating) {
                     let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Panel drag could not start DragHost on release");
@@ -733,14 +731,6 @@ pub(crate) fn register_pointer_events(
                     if !started {
                         tracing::debug!("Column drag could not start DragHost on release");
                     }
-                    DockInteractionCoordinator::release(window, &pointer_capture);
-                    pointer_press.set(None);
-                    app.stop_propagation();
-                    return;
-                }
-                if should_tearoff
-                    && super::drag::begin_native_tearoff(&controller, &manager, point, app)
-                {
                     DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
                     app.stop_propagation();
