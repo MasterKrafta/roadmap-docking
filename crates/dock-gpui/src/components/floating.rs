@@ -1222,6 +1222,9 @@ impl Render for FloatingHost {
             })
             .collect::<Vec<_>>();
 
+        let dragged_group = self.controller.update(cx, |controller, _| {
+            controller.dragged_group_from(window_id)
+        });
         let pending_transfer = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfer_from(window_id)
         });
@@ -1300,6 +1303,7 @@ impl Render for FloatingHost {
             &snapshot.rects.columns,
             &snapshot.rects.groups,
             panel_views,
+            dragged_group,
             &snapshot.rects.tab_strips,
             &snapshot.rects.tab_headers,
             &snapshot.rects.tab_overflows,
