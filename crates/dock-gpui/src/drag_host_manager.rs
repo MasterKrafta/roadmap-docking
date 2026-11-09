@@ -181,13 +181,9 @@ impl DragHostManager {
         if !platform::hide_from_taskbar(native_window) {
             tracing::warn!("could not hide the new DragHost from the taskbar");
         }
-        if let Err(error) = self.native_ops.move_window(native_window, physical_origin) {
-            self.discard_unregistered_window(&window, native_window, cx);
-            return Err(DragHostError::Native(error));
-        }
-
-        // The destination monitor may use a different DPI from MainHost.
-        let destination_scale = match self.native_ops.scale_factor(native_window) {
+        // The destination monitor may use a different DPI from MainHost. Read
+        // the new HWND's scale and recompute the grab offset before its first show.
+        let mut destination_scale = match self.native_ops.scale_factor(native_window) {
             Ok(scale) => match valid_scale(scale) {
                 Some(scale) => scale,
                 None => {
@@ -200,6 +196,53 @@ impl DragHostManager {
                 return Err(DragHostError::Native(error));
             }
         };
+        let Some(destination_grab_offset) =
+            DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
+        else {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::InvalidGrabOffset);
+        };
+        let mut destination_origin =
+            DockGeometry::physical_position_for_grab(cursor, destination_grab_offset);
+        if let Err(error) = self.native_ops.move_window(native_window, destination_origin) {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::Native(error));
+        }
+
+        // Moving to the destination can itself cross a DPI boundary. Re-read
+        // scale and correct both the grab point and requested client size.
+        let final_scale = match self.native_ops.scale_factor(native_window) {
+            Ok(scale) => match valid_scale(scale) {
+                Some(scale) => scale,
+                None => {
+                    self.discard_unregistered_window(&window, native_window, cx);
+                    return Err(DragHostError::InvalidScaleFactor);
+                }
+            },
+            Err(error) => {
+                self.discard_unregistered_window(&window, native_window, cx);
+                return Err(DragHostError::Native(error));
+            }
+        };
+        if (final_scale - destination_scale).abs() > 0.001 {
+            destination_scale = final_scale;
+            let Some(final_grab_offset) =
+                DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
+            else {
+                self.discard_unregistered_window(&window, native_window, cx);
+                return Err(DragHostError::InvalidGrabOffset);
+            };
+            let final_origin =
+                DockGeometry::physical_position_for_grab(cursor, final_grab_offset);
+            if final_origin != destination_origin {
+                if let Err(error) = self.native_ops.move_window(native_window, final_origin) {
+                    self.discard_unregistered_window(&window, native_window, cx);
+                    return Err(DragHostError::Native(error));
+                }
+                destination_origin = final_origin;
+            }
+        }
+
         let Some(physical_size) =
             DockGeometry::physical_size_from_logical(logical_size, destination_scale)
         else {
