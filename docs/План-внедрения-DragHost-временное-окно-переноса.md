@@ -388,7 +388,7 @@ DragHost только показывает визуальный preview. Он н
 - В `DragHostManager` добавлено периодическое сопровождение активной сессии: временное окно следует за курсором, определяет целевой Host и обновляет `DropTarget` через resolver соответствующего окна.
 - Оригинальные `DragPayload`, `DragHandle`, `DragSourceHost` и source `WindowId` берутся из `DragHostSession`; временный DragHost не используется для реконструкции источника.
 - Для Main и Floating переиспользуются уже существующие независимые geometry snapshots `DockController`: Main cache keyed by main window/viewport, Floating cache keyed by `WindowId + FloatingGroupId`. Активный resolver переключается на актуальное окно и не создаёт второй кэш.
-- При отсутствии Main/Floating окна под курсором проверяется доступность `FreeArea`. Желаемые bounds вычисляются по геометрии и координатам исходного Host, затем переводятся в virtual-desktop physical coordinates и сохраняются в DragHost-сессии для финального release.
+- При отсутствии Main/Floating окна под курсором проверяется доступность `FreeArea`. Желаемые bounds вычисляются по геометрии и координатам исходного Host, затем переводятся в virtual-desktop physical coordinates и сохраняются в runtime-состоянии `DragHostManager` для финального release.
 - `DockHost` связывает `DragHostManager` с `FloatingWindowManager`. Если постоянные FloatingHost отключены, Main HWND всё равно регистрируется для маршрутизации.
 
 Core не менялся. Native move/resize заголовка постоянного FloatingHost не затрагивался. Завершение drop и подключение Pointer-событий к DragHost остаются следующими этапами.
