@@ -659,6 +659,16 @@ impl DragHostManager {
         let source_point = floating_manager.update(cx, |manager, _| {
             manager.core_point_for_drag_source(source_host, source_window_id, cursor)
         });
+        let Some(source_point) = source_point else {
+            tracing::warn!(
+                ?id,
+                ?source_host,
+                ?source_window_id,
+                "DragHost source window is no longer available"
+            );
+            self.cancel_active_drag(id, cx);
+            return false;
+        };
         let source = crate::input::drag::drop_source(payload);
 
         let update = self.controller.update(cx, |controller, controller_cx| {
@@ -694,13 +704,8 @@ impl DragHostManager {
                         (None, _) => Ok(None),
                     }
                 };
-            let target = match target_result {
-                Ok(target) => target,
-                Err(error) => {
-                    tracing::debug!(?id, %error, "DragHost drop-target resolution failed");
-                    None
-                }
-            };
+            let target = target_result.map_err(|error| error.to_string())?;
+
             // A resolved dock target supplies coordinates in that target Host.
             // FreeArea has no target Host, so keep the pointer in the original
             // source Host's local coordinate system instead of mixing Main/Floating
@@ -710,44 +715,43 @@ impl DragHostManager {
                     DockingWindowAtPoint::Main { point, .. }
                     | DockingWindowAtPoint::Floating { point, .. } => point,
                 })
-                .or(source_point);
-            let Some(pointer_point) = pointer_point else {
-                let _ = controller.drag_mut().session_mut().set_drop_target(None);
-                controller_cx.notify();
-                return Some((None, None));
-            };
-            if let Err(error) = controller.drag_mut().session_mut().pointer_move(pointer_point) {
-                tracing::debug!(?id, %error, "DragHost pointer position was rejected");
-                let _ = controller.drag_mut().session_mut().set_drop_target(None);
-                controller_cx.notify();
-                return Some((None, None));
-            }
-            if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
-                tracing::debug!(?id, %error, "DragHost target update was rejected");
-                controller_cx.notify();
-                return Some((None, None));
-            }
+                .unwrap_or(source_point);
+            controller
+                .drag_mut()
+                .session_mut()
+                .pointer_move(pointer_point)
+                .map_err(|error| error.to_string())?;
+            controller
+                .drag_mut()
+                .session_mut()
+                .set_drop_target(target)
+                .map_err(|error| error.to_string())?;
 
             let local_free_area_bounds = if target == Some(DropTarget::FreeArea) {
-                source_point.and_then(|point| {
-                    crate::input::drag::floating_bounds_for_drag(
-                        controller,
-                        payload,
-                        point,
-                        source_host,
-                        source_window_id,
-                    )
-                })
+                crate::input::drag::floating_bounds_for_drag(
+                    controller,
+                    payload,
+                    source_point,
+                    source_host,
+                    source_window_id,
+                )
             } else {
                 None
             };
             controller_cx.notify();
-            Some((target, local_free_area_bounds))
+            Ok((target, local_free_area_bounds))
         });
-
-        let Some((target, local_free_area_bounds)) = update else {
-            self.clear_drop_preview(id, cx);
-            return true;
+        let (target, local_free_area_bounds) = match update {
+            Ok(update) => update,
+            Err(error) => {
+                tracing::warn!(
+                    ?id,
+                    %error,
+                    "DragHost drop tracking failed; cancelling the active session"
+                );
+                self.cancel_active_drag(id, cx);
+                return false;
+            }
         };
         let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
             floating_manager.update(cx, |manager, _| {
@@ -927,27 +931,28 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
 
-        let still_visible = match self.native_ops.hide(active.native_window) {
-            Ok(()) => false,
-            Err(error) => {
-                tracing::debug!(
-                    ?id,
-                    %error,
-                    "DragHost could not be confirmed hidden during close"
-                );
-                true
-            }
-        };
+        if let Err(error) = self.native_ops.hide(active.native_window) {
+            tracing::debug!(
+                ?id,
+                %error,
+                "DragHost could not be confirmed hidden during close"
+            );
+        }
 
-        if let Err(error) = active
+        // GPUI may already have disposed the window (for example after a native
+        // close). In either case the manager must release its runtime entry;
+        // retaining a failed WindowHandle update here would leave a dead
+        // WindowId/HWND and PanelView transfer registered indefinitely.
+        let window_update_error = active
             .window
             .update(cx, |_, window, _| window.remove_window())
-        {
-            self.active = Some(ActiveDragHost {
-                visible: still_visible,
-                ..active
-            });
-            return Err(DragHostError::WindowUpdate(error.to_string()));
+            .err();
+        if let Some(error) = &window_update_error {
+            tracing::debug!(
+                ?id,
+                %error,
+                "DragHost window was already unavailable during close"
+            );
         }
 
         self.controller.update(cx, |controller, controller_cx| {
@@ -955,12 +960,16 @@ impl DragHostManager {
             for panel in active.panels {
                 controller.finish_panel_view_transfer(panel);
             }
-            // The DragHost window is already removed. Only now may the cached
-            // PanelView become mountable in its final persistent Host.
+            // The temporary surface is no longer a valid presentation host.
+            // Only now may the cached PanelViews return to the persistent Host.
             controller.drag_mut().finish_host_session();
             controller_cx.notify();
         });
-        Ok(())
+
+        match window_update_error {
+            Some(error) => Err(DragHostError::WindowUpdate(error.to_string())),
+            None => Ok(()),
+        }
     }
 
     /// Returns the Dragging role for the current temporary window, if present.
