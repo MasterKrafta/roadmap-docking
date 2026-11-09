@@ -5,7 +5,7 @@
 //! and pointer-pipeline integration are introduced in later stages.
 
 use gpui::{
-    AppContext, Bounds, Context, Entity, IntoElement, Render, Window, WindowBounds,
+    AppContext, Bounds, Context, Entity, IntoElement, Render, Styled, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 use platform::{NativeError, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
