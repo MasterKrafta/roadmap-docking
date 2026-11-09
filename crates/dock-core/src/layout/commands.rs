@@ -128,7 +128,8 @@ impl Layout {
             DockCommand::MoveGroup { .. } | DockCommand::MoveGroupToMainColumn { .. } => {
                 self.apply_group_transfer_command(command, metrics)
             }
-            DockCommand::MoveColumnToMainColumn { .. } => {
+            DockCommand::MoveColumnToMainColumn { .. }
+            | DockCommand::MoveColumnToTarget { .. } => {
                 self.apply_column_transfer_command(command, metrics)
             }
             DockCommand::MergeGroup { .. } | DockCommand::SplitGroup { .. } => {
