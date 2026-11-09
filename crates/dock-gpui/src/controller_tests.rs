@@ -945,6 +945,16 @@ fn drag_host_keeps_source_layout_unchanged_until_release_and_escape_cancels() {
         .find_map(|(id, node)| matches!(node, Node::Tabs(_)).then_some(id))
         .expect("baseline workspace should contain a Group");
     controller
+        .layout
+        .apply(
+            DockCommand::SetColumnMode {
+                column: source_column,
+                mode: dock_core::ColumnMode::IconsOnly,
+            },
+            &controller.metrics,
+        )
+        .expect("the baseline Column should enter icon mode for a flyout");
+    controller
         .dispatch_transient(DockCommand::OpenFlyout {
             column: source_column,
             panel: source_panel,
