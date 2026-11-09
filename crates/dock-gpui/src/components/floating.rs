@@ -266,7 +266,7 @@ struct FloatingHostSnapshot {
 
 /// Floating tab drags detach one Panel after leaving the source strip or
 /// entering another docking window. The shared DockAreaHeader moves the whole window.
-fn floating_tab_tearoff_required(leaves_source: bool, over_other_window: bool) -> bool {
+fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool) -> bool {
     leaves_source || over_other_window
 }
 
@@ -893,7 +893,7 @@ impl Render for FloatingHost {
                                 })
                                 
                         });
-                        if floating_tab_tearoff_required(leaves_source, over_other_window)
+                        if floating_tab_drag_host_required(leaves_source, over_other_window)
                             && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
                                 manager.update(app, |manager, _| manager.drag_host_manager())
                             })
@@ -1042,7 +1042,7 @@ impl Render for FloatingHost {
                                     manager.cursor_over_other_docking_window(group)
                                 })
                             });
-                            if floating_tab_tearoff_required(leaves_source, over_other_window)
+                            if floating_tab_drag_host_required(leaves_source, over_other_window)
                                 && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
                                     manager.update(app, |manager, _| manager.drag_host_manager())
                                 })
@@ -1409,22 +1409,22 @@ impl Render for FloatingHost {
 }
 
 #[cfg(test)]
-mod floating_tab_tearoff_tests {
-    use super::floating_tab_tearoff_required;
+mod floating_tab_drag_host_tests {
+    use super::floating_tab_drag_host_required;
 
     #[test]
-    fn tab_drag_inside_source_window_does_not_create_another_floating_window() {
-        assert!(!floating_tab_tearoff_required(false, false));
+    fn tab_drag_inside_source_strip_keeps_the_original_host() {
+        assert!(!floating_tab_drag_host_required(false, false));
     }
 
     #[test]
-    fn tab_detaches_after_leaving_its_source_strip() {
-        assert!(floating_tab_tearoff_required(true, false));
+    fn tab_drag_leaving_its_source_strip_uses_drag_host() {
+        assert!(floating_tab_drag_host_required(true, false));
     }
 
     #[test]
-    fn dragging_over_another_docking_window_still_detaches_tabs() {
-        assert!(floating_tab_tearoff_required(false, true));
+    fn dragging_over_another_docking_window_uses_drag_host() {
+        assert!(floating_tab_drag_host_required(false, true));
     }
 }
 
