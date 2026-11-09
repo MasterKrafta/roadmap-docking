@@ -145,7 +145,6 @@ impl DragHostSession {
         self.handle == dock_core::DragHandle::GroupGrip
             && matches!(self.payload, dock_core::DragPayload::Group { group: active } if active == group)
             && self.transferred_panel.is_none()
-            && panel != PanelId::null()
     }
 
     pub(crate) fn begin_group_view_transfer(
