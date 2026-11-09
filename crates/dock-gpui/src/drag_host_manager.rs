@@ -493,6 +493,10 @@ impl DragHostManager {
             return false;
         };
         let Some((payload, handle, source_host, source_window_id)) = tracking_state else {
+            if !self.native_ops.left_button_down().unwrap_or(true) {
+                self.cancel_active_drag(id, cx);
+                return false;
+            }
             return true;
         };
 
