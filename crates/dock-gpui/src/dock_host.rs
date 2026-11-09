@@ -615,6 +615,8 @@ impl Render for DockHost {
         let pointer_press_for_measurement = self.pointer_press.clone();
         let pointer_press_for_events = self.pointer_press.clone();
         let floating_manager_for_pointer_events = floating_manager.clone();
+        let drag_host_manager_for_pointer_events = drag_host_manager.clone();
+        let drag_host_manager_for_escape = drag_host_manager.clone();
         let measurement = canvas(
             move |bounds, window, app| {
                 let (viewport, window_origin) = match host_geometry_from_gpui_bounds(bounds) {
@@ -668,7 +670,7 @@ impl Render for DockHost {
                         pointer_context_menu.clone(),
                         crate::input::PointerEventState {
                             manager: floating_manager_for_pointer_events.clone(),
-                            drag_host_manager: drag_host_manager.clone(),
+                            drag_host_manager: drag_host_manager_for_pointer_events.clone(),
                             pointer_capture: pointer_capture.clone(),
                             pointer_press: pointer_press_for_events.clone(),
                         },
@@ -742,7 +744,7 @@ impl Render for DockHost {
         {
             let controller_for_escape = self.controller.clone();
             let manager_for_escape = floating_manager.clone();
-            let drag_host_for_escape = drag_host_manager.clone();
+            let drag_host_for_escape = drag_host_manager_for_escape.clone();
             let pointer_capture_for_escape = self.pointer_capture.clone();
             let pointer_press_for_escape = self.pointer_press.clone();
             workspace = workspace.capture_key_down(move |event, window, app| {
