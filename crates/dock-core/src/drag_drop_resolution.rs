@@ -1581,7 +1581,20 @@ fn floating_column_header_moves_directly_to_main_column() {
         vec![source_group],
         vec![1.0],
     );
-    let source_floating = builder.floating_group(source_column, bounds(100.0, 140.0), 1);
+    let (_, sibling_panel) = builder.panel(key("floating-column-sibling"), constraints());
+    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
+    let sibling_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![sibling_group],
+        vec![1.0],
+    );
+    let source_root = builder.split(
+        Axis::X,
+        vec![source_column, sibling_column],
+        vec![0.4, 0.6],
+    );
+    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
 
     let (_, target_panel) = builder.panel(key("floating-column-to-main-target"), constraints());
     let target_group = builder.tabs(vec![target_panel], 0, false);
@@ -1622,7 +1635,8 @@ fn floating_column_header_moves_directly_to_main_column() {
     };
     layout.apply(command, &metrics).unwrap();
 
-    assert!(layout.floating_group(source_floating).is_none());
+    let source_area = layout.floating_group(source_floating).unwrap().area;
+    assert_eq!(layout.dock_area(source_area).unwrap().root, sibling_column);
     assert_eq!(
         layout.main_columns(DockSide::Right).unwrap(),
         vec![source_column, target_column]
@@ -1647,7 +1661,20 @@ fn floating_column_moves_directly_into_another_floating_composition() {
         vec![source_group],
         vec![1.0],
     );
-    let source_floating = builder.floating_group(source_column, bounds(100.0, 140.0), 1);
+    let (_, sibling_panel) = builder.panel(key("floating-column-sibling"), constraints());
+    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
+    let sibling_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![sibling_group],
+        vec![1.0],
+    );
+    let source_root = builder.split(
+        Axis::X,
+        vec![source_column, sibling_column],
+        vec![0.4, 0.6],
+    );
+    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
 
     let (_, target_panel) = builder.panel(key("floating-to-floating-target"), constraints());
     let target_group = builder.tabs(vec![target_panel], 0, false);
@@ -1688,7 +1715,8 @@ fn floating_column_moves_directly_into_another_floating_composition() {
     };
     layout.apply(command, &metrics).unwrap();
 
-    assert!(layout.floating_group(source_floating).is_none());
+    let source_area = layout.floating_group(source_floating).unwrap().area;
+    assert_eq!(layout.dock_area(source_area).unwrap().root, sibling_column);
     let target_area = layout.floating_group(target_floating).unwrap().area;
     let root = layout.dock_area(target_area).unwrap().root;
     let Some(Node::Split(split)) = layout.node(root) else {
@@ -1696,7 +1724,7 @@ fn floating_column_moves_directly_into_another_floating_composition() {
     };
     assert_eq!(split.axis, Axis::X);
     assert_eq!(split.children, vec![target_column, source_column]);
-    assert_eq!(layout.floating_groups().count(), 1);
+    assert_eq!(layout.floating_groups().count(), 2);
     assert!(matches!(
         layout.node(source_column),
         Some(Node::Column(column)) if column.groups == vec![source_group]
