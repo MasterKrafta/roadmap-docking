@@ -299,10 +299,10 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
                 && zone.target
                     == (DropTarget::Tabs {
                         group: target_group,
-                        index: 0,
+                        index: 2,
                     })
         })
-        .expect("the target tab should have an insertion zone");
+        .expect("the target tab strip should have an append insertion zone");
     let tab_point = Point::new(
         tab_zone.rect.origin.x + tab_zone.rect.size.width / 2.0,
         tab_zone.rect.origin.y + tab_zone.rect.size.height / 2.0,
@@ -312,7 +312,7 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
         HitResult::DropZone {
             target: DropTarget::Tabs {
                 group: target_group,
-                index: 0,
+                index: 2,
             },
             zone: DropZone::TabInsertion,
         }
