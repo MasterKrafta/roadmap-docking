@@ -20,8 +20,8 @@ use platform::{
 };
 
 use crate::{
-    DockController, DockEvent, DockTheme, DragSourceHost, components::FloatingHost,
-    geometry::DockGeometry,
+    DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
+    components::FloatingHost, geometry::DockGeometry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -215,6 +215,7 @@ pub struct FloatingWindowManager {
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
     native_resize: Option<NativeResizeSession>,
+    drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
     /// Group whose floating host is being created for an active native tear-off.
     /// Reconciliation keeps it hidden until the caller positions the HWND.
@@ -234,6 +235,7 @@ impl FloatingWindowManager {
             main_host_origin: Point::ZERO,
             native_move: None,
             native_resize: None,
+            drag_host_manager: None,
             reconciling: false,
             pending_tearoff_group: None,
             registry: PanelWindowRegistry::default(),
@@ -249,6 +251,18 @@ impl FloatingWindowManager {
 
     pub fn host_registry(&self) -> &CompositionHostRegistry {
         &self.host_registry
+    }
+
+    /// Connects the temporary transport manager without creating an ownership cycle.
+    pub(crate) fn attach_drag_host_manager(
+        &mut self,
+        manager: WeakEntity<DragHostManager>,
+    ) {
+        self.drag_host_manager = Some(manager);
+    }
+
+    pub(crate) fn drag_host_manager(&self) -> Option<Entity<DragHostManager>> {
+        self.drag_host_manager.as_ref()?.upgrade()
     }
 
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
@@ -1080,6 +1094,27 @@ impl FloatingWindowManager {
             window_id: entry.window_id,
             point: self.core_point_for_floating(target_native, screen)?,
         })
+    }
+
+    /// Returns true when the cursor is over a registered FloatingHost above MainHost.
+    pub(crate) fn cursor_over_floating_window_from_main(&self) -> bool {
+        let Some(main) = self.main_native_window else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let mut known = vec![main];
+        known.extend(self.registry.windows.values().filter_map(|entry| {
+            (entry.visibility == PanelWindowVisibility::Visible)
+                .then_some(entry.native_window)
+                .flatten()
+        }));
+        self.native_ops
+            .window_from_point(cursor, &known, None)
+            .ok()
+            .flatten()
+            .is_some_and(|window| window != main)
     }
 
     pub(crate) fn core_point_for_drag_source(
