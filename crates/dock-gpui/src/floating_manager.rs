@@ -953,7 +953,9 @@ impl FloatingWindowManager {
                 // only the temporary native host and must never replace its payload.
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
                 DragPayload::Column { column } => Some(DropSource::Column { column }),
-                DragPayload::DockArea { .. } => None,
+                // Group content is transported exclusively by DragHost and must
+                // never enter the legacy persistent-Floating tear-off resolver.
+                DragPayload::Group { .. } | DragPayload::DockArea { .. } => None,
                 // An already-floating window is a different gesture: its entire
                 // FloatingGroup is the source, so its root is resolved as one
                 // complete composition. Main-originated tear-offs never enter
