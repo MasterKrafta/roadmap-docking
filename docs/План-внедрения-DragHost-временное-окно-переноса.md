@@ -430,6 +430,7 @@ Core не менялся. Native move/resize заголовка постоянн
 - Floating PanelTab сохраняет прежнее поведение внутри своей полосы вкладок; при выходе из полосы или наведении на другое Dock-окно запускается тот же DragHost.
 - Общая функция `begin_panel_drag_host` получает Panel, исходный Host, WindowId и точку захвата из исходной `DragHostSession`; размер берётся из PanelConstraints.
 - Для переноса используется та же cached `PanelView`. Исходный Host сохраняет геометрию и подтверждает placeholder после кадра. Подтверждение работает и для неактивной вкладки, у которой нет собственного PanelRect в текущем снимке.
+- На успешном drop cached `PanelView` становится доступна конечному Host только после удаления DragHost HWND. Очистка транспортной сессии выполняется в `DragHostManager::close` после снятия временного окна.
 - DragHost Manager на отпускании выполняет `pointer_up`, передаёт последнюю DropTarget и при FreeArea — экранные bounds, рассчитанные по геометрии исходного Main/Floating Host. После этого выполняется одна Core-команда, затем DragHost закрывается и view становится доступен конечному Host.
 - Escape обрабатывается MainHost, FloatingHost и native polling. Отмена закрывает DragHost и возвращает ту же PanelView без изменения Layout.
 - Если мышь отпущена до подтверждения исходного placeholder, либо native routing/show временного окна завершается ошибкой, передача отменяется и исходный Host восстанавливает view.
