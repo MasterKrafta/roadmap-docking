@@ -4,6 +4,7 @@ use dock_core::{
     HitResult, InitialLayoutError, LayoutRects, PanelConstraints, PanelId, PanelKey, Point,
     Node, Profile, Rect, Size,
 };
+use crate::drag_host::{DragHostId, DragSourceHost};
 use gpui::WindowId;
 use slotmap::Key;
 
@@ -32,6 +33,94 @@ fn controller() -> DockController {
         Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
     )
     .expect("empty Photoshop controller should be valid")
+}
+
+#[test]
+fn content_drag_cancel_before_drag_host_creation_preserves_layout_and_history() {
+    let mut controller = controller();
+    let panel = PanelId::null();
+    let source_window = WindowId::from(71);
+    let layout_before = format!("{:?}", controller.layout());
+    let version_before = controller.layout().version();
+
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::new(120.0, 80.0),
+            DragSourceHost::Main,
+            source_window,
+        )
+        .expect("content drag session should start");
+
+    assert!(controller.has_active_pointer_interaction());
+    assert!(controller.drag.host_session().is_some());
+    assert!(!controller.can_undo());
+    assert!(!controller.can_redo());
+
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("Escape should cancel the pending content drag");
+
+    assert_eq!(controller.layout().version(), version_before);
+    assert_eq!(format!("{:?}", controller.layout()), layout_before);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
+    assert!(!controller.has_active_pointer_interaction());
+    assert!(!controller.can_undo());
+    assert!(!controller.can_redo());
+
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("repeated Escape cancellation should be harmless");
+    assert_eq!(controller.layout().version(), version_before);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
+}
+
+#[test]
+fn content_drag_cancel_after_drag_host_attachment_preserves_layout_and_history() {
+    let mut controller = controller();
+    let panel = PanelId::null();
+    let source_window = WindowId::from(72);
+    let drag_host = DragHostId::from_raw(91);
+    let layout_before = format!("{:?}", controller.layout());
+    let version_before = controller.layout().version();
+
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::new(160.0, 90.0),
+            DragSourceHost::Main,
+            source_window,
+        )
+        .expect("content drag session should start");
+    assert!(controller.drag.attach_transport_host(drag_host));
+    assert!(controller.drag.begin_panel_view_transfer(panel));
+    assert_eq!(
+        controller.drag.host_session().unwrap().transferred_panels(),
+        &[panel]
+    );
+
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("Escape should cancel the attached DragHost session");
+
+    assert_eq!(controller.layout().version(), version_before);
+    assert_eq!(format!("{:?}", controller.layout()), layout_before);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
+    assert!(!controller.has_active_pointer_interaction());
+    assert!(!controller.can_undo());
+    assert!(!controller.can_redo());
+
+    controller
+        .cancel_pointer_interaction_on_escape()
+        .expect("repeated Escape cancellation should be harmless");
+    assert_eq!(controller.layout().version(), version_before);
+    assert_eq!(controller.drag().session().state(), DragState::Idle);
+    assert!(controller.drag().host_session().is_none());
 }
 
 #[test]
