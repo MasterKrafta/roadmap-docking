@@ -5,7 +5,7 @@ use dock_core::{
 };
 use gpui::{App, Entity, WindowId};
 
-use crate::{DockController, DragSourceHost, FloatingWindowManager};
+use crate::{DockController, DragHostManager, DragSourceHost, FloatingWindowManager};
 
 /// Identifies the floating tab gesture across pointer updates and tear-off.
 #[derive(Clone, Copy)]
@@ -126,6 +126,95 @@ pub(crate) fn update_drag_at(
         cx.notify();
         was_pressed
     })
+}
+
+/// Starts the temporary DragHost for the active PanelTab gesture.
+/// The source host and original pointer origin always come from DragHostSession;
+/// the temporary window never becomes the semantic drag source.
+pub(crate) fn begin_panel_drag_host(
+    controller: &Entity<DockController>,
+    drag_host_manager: &Entity<DragHostManager>,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (panel, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::Panel { panel },
+                origin,
+                ..
+            } if controller.drag().session().handle() == Some(DragHandle::PanelTab) => {
+                (panel, origin)
+            }
+            _ => return None,
+        };
+        let host_session = controller.drag().host_session()?;
+        let source_host = host_session.source_host();
+        let source_window_id = host_session.source_window_id()?;
+
+        let (header_rect, preferred_size) = match source_host {
+            DragSourceHost::Main => {
+                let header = controller
+                    .geometry()
+                    .ok()?
+                    .tab_headers
+                    .iter()
+                    .find(|header| header.panel == panel)?
+                    .rect;
+                let size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
+                (header, size)
+            }
+            DragSourceHost::Floating { group } => {
+                let header = controller
+                    .floating_geometry(source_window_id, group)
+                    .ok()?
+                    .tab_headers
+                    .iter()
+                    .find(|header| header.panel == panel)?
+                    .rect;
+                let size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
+                (header, size)
+            }
+        };
+        let grab_offset = Point::new(
+            (origin.x - header_rect.origin.x)
+                .clamp(0.0, header_rect.size.width)
+                .min(preferred_size.width),
+            (origin.y - header_rect.origin.y)
+                .clamp(0.0, header_rect.size.height)
+                .min(preferred_size.height),
+        );
+        Some((panel, grab_offset, preferred_size))
+    });
+    let Some((panel, grab_offset, preferred_size)) = candidate else {
+        tracing::debug!("PanelTab drag has no valid source geometry for DragHost");
+        return false;
+    };
+
+    match drag_host_manager.update(app, |manager, manager_cx| {
+        manager.open_panel_at_cursor(panel, grab_offset, preferred_size, manager_cx)
+    }) {
+        Ok(Ok(_)) => true,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "could not start Panel DragHost");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed Panel DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+        Err(error) => {
+            tracing::warn!(%error, "could not access DragHostManager for Panel drag");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed Panel DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+    }
 }
 
 /// Updates a tab drag that started inside a floating host. The resolver is
