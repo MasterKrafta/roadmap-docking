@@ -246,13 +246,14 @@ impl DragHostManager {
         };
         let theme = self.theme;
         let controller = self.controller.clone();
+        let surface_panel = panels.first().copied();
         let window = cx
             .open_window(options, move |_, app| {
                 app.new(|_| DragHostSurface {
                     theme,
                     controller,
                     controller_observed: false,
-                    panel: panels.first().copied(),
+                    panel: surface_panel,
                     group,
                     column,
                 })
