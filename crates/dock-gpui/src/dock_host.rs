@@ -13,7 +13,7 @@ use gpui::{
 };
 
 use crate::{
-    DockController, DockTheme, FloatingWindowManager,
+    DockController, DockTheme, DragHostManager, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
@@ -61,6 +61,8 @@ pub struct DockHost {
     floating_manager: Option<Entity<FloatingWindowManager>>,
     floating_manager_enabled: bool,
     floating_manager_attached: bool,
+    drag_host_manager: Option<Entity<DragHostManager>>,
+    drag_host_manager_attached: bool,
 }
 
 #[derive(Clone)]
@@ -90,6 +92,8 @@ impl DockHost {
             floating_manager: None,
             floating_manager_enabled: false,
             floating_manager_attached: false,
+            drag_host_manager: None,
+            drag_host_manager_attached: false,
         }
     }
 
@@ -150,6 +154,14 @@ impl DockHost {
         self.theme
     }
 
+    /// Returns the temporary DragHost manager owned by this DockHost, once initialized.
+    ///
+    /// The returned manager shares this host's DockController and does not own a
+    /// separate Layout. It can be used by application-level drag integrations.
+    pub fn drag_host_manager(&self) -> Option<Entity<DragHostManager>> {
+        self.drag_host_manager.clone()
+    }
+
     /// Maps a pointer point in a scrolled main column back to Core geometry.
     ///
     /// Call this before DockController::hit_test for points inside the given
@@ -205,6 +217,22 @@ impl Render for DockHost {
                 manager.attach_main_window(window, manager_cx);
             });
             self.floating_manager_attached = true;
+        }
+
+        // DragHost is a separate temporary-window manager, not an extension
+        // of FloatingWindowManager. Both managers share this DockController.
+        let drag_host_manager = if let Some(manager) = self.drag_host_manager.clone() {
+            manager
+        } else {
+            let controller = self.controller.clone();
+            let theme = self.theme;
+            let manager = cx.new(|_| DragHostManager::new(controller, theme));
+            self.drag_host_manager = Some(manager.clone());
+            manager
+        };
+        if !self.drag_host_manager_attached {
+            self.drag_host_manager_attached = drag_host_manager
+                .update(cx, |manager, _| manager.attach_main_window(window));
         }
 
         let focus_handle = self
