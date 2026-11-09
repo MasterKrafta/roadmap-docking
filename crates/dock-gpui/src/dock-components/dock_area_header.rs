@@ -5,7 +5,9 @@ mod collapse_column_button;
 #[path = "close_dock_area_button.rs"]
 mod close_dock_area_button;
 
-use dock_core::{ColumnRect, DockMetrics, Rect};
+use dock_core::{ColumnMode, ColumnRect, DockMetrics, NodeId, Rect};
+use std::collections::HashMap;
+
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
@@ -24,6 +26,8 @@ impl DockAreaHeader {
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
+        column_modes: &HashMap<NodeId, ColumnMode>,
+        dragged_column: Option<NodeId>,
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
@@ -48,6 +52,23 @@ impl DockAreaHeader {
             ));
 
         for (index, column) in columns.iter().enumerate() {
+            if dragged_column != Some(column.column)
+                && column_modes
+                    .get(&column.column)
+                    .copied()
+                    .unwrap_or(ColumnMode::Expanded)
+                    == ColumnMode::Expanded
+            {
+                header = header.child(DockAreaDragArea::render_column_grip(
+                    format!("{id}-column-grip-{index}"),
+                    column.rect.origin.x - area_rect.origin.x,
+                    theme,
+                ));
+            }
+
+            if dragged_column == Some(column.column) {
+                continue;
+            }
             let button_x =
                 DockAreaDragArea::collapse_button_left(area_rect, *column, button_width);
 

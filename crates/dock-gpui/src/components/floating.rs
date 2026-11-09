@@ -235,6 +235,8 @@ impl FloatingWindowContent {
                 format!("floating-dock-area-{:?}", floating.group),
                 floating.rect,
                 columns,
+                column_modes,
+                dragged_column,
                 metrics,
                 theme,
             ));

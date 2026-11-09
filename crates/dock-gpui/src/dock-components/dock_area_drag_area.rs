@@ -9,9 +9,25 @@ use ui::Theme;
 pub struct DockAreaDragArea;
 
 impl DockAreaDragArea {
+    pub(crate) const COLUMN_GRIP_WIDTH: f32 = 24.0;
+
+    pub(crate) fn column_drag_handle_contains(
+        column: dock_core::ColumnRect,
+        point: Point,
+        header_height: f32,
+    ) -> bool {
+        let width = Self::COLUMN_GRIP_WIDTH.min(column.rect.size.width);
+        let height = header_height.min(column.rect.size.height);
+        point.x >= column.rect.origin.x
+            && point.x < column.rect.origin.x + width
+            && point.y >= column.rect.origin.y
+            && point.y < column.rect.origin.y + height
+    }
+
     pub(crate) fn contains(
         area_rect: Rect,
         columns: &[dock_core::ColumnRect],
+        column_grip_columns: &[dock_core::ColumnRect],
         point: Point,
         header_height: f32,
         button_width: f32,
@@ -27,7 +43,11 @@ impl DockAreaDragArea {
         }
 
         let close_left = area_right - button_width;
-        if point.x >= close_left {
+        if point.x >= close_left
+            || column_grip_columns.iter().any(|column| {
+                Self::column_drag_handle_contains(*column, point, header_height)
+            })
+        {
             return false;
         }
 
@@ -51,6 +71,27 @@ impl DockAreaDragArea {
             } else {
                 button_width
             }
+    }
+
+    pub(crate) fn render_column_grip(
+        id: String,
+        left: f32,
+        theme: Theme,
+    ) -> impl IntoElement {
+        div()
+            .id(id)
+            .absolute()
+            .left(gpui::px(left))
+            .top_0()
+            .w(gpui::px(Self::COLUMN_GRIP_WIDTH))
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_move()
+            .bg(rgb(theme.colors.group_grip_background))
+            .text_color(rgb(theme.colors.primary_text))
+            .child("⋮")
     }
 
     pub fn render(id: String, theme: Theme) -> impl IntoElement {

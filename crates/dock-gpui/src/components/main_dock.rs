@@ -125,6 +125,8 @@ impl MainDockView {
                     format!("main-dock-area-{side_name}"),
                     area_rect,
                     &area_columns,
+                    column_modes,
+                    dragged_column,
                     metrics,
                     theme,
                 ));
