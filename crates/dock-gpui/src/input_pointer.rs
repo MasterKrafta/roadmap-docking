@@ -1180,23 +1180,25 @@ fn column_header_drag_handle_contains(
     point: Point,
     app: &mut App,
 ) -> bool {
-    controller.update(app, |controller, _| {
-        let Some(column_rect) = controller
-            .geometry()
-            .ok()?
-            .columns
-            .iter()
-            .find(|rect| rect.column == column)
-            .copied()
-        else {
-            return Some(false);
-        };
-        Some(DockAreaDragArea::column_drag_handle_contains(
-            column_rect,
-            point,
-            controller.metrics().column_header_height,
-        ))
-    }).unwrap_or(false)
+    controller
+        .update(app, |controller, _| {
+            let Some(column_rect) = controller
+                .geometry()
+                .ok()?
+                .columns
+                .iter()
+                .find(|rect| rect.column == column)
+                .copied()
+            else {
+                return Some(false);
+            };
+            Some(DockAreaDragArea::column_drag_handle_contains(
+                column_rect,
+                point,
+                controller.metrics().column_header_height,
+            ))
+        })
+        .unwrap_or(false)
 }
 
 fn dock_area_drag_handle_side(
