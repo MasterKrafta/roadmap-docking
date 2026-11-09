@@ -177,7 +177,10 @@ impl DragHostSession {
         panels: &[PanelId],
     ) -> bool {
         self.handle == dock_core::DragHandle::ColumnHeader
-            && matches!(self.payload, dock_core::DragPayload::Column { column: active } if active == column)
+            && matches!(
+                self.payload,
+                dock_core::DragPayload::Column { column: active } if active == column
+            )
             && self.transferred_panels.is_empty()
             && panels.iter().enumerate().all(|(index, panel)| !panels[..index].contains(panel))
     }

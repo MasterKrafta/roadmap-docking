@@ -528,7 +528,9 @@ pub(crate) fn register_pointer_events(
             if column_header_active && should_tearoff {
                 let started = begin_column_drag_host(&controller, &drag_host_manager, app);
                 if !started {
-                    tracing::debug!("Column drag could not start DragHost; source gesture was cancelled");
+                    tracing::debug!(
+                        "Column drag could not start DragHost; source gesture was cancelled"
+                    );
                 }
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);

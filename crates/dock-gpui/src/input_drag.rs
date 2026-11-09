@@ -593,7 +593,8 @@ pub(crate) fn begin_native_tearoff(
         return false;
     };
     eprintln!(
-        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} \
+         pointer=({:.1}, {:.1}) bounds=({:.1}, {:.1}, {:.1}, {:.1})",
         payload,
         handle,
         pointer.x,

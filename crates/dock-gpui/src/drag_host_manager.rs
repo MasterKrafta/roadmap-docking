@@ -20,7 +20,9 @@ use dock_core::{
 
 use crate::{
     components::{context_menu::GroupMenuToggle, PanelHost},
-    dock_components::{collect_group_presentations, DockCompositionView, DockGroupView, GroupPresentation},
+    dock_components::{
+        collect_group_presentations, DockCompositionView, DockGroupView, GroupPresentation,
+    },
     floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
     DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
