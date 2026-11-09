@@ -2029,6 +2029,8 @@ mod floating_tab_drag_host_tests {
 
 #[cfg(test)]
 mod floating_dock_area_header_hit_tests {
+    use std::collections::HashMap;
+
     use dock_core::{ColumnRect, DockMetrics, NodeId, Point, Rect, Size};
     use slotmap::Key;
 
