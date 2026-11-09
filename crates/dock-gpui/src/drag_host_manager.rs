@@ -202,7 +202,7 @@ impl DragHostManager {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::InvalidGrabOffset);
         };
-        let mut destination_origin =
+        let destination_origin =
             DockGeometry::physical_position_for_grab(cursor, destination_grab_offset);
         if let Err(error) = self.native_ops.move_window(native_window, destination_origin) {
             self.discard_unregistered_window(&window, native_window, cx);
@@ -239,7 +239,6 @@ impl DragHostManager {
                     self.discard_unregistered_window(&window, native_window, cx);
                     return Err(DragHostError::Native(error));
                 }
-                destination_origin = final_origin;
             }
         }
 
