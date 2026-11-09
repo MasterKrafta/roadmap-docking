@@ -1,0 +1,337 @@
+//! Runtime owner of temporary native windows used to present dragged dock content.
+//!
+//! A DragHost is deliberately independent from Core Layout and the persistent
+//! FloatingWindowManager. Stage 2 creates only an empty surface; content transfer
+//! and pointer-pipeline integration are introduced in later stages.
+
+use gpui::{
+    AppContext, Bounds, Context, Entity, IntoElement, Render, Window, WindowBounds,
+    WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
+};
+use platform::{
+    NativeError, NativeWindowId, NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
+};
+
+use dock_core::{Point, Size};
+
+use crate::{
+    DockController, DockTheme, DockWindowRole, DragHostId,
+    geometry::DockGeometry,
+};
+
+const DEFAULT_DRAG_HOST_SIZE: Size = Size::new(280.0, 180.0);
+
+struct ActiveDragHost {
+    id: DragHostId,
+    window: WindowHandle<DragHostSurface>,
+    window_id: WindowId,
+    native_window: NativeWindowId,
+}
+
+/// Creates, positions, and closes the single temporary DragHost allowed during
+/// one pointer interaction.
+///
+/// The manager is owned by DockHost, alongside FloatingWindowManager. It keeps
+/// the shared controller entity only as an architectural link; it never reads
+/// or mutates Layout and never creates PanelView instances.
+pub struct DragHostManager {
+    controller: Entity<DockController>,
+    theme: DockTheme,
+    main_native_window: Option<NativeWindowId>,
+    active: Option<ActiveDragHost>,
+    next_id: u64,
+    native_ops: SystemNativeWindowOps,
+}
+
+impl DragHostManager {
+    pub fn new(controller: Entity<DockController>, theme: DockTheme) -> Self {
+        Self {
+            controller,
+            theme,
+            main_native_window: None,
+            active: None,
+            next_id: 1,
+            native_ops: SystemNativeWindowOps,
+        }
+    }
+
+    /// Returns the shared controller entity. The manager does not own its Layout.
+    pub fn controller(&self) -> &Entity<DockController> {
+        &self.controller
+    }
+
+    /// Connects the manager to the application's main native window.
+    ///
+    /// DragHost windows use MainHost as their native owner for application
+    /// lifetime and taskbar behavior. Returns false when GPUI cannot provide
+    /// the main HWND yet; DockHost may retry on a later render.
+    pub(crate) fn attach_main_window(
+        &mut self,
+        window: &mut Window,
+    ) -> bool {
+        if self.main_native_window.is_some() {
+            return true;
+        }
+
+        match self.native_ops.hwnd_of(window) {
+            Ok(native_window) => {
+                self.main_native_window = Some(native_window);
+                true
+            }
+            Err(error) => {
+                tracing::debug!(
+                    %error,
+                    "main native handle is unavailable; DragHost creation is deferred"
+                );
+                false
+            }
+        }
+    }
+
+    /// Creates one empty DragHost at the current cursor position.
+    ///
+    /// `grab_offset` is measured in DockCore logical pixels from the DragHost's
+    /// top-left corner to the pointer. The new HWND is created hidden, assigned
+    /// to MainHost, positioned, and sized before it is shown without activation.
+    pub fn open_at_cursor(
+        &mut self,
+        grab_offset: Point,
+        logical_size: Size,
+        cx: &mut Context<Self>,
+    ) -> Result<DragHostId, DragHostError> {
+        if self.active.is_some() {
+            return Err(DragHostError::AlreadyActive);
+        }
+        let owner = self
+            .main_native_window
+            .ok_or(DragHostError::MainWindowUnavailable)?;
+        grab_offset
+            .validate()
+            .map_err(|_| DragHostError::InvalidGrabOffset)?;
+        logical_size
+            .validate_positive()
+            .map_err(|_| DragHostError::InvalidLogicalSize)?;
+
+        let cursor = self.native_ops.cursor_position()?;
+        let owner_scale = valid_scale(self.native_ops.scale_factor(owner)?)
+            .ok_or(DragHostError::InvalidScaleFactor)?;
+        let physical_grab_offset =
+            DockGeometry::physical_offset_from_logical(grab_offset, owner_scale)
+                .ok_or(DragHostError::InvalidGrabOffset)?;
+        let physical_origin =
+            DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
+        let logical_origin = DockGeometry::logical_point_from_core_physical(
+            Point::new(physical_origin.x as f32, physical_origin.y as f32),
+            owner_scale,
+        )
+        .ok_or(DragHostError::InvalidScreenPosition)?;
+
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                point(px(logical_origin.x), px(logical_origin.y)),
+                size(px(logical_size.width), px(logical_size.height)),
+            ))),
+            titlebar: None,
+            focus: false,
+            show: false,
+            kind: WindowKind::Floating,
+            is_movable: false,
+            app_owns_titlebar_drag: false,
+            is_resizable: false,
+            is_minimizable: false,
+            ..Default::default()
+        };
+        let theme = self.theme;
+        let window = cx
+            .open_window(options, move |_, app| {
+                app.new(|_| DragHostSurface { theme })
+            })
+            .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
+
+        let window_id = match window.update(cx, |_, window, _| {
+            window.window_handle().window_id()
+        }) {
+            Ok(window_id) => window_id,
+            Err(error) => {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return Err(DragHostError::WindowUpdate(error.to_string()));
+            }
+        };
+        let native_window = match window.update(cx, |_, window, _| {
+            self.native_ops.hwnd_of(window)
+        }) {
+            Ok(Ok(native_window)) => native_window,
+            Ok(Err(error)) => {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return Err(DragHostError::Native(error));
+            }
+            Err(error) => {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return Err(DragHostError::WindowUpdate(error.to_string()));
+            }
+        };
+
+        if let Err(error) = self.native_ops.set_owner(native_window, owner) {
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+            return Err(DragHostError::Native(error));
+        }
+        if !platform::hide_from_taskbar(native_window) {
+            tracing::warn!("could not hide the new DragHost from the taskbar");
+        }
+        if let Err(error) = self.native_ops.move_window(native_window, physical_origin) {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::Native(error));
+        }
+
+        // The destination monitor may use a different DPI from MainHost.
+        let destination_scale = match self.native_ops.scale_factor(native_window) {
+            Ok(scale) => valid_scale(scale).ok_or(DragHostError::InvalidScaleFactor)?,
+            Err(error) => {
+                self.discard_unregistered_window(&window, native_window, cx);
+                return Err(DragHostError::Native(error));
+            }
+        };
+        let physical_size = DockGeometry::physical_size_from_logical(
+            logical_size,
+            destination_scale,
+        )
+        .ok_or(DragHostError::InvalidLogicalSize)?;
+        if let Err(error) = self.native_ops.resize_window(native_window, physical_size) {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::Native(error));
+        }
+
+        if let Err(error) = self.native_ops.show_no_activate(native_window) {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::Native(error));
+        }
+
+        let id = DragHostId::from_raw(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(DragHostError::IdExhausted)?;
+        self.active = Some(ActiveDragHost {
+            id,
+            window,
+            window_id,
+            native_window,
+        });
+        Ok(id)
+    }
+
+    /// Moves the active DragHost so the same logical grab point stays under
+    /// the current cursor. The window never activates during movement.
+    pub fn move_with_cursor(
+        &mut self,
+        id: DragHostId,
+        grab_offset: Point,
+    ) -> Result<(), DragHostError> {
+        let active = self.active.as_ref().ok_or(DragHostError::NotActive(id))?;
+        if active.id != id {
+            return Err(DragHostError::NotActive(id));
+        }
+        grab_offset
+            .validate()
+            .map_err(|_| DragHostError::InvalidGrabOffset)?;
+        let cursor = self.native_ops.cursor_position()?;
+        let scale = valid_scale(self.native_ops.scale_factor(active.native_window)?)
+            .ok_or(DragHostError::InvalidScaleFactor)?;
+        let physical_grab_offset =
+            DockGeometry::physical_offset_from_logical(grab_offset, scale)
+                .ok_or(DragHostError::InvalidGrabOffset)?;
+        let position = DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
+        self.native_ops.move_window(active.native_window, position)?;
+        Ok(())
+    }
+
+    /// Closes the matching DragHost. Repeated close calls are harmless.
+    pub fn close(
+        &mut self,
+        id: DragHostId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), DragHostError> {
+        let Some(active) = self.active.take() else {
+            return Ok(());
+        };
+        if active.id != id {
+            self.active = Some(active);
+            return Err(DragHostError::NotActive(id));
+        }
+
+        if let Err(error) = self.native_ops.hide(active.native_window) {
+            tracing::debug!(
+                ?id,
+                %error,
+                "DragHost was already hidden or unavailable during close"
+            );
+        }
+        active
+            .window
+            .update(cx, |_, window, _| window.remove_window())
+            .map_err(|error| DragHostError::WindowUpdate(error.to_string()))?;
+        Ok(())
+    }
+
+    /// Returns the Dragging role for the current temporary window, if present.
+    pub fn role_for_window_id(&self, window_id: WindowId) -> Option<DockWindowRole> {
+        let active = self.active.as_ref()?;
+        (active.window_id == window_id).then_some(DockWindowRole::Dragging { id: active.id })
+    }
+
+    pub fn active_drag_host_id(&self) -> Option<DragHostId> {
+        self.active.as_ref().map(|active| active.id)
+    }
+
+    fn discard_unregistered_window(
+        &self,
+        window: &WindowHandle<DragHostSurface>,
+        native_window: NativeWindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = self.native_ops.hide(native_window);
+        let _ = window.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DragHostError {
+    #[error("a DragHost is already active")]
+    AlreadyActive,
+    #[error("the main native window has not been attached")]
+    MainWindowUnavailable,
+    #[error("the DragHost size must be positive")]
+    InvalidLogicalSize,
+    #[error("the pointer grab offset is invalid")]
+    InvalidGrabOffset,
+    #[error("the native monitor scale factor is invalid")]
+    InvalidScaleFactor,
+    #[error("the pointer position cannot be converted to GPUI screen coordinates")]
+    InvalidScreenPosition,
+    #[error("no active DragHost matches {0:?}")]
+    NotActive(DragHostId),
+    #[error("DragHost runtime identifiers are exhausted")]
+    IdExhausted,
+    #[error("GPUI could not create a DragHost window: {0}")]
+    OpenWindow(String),
+    #[error("GPUI window operation failed: {0}")]
+    WindowUpdate(String),
+    #[error(transparent)]
+    Native(#[from] NativeError),
+}
+
+struct DragHostSurface {
+    theme: DockTheme,
+}
+
+impl Render for DragHostSurface {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .bg(rgb(self.theme.colors.window_background))
+    }
+}
+
+fn valid_scale(scale: f32) -> Option<f32> {
+    (scale.is_finite() && scale > 0.0).then_some(scale)
+}
