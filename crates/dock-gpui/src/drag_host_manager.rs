@@ -365,6 +365,13 @@ impl DragHostManager {
                         %error,
                         "could not show DragHost after source placeholder was rendered"
                     );
+                    if let Err(close_error) = manager.close(id, manager_cx) {
+                        tracing::warn!(
+                            ?id,
+                            %close_error,
+                            "could not close DragHost after its delayed show failed"
+                        );
+                    }
                     manager.controller.update(manager_cx, |controller, controller_cx| {
                         if let Err(cancel_error) = controller.cancel_pointer_interaction() {
                             tracing::debug!(
@@ -375,13 +382,6 @@ impl DragHostManager {
                         }
                         controller_cx.notify();
                     });
-                    if let Err(close_error) = manager.close(id, manager_cx) {
-                        tracing::warn!(
-                            ?id,
-                            %close_error,
-                            "could not close DragHost after its delayed show failed"
-                        );
-                    }
                 }
             })
             .detach();
@@ -653,7 +653,6 @@ impl DragHostManager {
                 let _ = controller.cancel_pointer_interaction();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
-                controller.drag_mut().finish_host_session();
                 controller_cx.notify();
                 return false;
             };
@@ -701,7 +700,6 @@ impl DragHostManager {
             let _ = controller.drag_mut().session_mut().reset();
             controller.drag_mut().clear_resolver();
             controller.drag_mut().clear_layout_version();
-            controller.drag_mut().finish_host_session();
             controller_cx.notify();
             true
         });
@@ -717,15 +715,15 @@ impl DragHostManager {
     }
 
     fn cancel_active_drag(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(?id, %error, "could not close DragHost after cancellation");
+        }
         self.controller.update(cx, |controller, controller_cx| {
             if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
                 tracing::debug!(?id, %error, "could not cancel DragHost pointer interaction");
             }
             controller_cx.notify();
         });
-        if let Err(error) = self.close(id, cx) {
-            tracing::warn!(?id, %error, "could not close DragHost after cancellation");
-        }
     }
 
     /// Cancels the active content drag and restores its cached PanelView.
@@ -806,6 +804,9 @@ impl DragHostManager {
             if let Some(panel) = active.panel {
                 controller.finish_panel_view_transfer(panel);
             }
+            // The DragHost window is already removed. Only now may the cached
+            // PanelView become mountable in its final persistent Host.
+            controller.drag_mut().finish_host_session();
             controller_cx.notify();
         });
         Ok(())
