@@ -1,8 +1,7 @@
 #[path = "dock_area_header.rs"]
 mod header;
 
-use dock_core::{ColumnMode, ColumnRect, DockMetrics, NodeId, Rect};
-use std::collections::HashMap;
+use dock_core::{ColumnRect, DockMetrics, NodeId, Rect};
 
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div};
 use ui::Theme;
@@ -35,7 +34,6 @@ impl DockAreaView {
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
-        column_modes: &HashMap<NodeId, ColumnMode>,
         dragged_column: Option<NodeId>,
         metrics: DockMetrics,
         theme: Theme,
@@ -44,7 +42,6 @@ impl DockAreaView {
             id,
             area_rect,
             columns,
-            column_modes,
             dragged_column,
             metrics,
             theme,

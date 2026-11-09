@@ -5,8 +5,7 @@ mod collapse_column_button;
 #[path = "close_dock_area_button.rs"]
 mod close_dock_area_button;
 
-use dock_core::{ColumnMode, ColumnRect, DockMetrics, NodeId, Rect};
-use std::collections::HashMap;
+use dock_core::{ColumnRect, DockMetrics, NodeId, Rect};
 
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -26,7 +25,6 @@ impl DockAreaHeader {
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
-        column_modes: &HashMap<NodeId, ColumnMode>,
         dragged_column: Option<NodeId>,
         metrics: DockMetrics,
         theme: Theme,
