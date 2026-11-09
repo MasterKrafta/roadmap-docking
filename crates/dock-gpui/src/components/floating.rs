@@ -60,6 +60,7 @@ impl FloatingWindowContent {
         columns: &[ColumnRect],
         groups: &[GroupRect],
         panels: Vec<(PanelRect, Option<AnyView>)>,
+        dragged_group: Option<NodeId>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -144,6 +145,7 @@ impl FloatingWindowContent {
                 theme,
                 Some(floating.group),
                 !hide_header,
+                dragged_group,
             ));
         }
 
@@ -172,20 +174,29 @@ impl FloatingWindowContent {
                 .find(|overflow| overflow.group == group.group)
                 .cloned();
 
-            root = root.child(DockGroupView::render_core(
-                None,
-                *group,
-                strip,
-                &headers,
-                overflow,
-                presentation,
-                origin,
-                metrics,
-                0.0,
-                controller.clone(),
-                theme,
-                context_menu.clone(),
-            ));
+            if dragged_group == Some(group.group) {
+                root = root.child(DockGroupView::render_placeholder(
+                    *group,
+                    origin,
+                    metrics,
+                    theme,
+                ));
+            } else {
+                root = root.child(DockGroupView::render_core(
+                    None,
+                    *group,
+                    strip,
+                    &headers,
+                    overflow,
+                    presentation,
+                    origin,
+                    metrics,
+                    0.0,
+                    controller.clone(),
+                    theme,
+                    context_menu.clone(),
+                ));
+            }
         }
 
         // X splits and splitters outside Columns are painted once above the
