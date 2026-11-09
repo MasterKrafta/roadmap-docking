@@ -47,6 +47,7 @@ impl DockCompositionView {
         theme: Theme,
         raise_floating: Option<FloatingGroupId>,
         show_area_header: bool,
+        dragged_group: Option<NodeId>,
     ) -> impl IntoElement {
         let group_rects = groups
             .iter()
@@ -114,6 +115,7 @@ impl DockCompositionView {
                 theme,
                 raise_floating,
                 show_area_header,
+                dragged_group,
             ));
 
         surface
