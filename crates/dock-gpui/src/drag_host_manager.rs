@@ -13,13 +13,16 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    DockMetrics, DragDropAction, DragHandle, DragPayload, DragState, DropTarget, GroupRect, Node, NodeId, PanelId, PanelRect, Point, Rect, Size, TabHeaderRect, TabOverflowRect, TabStripRect,
+    DockMetrics, DragDropAction, DragHandle, DragPayload, DragState, DropTarget, GroupRect, Node,
+    NodeId, PanelId, PanelRect, Point, Rect, Size, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 
 use crate::{
-    DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost,
-    FloatingWindowManager, components::{PanelHost, context_menu::GroupMenuToggle}, dock_components::{DockGroupView, GroupPresentation, collect_group_presentations}, floating_manager::DockingWindowAtPoint,
+    components::{context_menu::GroupMenuToggle, PanelHost},
+    dock_components::{collect_group_presentations, DockGroupView, GroupPresentation},
+    floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
+    DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
 };
 
 struct ActiveDragHost {
@@ -953,8 +956,10 @@ impl Render for DragHostSurface {
         if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let session = controller.drag().host_session()?;
-                if !matches!(session.payload(), DragPayload::Group { group: active } if active == group)
-                    || session.transferred_panel().is_none()
+                if !matches!(
+                    session.payload(),
+                    DragPayload::Group { group: active } if active == group
+                ) || session.transferred_panel().is_none()
                     || !session
                         .transferred_panel()
                         .is_some_and(|panel| session.panel_view_source_detached(panel))
@@ -968,8 +973,16 @@ impl Render for DragHostSurface {
                         controller.floating_geometry(source_window_id, floating).ok()?.clone()
                     }
                 };
-                let group_rect = rects.groups.iter().find(|rect| rect.group == group).copied()?;
-                let strip = rects.tab_strips.iter().find(|strip| strip.group == group).copied()?;
+                let group_rect = rects
+                    .groups
+                    .iter()
+                    .find(|rect| rect.group == group)
+                    .copied()?;
+                let strip = rects
+                    .tab_strips
+                    .iter()
+                    .find(|strip| strip.group == group)
+                    .copied()?;
                 let headers = rects
                     .tab_headers
                     .iter()
@@ -991,11 +1004,18 @@ impl Render for DragHostSurface {
                 let presentation = presentations.get(&group)?.clone();
                 let panel = session.transferred_panel()?;
                 let panel_view = controller.panel_view_for_drag(panel);
-                let panel_rect = rects.panels.iter().find(|rect| rect.panel == panel).copied();
+                let panel_rect = rects
+                    .panels
+                    .iter()
+                    .find(|rect| rect.panel == panel)
+                    .copied();
                 let panel = panel_rect.zip(panel_view);
                 let column = controller.layout().nodes().find_map(|(id, node)| {
-                    matches!(node, Node::Column(value) if value.groups.contains(&group))
-                        .then_some(id)
+                    matches!(
+                        node,
+                        Node::Column(value) if value.groups.contains(&group)
+                    )
+                    .then_some(id)
                 });
                 Some(DragGroupPresentation {
                     group: group_rect,
