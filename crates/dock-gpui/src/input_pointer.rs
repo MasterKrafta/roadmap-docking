@@ -858,7 +858,7 @@ fn host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload)
     match (handle, payload) {
         (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
-        (Some(DragHandle::PanelTab), DragPayload::Panel { .. }) => true,
+        (Some(DragHandle::PanelTab | DragHandle::FlyoutPanel), DragPayload::Panel { .. }) => true,
         (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => true,
         _ => false,
     }
@@ -899,6 +899,7 @@ fn host_transition_required(controller: &mut DockController, pointer: Point) -> 
             let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
             DockTab::leaves_strip_zone(drag_zone, pointer)
         }
+        (Some(DragHandle::FlyoutPanel), DragPayload::Panel { .. }) => true,
         (Some(DragHandle::GroupGrip), DragPayload::Group { group }) => {
             group_drag_zone(controller, group)
                 .is_some_and(|zone| !GroupDragArea::contains(zone, pointer))
