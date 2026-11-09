@@ -560,8 +560,8 @@ pub(crate) fn finish_floating_tab_drag(
     })
 }
 
-/// Handles only the remaining legacy Main tear-offs: FlyoutPanel, Column and
-/// DockArea. PanelTab and GroupGrip content is transported by DragHost.
+/// Handles only the remaining legacy Main tear-offs: FlyoutPanel and DockArea.
+/// PanelTab, GroupGrip and ColumnHeader content is transported by DragHost.
 pub(crate) fn begin_native_tearoff(
     controller: &Entity<DockController>,
     manager: &Entity<FloatingWindowManager>,
@@ -577,25 +577,10 @@ pub(crate) fn begin_native_tearoff(
             } => (payload, controller.drag().session().handle()?, origin),
             _ => return None,
         };
-        let hide_header = match (handle, payload) {
-            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
-                column_drag_started_from_tab(controller, column, origin)
-            }
-            _ => false,
-        };
         let local_bounds = floating_bounds(controller, payload, pointer)?;
         let command = match (handle, payload) {
-            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
-                let node = controller.layout().nodes().find_map(|(id, node)| {
-                    matches!(node, Node::Panel(value) if value.panel_id == panel).then_some(id)
-                })?;
-                DockCommand::Float { node, bounds: local_bounds }
-            }
             (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => {
                 DockCommand::FloatPanelFromFlyout { panel, bounds: local_bounds }
-            }
-            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
-                DockCommand::Float { node: column, bounds: local_bounds }
             }
             (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
                 let root = controller.layout().main_area(side)?.root;
@@ -603,19 +588,18 @@ pub(crate) fn begin_native_tearoff(
             }
             _ => return None,
         };
-        Some((command, local_bounds, hide_header, payload, handle))
+        Some((command, local_bounds, payload, handle))
     });
 
-    let Some((command, local_bounds, hide_header, payload, handle)) = candidate else {
+    let Some((command, local_bounds, payload, handle)) = candidate else {
         return false;
     };
     eprintln!(
-        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) hide_header={} bounds=({:.1}, {:.1}, {:.1}, {:.1})",
+        "[DOCK-INPUT][main] native_tearoff payload={:?} handle={:?} pointer=({:.1}, {:.1}) bounds=({:.1}, {:.1}, {:.1}, {:.1})",
         payload,
         handle,
         pointer.x,
         pointer.y,
-        hide_header,
         local_bounds.origin.x,
         local_bounds.origin.y,
         local_bounds.size.width,
@@ -674,7 +658,7 @@ pub(crate) fn begin_native_tearoff(
             pointer,
             local_bounds,
             model_bounds,
-            hide_header,
+            false,
             manager_cx,
         )
     });
@@ -1045,30 +1029,6 @@ fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
         Point::new(left, top),
         Size::new(right - left, bottom - top),
     ))
-}
-
-/// True when a ColumnHeader drag was initiated from the DockTab row,
-/// rather than from ColumnDragArea. Both use the same Core handle and payload;
-/// their original pointer position distinguishes the visual grip.
-fn column_drag_started_from_tab(
-    controller: &mut DockController,
-    column: NodeId,
-    origin: Point,
-) -> bool {
-    let header_height = controller.metrics().column_header_height;
-    let source = controller
-        .geometry()
-        .ok()
-        .and_then(|rects| {
-            rects
-                .columns
-                .iter()
-                .find(|rect| rect.column == column)
-                .map(|rect| rect.rect)
-        });
-    source.is_some_and(|rect| {
-        origin.y >= rect.origin.y + header_height.min(rect.size.height)
-    })
 }
 
 /// Crops the hidden ColumnHeader out of the detached native window bounds.
