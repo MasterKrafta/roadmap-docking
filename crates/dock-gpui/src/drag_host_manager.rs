@@ -471,9 +471,7 @@ impl DragHostManager {
                     host_session.source_host(),
                     host_session.source_window_id(),
                 )))
-            })
-            .ok()
-            .flatten();
+            });
         let Some(tracking_state) = tracking_state else {
             return false;
         };
@@ -508,19 +506,12 @@ impl DragHostManager {
                     native_drag_host,
                     excluded_source_window,
                 )
-            })
-            .ok()
-            .flatten();
+            });
         let main_point = floating_manager
-            .update(cx, |manager, _| manager.core_point_for_main(cursor))
-            .ok()
-            .flatten();
-        let source_point = floating_manager
-            .update(cx, |manager, _| {
-                manager.core_point_for_drag_source(source_host, source_window_id, cursor)
-            })
-            .ok()
-            .flatten();
+            .update(cx, |manager, _| manager.core_point_for_main(cursor));
+        let source_point = floating_manager.update(cx, |manager, _| {
+            manager.core_point_for_drag_source(source_host, source_window_id, cursor)
+        });
         let source = crate::input::drag::drop_source(payload);
 
         let update = self.controller.update(cx, |controller, controller_cx| {
@@ -603,17 +594,14 @@ impl DragHostManager {
             Some((target, local_free_area_bounds))
         });
 
-        let Some((target, local_free_area_bounds)) = update.ok().flatten() else {
+        let Some((target, local_free_area_bounds)) = update else {
             self.clear_drop_preview(id, cx);
             return true;
         };
         let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
-            floating_manager
-                .update(cx, |manager, _| {
-                    manager.screen_bounds_for_drag_source(source_host, bounds)
-                })
-                .ok()
-                .flatten()
+            floating_manager.update(cx, |manager, _| {
+                manager.screen_bounds_for_drag_source(source_host, bounds)
+            })
         });
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
