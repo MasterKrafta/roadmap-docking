@@ -1101,10 +1101,12 @@ fn column_header_drag_moves_a_complete_column_between_main_docks() {
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
     assert_eq!(
         action,
-        DragDropAction::Command(DockCommand::MoveColumnToMainColumn {
+        DragDropAction::Command(DockCommand::MoveColumnToTarget {
             column: source_column,
-            side: DockSide::Right,
-            index: 0,
+            target: DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 0,
+            },
         })
     );
     let DragDropAction::Command(command) = action else {
@@ -1244,10 +1246,12 @@ fn column_header_drag_reorders_columns_within_one_main_dock() {
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
     assert_eq!(
         action,
-        DragDropAction::Command(DockCommand::MoveColumnToMainColumn {
+        DragDropAction::Command(DockCommand::MoveColumnToTarget {
             column: source_column,
-            side: DockSide::Left,
-            index: 2,
+            target: DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 2,
+            },
         })
     );
     let DragDropAction::Command(command) = action else {
@@ -1445,7 +1449,7 @@ fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
 }
 
 #[test]
-fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
+fn photoshop_main_column_moves_directly_into_an_existing_floating_column() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -1476,21 +1480,7 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
         vec![0.4, 0.6],
     );
     let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
-
     let mut layout = builder.build();
-    let float_outcome = layout
-        .apply(
-            DockCommand::Float {
-                node: source_column,
-                bounds: bounds(120.0, 140.0),
-            },
-            &metrics,
-        )
-        .unwrap();
-    let Some(crate::CommandValue::FloatingGroup(source_floating)) = float_outcome.actual_value
-    else {
-        panic!("detaching the Main Column must create its temporary Floating host");
-    };
 
     let target_rects = layout
         .compute_floating_rects(target_floating, &metrics)
@@ -1511,7 +1501,7 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
                 }
                 && zone.zone == crate::DropZone::Left
         })
-        .expect("a Floating Column must expose its left edge to another Floating Column");
+        .expect("a Floating Column must expose its left edge to a Main Column");
     let point = Point::new(
         left_zone.rect.origin.x + left_zone.rect.size.width / 2.0,
         left_zone.rect.origin.y + left_zone.rect.size.height / 2.0,
@@ -1528,8 +1518,6 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
         Some(target)
     );
 
-    // The native tear-off retains ColumnHeader + Column even though Core has
-    // already moved that Column into the temporary Floating composition.
     let request = DragDropRequest {
         payload: DragPayload::Column {
             column: source_column,
@@ -1541,41 +1529,24 @@ fn photoshop_main_column_tearoff_can_join_an_existing_floating_column() {
         floating_bounds: None,
     };
     let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    let expected = DragDropAction::Command(DockCommand::DockFloating {
-        group: source_floating,
-        target,
-    });
-    assert_eq!(action, expected);
-
-    // A drag that starts from an already-floating column uses FloatingCapture
-    // instead of the retained ColumnHeader payload, but resolves to the same Core command.
-    let capture_request = DragDropRequest {
-        payload: DragPayload::FloatingGroup {
-            group: source_floating,
-        },
-        handle: DragHandle::FloatingCapture,
-        origin: Point::ZERO,
-        point,
-        target: Some(target),
-        floating_bounds: None,
-    };
     assert_eq!(
-        layout
-            .resolve_drag_drop(&capture_request, &metrics)
-            .unwrap(),
-        expected
+        action,
+        DragDropAction::Command(DockCommand::MoveColumnToTarget {
+            column: source_column,
+            target,
+        })
     );
 
     let DragDropAction::Command(command) = action else {
-        panic!("the detached Main Column must dock into the existing Floating composition");
+        panic!("the Main Column must move directly into the Floating composition");
     };
     layout.apply(command, &metrics).unwrap();
 
-    assert!(layout.floating_group(source_floating).is_none());
+    assert!(layout.main_area(DockSide::Left).is_none());
     let target_area = layout.floating_group(target_floating).unwrap().area;
     let target_root = layout.dock_area(target_area).unwrap().root;
     let Some(Node::Split(split)) = layout.node(target_root) else {
-        panic!("joining two Floating Columns must create a horizontal composition");
+        panic!("joining a Main Column must create a horizontal Floating composition");
     };
     assert_eq!(split.axis, Axis::X);
     assert_eq!(split.children, vec![source_column, target_column]);
