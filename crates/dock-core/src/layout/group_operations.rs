@@ -476,16 +476,6 @@ impl Layout {
                 )
             }
             DropZone::Left | DropZone::Right => {
-                let (side, column_index) =
-                    self.main_column_position(column_id)
-                        .ok_or(CommandError::InvalidTarget {
-                            reason: "horizontal group splits require a column in a main dock",
-                        })?;
-                let insert_at = if zone == DropZone::Left {
-                    column_index
-                } else {
-                    column_index + 1
-                };
                 let column = self.nodes.insert(Node::Column(crate::Column {
                     width: metrics.default_column_width,
                     mode: ColumnMode::Expanded,
@@ -493,11 +483,11 @@ impl Layout {
                     group_ratios: vec![1.0],
                     last_expanded_width: Some(metrics.default_column_width),
                 }));
-                self.insert_existing_column_at(
-                    side,
-                    insert_at,
+                self.insert_column_adjacent_to_target(
                     column,
-                    Some((split_ratio, column_index)),
+                    column_id,
+                    zone,
+                    split_ratio,
                     metrics,
                 )
             }
