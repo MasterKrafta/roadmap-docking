@@ -145,7 +145,6 @@ impl CompositionHostRegistry {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum DockingWindowAtPoint {
     Main {
-        window_id: WindowId,
         point: Point,
     },
     Floating {
@@ -1067,7 +1066,6 @@ impl FloatingWindowManager {
 
         if target_native == main_native_window {
             return Some(DockingWindowAtPoint::Main {
-                window_id: main_window_id,
                 point: self.core_point_for_main(screen)?,
             });
         }
