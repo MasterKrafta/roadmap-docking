@@ -465,7 +465,7 @@ Core не менялся. `dock-components/tab.rs` не требовал изм�
 - В исходном Main/Floating Host вся Group заменяется placeholder с тем же Core-прямоугольником. Активная `PanelView` передаётся по уже используемому протоколу: source placeholder → подтверждение следующего кадра → показ DragHost.
 - Для Main и Floating используется общий drop tracking: Main → Main, Main → Floating, Floating → Main, Floating → Floating и FreeArea разрешаются через существующий Core resolver. Для FreeArea границы вычисляются по исходному прямоугольнику Group, а постоянное Floating создаётся только финальной командой при отпускании.
 - Escape и ошибки запуска используют общий путь отмены DragHost; потеря фокуса исходным Host не отменяет сессию, когда foreground принадлежит активному DragHost. Перемещение заголовка уже существующего FloatingHost не менялось.
-- Legacy-путь `PanelTab → DockCommand::Float` удалён на этапе 7: Panel передаётся только через DragHost. В этом подэтапе удалены ветка `GroupGrip → DockCommand::Float` из `begin_native_tearoff` и Group-источник из native drop resolver `FloatingWindowManager`. Старый механизм остаётся только для ещё не переведённых FlyoutPanel, Column и Main DockArea.
+- Legacy-путь `PanelTab → DockCommand::Float` удалён на этапе 7: Panel передаётся только через DragHost. В этом подэтапе удалены ветка `GroupGrip → DockCommand::Float` из `begin_native_tearoff` и Group-источник из native drop resolver `FloatingWindowManager`. После этапа 8.2 старый tear-off остаётся только для FlyoutPanel и Main DockArea.
 
 Core не менялся.
 
@@ -486,6 +486,30 @@ Core не менялся.
 - drop переносит Column как единое поддерево;
 - проверить Photoshop-ограничения для горизонтального объединения целых Column-композиций;
 - не превращать перенос Column в набор независимых переносов Group.
+
+**Фактически внедрено:**
+
+- У каждой Column появился отдельный grip шириной 24 px в левой части общего заголовка. Он доступен и для развёрнутой, и для свёрнутой/rail-колонки. Остальная область заголовка сохраняет прежнюю роль: перемещение целой Main DockArea или существующего Floating-окна.
+- Main и Floating запускают один `begin_column_drag_host` после перехода Core-сессии через drag threshold. Источник сохраняется как исходный `DragSourceHost`, payload и handle остаются `DragPayload::Column` и `DragHandle::ColumnHeader`.
+- Controller собирает PanelId активной вкладки каждой Group в исходной Column. Одна DragHost-сессия передаёт весь этот набор cached `PanelView`; Column не раскладывается на независимые Group-переносы.
+- В исходном Host вся Column заменяется placeholder с прежним прямоугольником. Main/Floating подтверждают отключение каждого активного представления только после кадра с placeholder; DragHost показывается после подтверждения всего набора.
+- DragHost строит полную презентацию через существующий `DockCompositionView::render_column`: Groups, tab strips/headers/overflow, активные PanelView, Column splitters и vertical overflow. Геометрия переводится в локальную систему координат исходной Column.
+- Drop продолжает использовать исходный `DropSource::Column` и существующий Core resolver. Legacy-переход `ColumnHeader → DockCommand::Float` удалён; отдельная Column не создаёт постоянное Floating при пересечении порога. Постоянное Floating для FreeArea появляется только в результате финального drop.
+- Из legacy native resolver удалён Column payload. Перемещение уже существующего целого FloatingGroup не менялось: это отдельный жест и отдельный payload.
+- Добавлены тесты на геометрию Column grip и передачу нескольких PanelId одной DragHost-сессией.
+
+Core не менялся. Этап 8.3 (Main DockArea) не начинался.
+
+**Локальная проверка этапа 8.2:**
+
+1. `cargo fmt --all -- --check`
+2. `cargo check -p dock-gpui`
+3. `cargo test -p dock-gpui`
+4. Проверить Column Main → Main, Main → Floating, Floating → Main, Floating → Floating, FreeArea и Escape. Отдельно проверить Column с несколькими Groups, свёрнутую/rail-колонку, исходный placeholder, отсутствие двойного монтирования PanelView и то, что общий DockArea header по-прежнему перемещает целую композицию.
+
+Проверки не запускались: их выполняет пользователь в локальном окружении.
+
+**Критерий готовности:** Column любого режима переносится через DragHost как одно Core-поддерево; все активные cached PanelView передаются безопасно, а старый tear-off не участвует в переносе Column.
 
 ### 8.3. Main DockArea
 
@@ -633,4 +657,4 @@ Core не менялся.
 
 Новый план заменяет именно эту транспортную часть. Уже реализованные Core-правила DropTarget, геометрии и стыковки нужно сохранить там, где они подходят новой схеме. Код предыдущих этапов не удаляется заранее: его судьба определяется на Этапе 10 после локальной проверки DragHost.
 
-**Текущая точка: Этап 8.1 — перенос Group через DragHost реализован на `main` и ожидает локальных проверок; после подтверждения начинается этап 8.2 (Column). По просьбе пользователя переход к этапу 8 начат до отдельного подтверждения локальных проверок этапа 7.**
+**Текущая точка: Этап 8.2 — перенос Column через DragHost реализован на `main` и ожидает локальных проверок; после подтверждения начинается этап 8.3 (Main DockArea). Этап 8.1 пользователь проверил и подтвердил. По просьбе пользователя переход к этапу 8 начат до отдельного подтверждения локальных проверок этапа 7.**
