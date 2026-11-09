@@ -1369,7 +1369,6 @@ impl Render for FloatingHost {
         root = root.capture_key_down(move |event, window, app| {
             if context_menu_is_open
                 || !event.keystroke.key.eq_ignore_ascii_case("escape")
-                || tab_press_for_escape.get().is_none()
             {
                 return;
             }
@@ -1377,6 +1376,23 @@ impl Render for FloatingHost {
                 if manager.update(app, |manager, _| manager.native_move_active()) {
                     return;
                 }
+                let drag_host_manager =
+                    manager.update(app, |manager, _| manager.drag_host_manager());
+                if drag_host_manager.is_some_and(|drag_host| {
+                    drag_host.update(app, |manager, manager_cx| {
+                        manager.cancel_active(manager_cx)
+                    })
+                }) {
+                    tab_press_for_escape.set(None);
+                    if DockInteractionCoordinator::has_capture(&pointer_capture_for_escape) {
+                        DockInteractionCoordinator::release(window, &pointer_capture_for_escape);
+                    }
+                    app.stop_propagation();
+                    return;
+                }
+            }
+            if tab_press_for_escape.get().is_none() {
+                return;
             }
             tab_press_for_escape.set(None);
             DockInteractionCoordinator::cancel_on_escape(
