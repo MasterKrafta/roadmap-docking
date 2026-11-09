@@ -142,7 +142,6 @@ mod tests {
     #[test]
     fn drag_host_session_keeps_original_payload_and_source_separate_from_transport() {
         use dock_core::{DragHandle, DragPayload, PanelId};
-        use slotmap::Key as _;
 
         let panel = PanelId::null();
         let source_group = FloatingGroupId::null();
@@ -155,12 +154,18 @@ mod tests {
 
         assert_eq!(session.payload(), DragPayload::Panel { panel });
         assert_eq!(session.handle(), DragHandle::PanelTab);
-        assert_eq!(session.source_host(), super::DragSourceHost::Floating { group: source_group });
+        assert_eq!(
+            session.source_host(),
+            super::DragSourceHost::Floating { group: source_group }
+        );
         assert_eq!(session.transport_host(), None);
 
         assert!(session.attach_transport_host(drag_host));
         assert_eq!(session.transport_host(), Some(drag_host));
-        assert_eq!(session.transport_role(), Some(DockWindowRole::Dragging { id: drag_host }));
+        assert_eq!(
+            session.transport_role(),
+            Some(DockWindowRole::Dragging { id: drag_host })
+        );
         assert_eq!(session.payload(), DragPayload::Panel { panel });
         assert_eq!(session.source_host(), super::DragSourceHost::Floating { group: source_group });
 
