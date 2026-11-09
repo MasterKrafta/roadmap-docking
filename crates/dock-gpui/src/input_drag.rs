@@ -213,6 +213,88 @@ pub(crate) fn begin_panel_drag_host(
     }
 }
 
+/// Starts DragHost for an active GroupGrip gesture, transferring the Group's
+/// active cached PanelView while preserving the complete tab-strip presentation.
+pub(crate) fn begin_group_drag_host(
+    controller: &Entity<DockController>,
+    drag_host_manager: &Entity<DragHostManager>,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (group, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::Group { group },
+                origin,
+                ..
+            } if controller.drag().session().handle() == Some(DragHandle::GroupGrip) => {
+                (group, origin)
+            }
+            _ => return None,
+        };
+        let host_session = controller.drag().host_session()?;
+        let source_host = host_session.source_host();
+        let source_window_id = host_session.source_window_id()?;
+        let group_rect = match source_host {
+            DragSourceHost::Main => controller
+                .geometry()
+                .ok()?
+                .groups
+                .iter()
+                .find(|rect| rect.group == group)
+                .copied()?,
+            DragSourceHost::Floating { group: floating } => controller
+                .floating_geometry(source_window_id, floating)
+                .ok()?
+                .groups
+                .iter()
+                .find(|rect| rect.group == group)
+                .copied()?,
+        };
+        let panel = match controller.layout().node(group) {
+            Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
+                match controller.layout().node(child) {
+                    Some(Node::Panel(panel)) => Some(panel.panel_id),
+                    _ => None,
+                }
+            })?,
+            _ => return None,
+        };
+        let grab_offset = Point::new(
+            (origin.x - group_rect.rect.origin.x)
+                .clamp(0.0, group_rect.rect.size.width),
+            (origin.y - group_rect.rect.origin.y)
+                .clamp(0.0, group_rect.rect.size.height),
+        );
+        Some((group, panel, grab_offset, group_rect.rect.size))
+    });
+    let Some((group, panel, grab_offset, logical_size)) = candidate else {
+        tracing::debug!("GroupGrip drag has no valid source geometry for DragHost");
+        controller.update(app, |controller, cx| {
+            if let Err(error) = controller.cancel_pointer_interaction() {
+                tracing::debug!(%error, "could not cancel Group drag without source geometry");
+            }
+            cx.notify();
+        });
+        return false;
+    };
+
+    match drag_host_manager.update(app, |manager, manager_cx| {
+        manager.open_group_at_cursor(group, panel, grab_offset, logical_size, manager_cx)
+    }) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, "could not start Group DragHost");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed Group DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+    }
+}
+
 /// Updates a tab drag that started inside a floating host. The resolver is
 /// built from that host's own local geometry, not from the main DockHost.
 pub(crate) fn update_floating_tab_drag(
