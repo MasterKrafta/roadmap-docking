@@ -112,6 +112,13 @@ impl DragHostManager {
             .validate_positive()
             .map_err(|_| DragHostError::InvalidLogicalSize)?;
 
+        let id = DragHostId::from_raw(self.next_id);
+        let next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(DragHostError::IdExhausted)?;
+        self.next_id = next_id;
+
         let cursor = self.native_ops.cursor_position()?;
         let owner_scale = valid_scale(self.native_ops.scale_factor(owner)?)
             .ok_or(DragHostError::InvalidScaleFactor)?;
@@ -185,17 +192,24 @@ impl DragHostManager {
 
         // The destination monitor may use a different DPI from MainHost.
         let destination_scale = match self.native_ops.scale_factor(native_window) {
-            Ok(scale) => valid_scale(scale).ok_or(DragHostError::InvalidScaleFactor)?,
+            Ok(scale) => match valid_scale(scale) {
+                Some(scale) => scale,
+                None => {
+                    self.discard_unregistered_window(&window, native_window, cx);
+                    return Err(DragHostError::InvalidScaleFactor);
+                }
+            },
             Err(error) => {
                 self.discard_unregistered_window(&window, native_window, cx);
                 return Err(DragHostError::Native(error));
             }
         };
-        let physical_size = DockGeometry::physical_size_from_logical(
-            logical_size,
-            destination_scale,
-        )
-        .ok_or(DragHostError::InvalidLogicalSize)?;
+        let Some(physical_size) =
+            DockGeometry::physical_size_from_logical(logical_size, destination_scale)
+        else {
+            self.discard_unregistered_window(&window, native_window, cx);
+            return Err(DragHostError::InvalidLogicalSize);
+        };
         if let Err(error) = self.native_ops.resize_window(native_window, physical_size) {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::Native(error));
@@ -206,11 +220,6 @@ impl DragHostManager {
             return Err(DragHostError::Native(error));
         }
 
-        let id = DragHostId::from_raw(self.next_id);
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or(DragHostError::IdExhausted)?;
         self.active = Some(ActiveDragHost {
             id,
             window,
