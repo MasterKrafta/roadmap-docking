@@ -6,10 +6,10 @@ use gpui::{
 use ui::Theme;
 
 
-/// Reusable tab header. The shared DockHost/FloatingHost pointer pipelines
-/// handle its drag gesture from Core tab geometry. In the main DockHost, leaving
-/// the DockTab drag zone detaches the Panel into WindowKind::Floating;
-/// DockAreaHeader remains hidden until the native move ends on mouse release.
+/// Reusable tab header. The shared Main/Floating Host pointer pipelines
+/// handle activation and drag from Core tab geometry. Leaving the tab strip
+/// transfers the same cached PanelView into the temporary DragHost; the logical
+/// Panel stays in its original Group until the final drop command is dispatched.
 pub struct DockTab;
 
 impl DockTab {
