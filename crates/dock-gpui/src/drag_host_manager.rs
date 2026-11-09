@@ -1024,35 +1024,75 @@ impl Render for DragHostSurface {
                     {
                         return None;
                     }
-                    (session.source_host(), session.source_window_id()?, session.transferred_panels().to_vec())
+                    (
+                        session.source_host(),
+                        session.source_window_id()?,
+                        session.transferred_panels().to_vec(),
+                    )
                 };
                 let rects = match source_host {
                     DragSourceHost::Main => controller.geometry().ok()?.clone(),
-                    DragSourceHost::Floating { group } => {
-                        controller.floating_geometry(source_window_id, group).ok()?.clone()
-                    }
+                    DragSourceHost::Floating { group } => controller
+                        .floating_geometry(source_window_id, group)
+                        .ok()?
+                        .clone(),
                 };
-                let source_column = rects.columns.iter().find(|rect| rect.column == column).copied()?;
+                let source_column = rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .copied()?;
                 let Some(Node::Column(column_model)) = controller.layout().node(column) else {
                     return None;
                 };
                 let group_ids = column_model.groups.clone();
                 let group_id_set = group_ids.iter().copied().collect::<HashSet<_>>();
-                let group_rects = rects.groups.iter()
+                let group_rects = rects
+                    .groups
+                    .iter()
                     .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| GroupRect::new(rect.group, translate_rect(rect.rect, source_column.rect.origin)))
+                    .map(|rect| {
+                        GroupRect::new(
+                            rect.group,
+                            translate_rect(rect.rect, source_column.rect.origin),
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let strip_rects = rects.tab_strips.iter()
+                let strip_rects = rects
+                    .tab_strips
+                    .iter()
                     .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| TabStripRect::new(rect.group, translate_rect(rect.rect, source_column.rect.origin)))
+                    .map(|rect| {
+                        TabStripRect::new(
+                            rect.group,
+                            translate_rect(rect.rect, source_column.rect.origin),
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let header_rects = rects.tab_headers.iter()
+                let header_rects = rects
+                    .tab_headers
+                    .iter()
                     .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| TabHeaderRect::new(rect.group, rect.panel, rect.index, translate_rect(rect.rect, source_column.rect.origin)))
+                    .map(|rect| {
+                        TabHeaderRect::new(
+                            rect.group,
+                            rect.panel,
+                            rect.index,
+                            translate_rect(rect.rect, source_column.rect.origin),
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let overflow_rects = rects.tab_overflows.iter()
+                let overflow_rects = rects
+                    .tab_overflows
+                    .iter()
                     .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| TabOverflowRect::new(rect.group, translate_rect(rect.button_rect, source_column.rect.origin), rect.hidden_tabs.clone()))
+                    .map(|rect| {
+                        TabOverflowRect::new(
+                            rect.group,
+                            translate_rect(rect.button_rect, source_column.rect.origin),
+                            rect.hidden_tabs.clone(),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let presentations = collect_group_presentations(
                     controller.layout(),
@@ -1060,17 +1100,39 @@ impl Render for DragHostSurface {
                     &group_id_set,
                     Some(&rects),
                 );
-                let panel_rects = rects.panels.iter()
+                let panel_rects = rects
+                    .panels
+                    .iter()
                     .filter(|rect| panels.contains(&rect.panel))
                     .filter_map(|rect| {
                         let view = controller.panel_view_for_drag(rect.panel)?;
-                        Some((PanelRect::new(rect.panel, translate_rect(rect.rect, source_column.rect.origin)), Some(view)))
+                        Some((
+                            PanelRect::new(
+                                rect.panel,
+                                translate_rect(rect.rect, source_column.rect.origin),
+                            ),
+                            Some(view),
+                        ))
                     })
                     .collect::<Vec<_>>();
-                let local_column = ColumnRect::new(column, translate_rect(source_column.rect, source_column.rect.origin));
-                let splitters = rects.splitters.iter()
-                    .filter(|splitter| splitter.owner == column && splitter.axis == dock_core::Axis::Y)
-                    .map(|splitter| SplitterRect::new(splitter.owner, splitter.boundary_index, splitter.axis, translate_rect(splitter.rect, source_column.rect.origin)))
+                let local_column = ColumnRect::new(
+                    column,
+                    translate_rect(source_column.rect, source_column.rect.origin),
+                );
+                let splitters = rects
+                    .splitters
+                    .iter()
+                    .filter(|splitter| {
+                        splitter.owner == column && splitter.axis == dock_core::Axis::Y
+                    })
+                    .map(|splitter| {
+                        SplitterRect::new(
+                            splitter.owner,
+                            splitter.boundary_index,
+                            splitter.axis,
+                            translate_rect(splitter.rect, source_column.rect.origin),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let vertical_overflow = rects.vertical_overflow.iter()
                     .filter(|overflow| overflow.owner == column)
