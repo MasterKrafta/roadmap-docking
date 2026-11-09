@@ -51,6 +51,7 @@ fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
         handle,
         Some(
             DragHandle::PanelTab
+                | DragHandle::FlyoutPanel
                 | DragHandle::GroupGrip
                 | DragHandle::ColumnHeader
                 | DragHandle::DockAreaHeader
@@ -1068,10 +1069,12 @@ mod main_drop_resolution_tests {
     use super::main_drag_uses_drop_targets;
 
     #[test]
-    fn main_tab_group_and_column_tearoffs_do_not_resolve_drop_targets() {
+    fn main_content_drags_defer_drop_target_resolution_to_drag_host() {
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::PanelTab)));
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::FlyoutPanel)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::ColumnHeader)));
+        assert!(!main_drag_uses_drop_targets(Some(DragHandle::DockAreaHeader)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::FloatingTitle)));
     }
 
