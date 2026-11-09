@@ -244,6 +244,9 @@ impl Render for DockHost {
                     manager.attach_main_window(window)
                 });
         }
+        floating_manager.update(cx, |manager, _| {
+            manager.attach_drag_host_manager(drag_host_manager.downgrade());
+        });
 
         let focus_handle = self
             .root_focus_handle
@@ -665,6 +668,7 @@ impl Render for DockHost {
                         pointer_context_menu.clone(),
                         crate::input::PointerEventState {
                             manager: floating_manager_for_pointer_events.clone(),
+                            drag_host_manager: drag_host_manager.clone(),
                             pointer_capture: pointer_capture.clone(),
                             pointer_press: pointer_press_for_events.clone(),
                         },
@@ -738,10 +742,21 @@ impl Render for DockHost {
         {
             let controller_for_escape = self.controller.clone();
             let manager_for_escape = floating_manager.clone();
+            let drag_host_for_escape = drag_host_manager.clone();
             let pointer_capture_for_escape = self.pointer_capture.clone();
             let pointer_press_for_escape = self.pointer_press.clone();
             workspace = workspace.capture_key_down(move |event, window, app| {
                 if context_menu_is_open || !event.keystroke.key.eq_ignore_ascii_case("escape") {
+                    return;
+                }
+                if drag_host_for_escape.update(app, |manager, manager_cx| {
+                    manager.cancel_active(manager_cx)
+                }) {
+                    pointer_press_for_escape.set(None);
+                    if DockInteractionCoordinator::has_capture(&pointer_capture_for_escape) {
+                        DockInteractionCoordinator::release(window, &pointer_capture_for_escape);
+                    }
+                    app.stop_propagation();
                     return;
                 }
                 if manager_for_escape.update(app, |manager, _| manager.native_move_active()) {
