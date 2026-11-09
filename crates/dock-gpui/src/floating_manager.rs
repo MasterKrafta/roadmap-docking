@@ -596,8 +596,8 @@ impl FloatingWindowManager {
     }
 
     /// Starts native movement for a persistent Floating window created by a legacy
-    /// Panel or Column tear-off.
-    /// PanelTab tear-offs may hide DockAreaHeader until this native move finishes.
+    /// FlyoutPanel, Column, or Main DockArea tear-off.
+    /// PanelTab DragHost transfers and Group DragHost transfers never enter this path.
     /// ColumnHeader drags hide the header only when they start on DockTab, not ColumnDragArea.
     pub(crate) fn begin_tearoff_move(
         &mut self,
