@@ -104,7 +104,7 @@ DragHost нужен для переноса **содержимого** из од
 - новый `DragHostManager` отвечает за создание, показ, позиционирование и закрытие временных DragHost;
 - единая маршрутизация окон знает MainHost, FloatingHost и временные DragHost, но при поиске drop-цели исключает DragHost.
 
-DragHostManager не владеет Layout, PanelRegistry или отдельными экземплярами PanelView. Он получает необходимое представление из общего DockController.
+**Решение по владению:** `DockHost` владеет `DragHostManager` как отдельной GPUI-сущностью, на одном уровне с `FloatingWindowManager`. Оба менеджера получают одну и ту же `Entity<DockController>`. DragHostManager не вкладывается в FloatingWindowManager, не владеет Layout, PanelRegistry или отдельными экземплярами PanelView и не создаёт параллельную модель.
 
 ### 5.3. Данные DragHost-сессии
 
@@ -189,6 +189,8 @@ Runtime-сессия должна хранить как минимум:
 3. Определить владельца DragHostManager и способ связи с общим DockController.
 4. Зафиксировать правило: DragHost не регистрируется как FloatingGroup и не создаёт Core DockArea.
 5. Не менять существующие `begin_native_tearoff`, `DockCommand::Float` и drop-поведение.
+
+**Фактически внедрено:** в `crates/dock-gpui/src/drag_host.rs` добавлены `DragHostId` и `DockWindowRole::{Main, Floating, Dragging}`; типы экспортированы из `dock-gpui`. Владелец будущего DragHostManager определён как `DockHost`, менеджер будет соседом `FloatingWindowManager` и получит общий `DockController`. Текущий жизненный цикл tear-off при этом не подключён к новым типам.
 
 **Критерий готовности:** новые типы описывают временный хост, но приложение работает по старой схеме.
 
