@@ -195,7 +195,7 @@ impl DragController {
     pub(crate) fn panel_view_is_transferred(&self, panel: PanelId) -> bool {
         self.host_session
             .as_ref()
-            .is_some_and(|session| session.transferred_panel() == Some(panel))
+            .is_some_and(|session| session.transferred_panels().contains(&panel))
     }
 
     pub(crate) fn panel_view_source_detached(&self, panel: PanelId) -> bool {
@@ -457,17 +457,81 @@ impl DockController {
                 .is_some_and(|session| session.begin_group_view_transfer(group, panel))
     }
 
+    pub(crate) fn can_begin_column_view_transfer(
+        &self,
+        column: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        let Some(Node::Column(value)) = self.layout.node(column) else {
+            return false;
+        };
+        if self
+            .layout
+            .flyout()
+            .is_some_and(|flyout| flyout.column == column)
+        {
+            return false;
+        }
+
+        let active_panels = value
+            .groups
+            .iter()
+            .filter_map(|group| match self.layout.node(*group) {
+                Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
+                    match self.layout.node(child) {
+                        Some(Node::Panel(panel)) => Some(panel.panel_id),
+                        _ => None,
+                    }
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        active_panels == panels
+            && panels.iter().all(|panel| self.panel_views.get(*panel).is_some())
+            && self
+                .drag
+                .host_session()
+                .is_some_and(|session| session.can_begin_column_view_transfer(column, panels))
+    }
+
+    pub(crate) fn begin_column_view_transfer(
+        &mut self,
+        column: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        self.can_begin_column_view_transfer(column, panels)
+            && self
+                .drag
+                .host_session
+                .as_mut()
+                .is_some_and(|session| session.begin_column_view_transfer(column, panels))
+    }
+
     /// Returns the Group replaced by a DragHost placeholder in this persistent source window.
     pub(crate) fn dragged_group_from(&self, source_window_id: WindowId) -> Option<NodeId> {
         let session = self.drag.host_session()?;
         if session.source_window_id() != Some(source_window_id)
             || session.transport_host().is_none()
-            || session.transferred_panel().is_none()
+            || session.transferred_panels().is_empty()
         {
             return None;
         }
         match session.payload() {
             DragPayload::Group { group } => Some(group),
+            _ => None,
+        }
+    }
+
+    /// Returns the Column replaced by a DragHost placeholder in this persistent source window.
+    pub(crate) fn dragged_column_from(&self, source_window_id: WindowId) -> Option<NodeId> {
+        let session = self.drag.host_session()?;
+        if session.source_window_id() != Some(source_window_id)
+            || session.transport_host().is_none()
+        {
+            return None;
+        }
+        match session.payload() {
+            DragPayload::Column { column } => Some(column),
             _ => None,
         }
     }
@@ -480,15 +544,31 @@ impl DockController {
             .flatten()
     }
 
+    pub(crate) fn pending_panel_view_transfers_from(
+        &self,
+        source_window_id: WindowId,
+    ) -> Vec<PanelId> {
+        let Some(session) = self.drag.host_session() else {
+            return Vec::new();
+        };
+        if session.source_window_id() != Some(source_window_id) {
+            return Vec::new();
+        }
+        session
+            .transferred_panels()
+            .iter()
+            .copied()
+            .filter(|panel| !session.panel_view_source_detached(*panel))
+            .collect()
+    }
+
     pub(crate) fn pending_panel_view_transfer_from(
         &self,
         source_window_id: WindowId,
     ) -> Option<PanelId> {
-        let session = self.drag.host_session()?;
-        let panel = session.transferred_panel()?;
-        (session.source_window_id() == Some(source_window_id)
-            && !session.panel_view_source_detached(panel))
-        .then_some(panel)
+        self.pending_panel_view_transfers_from(source_window_id)
+            .into_iter()
+            .next()
     }
 
     pub(crate) fn confirm_panel_view_source_detached(

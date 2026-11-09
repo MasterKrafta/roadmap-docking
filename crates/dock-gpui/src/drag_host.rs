@@ -71,15 +71,15 @@ pub enum DragSourceHost {
 /// The semantic payload and handle remain the original source values. The
 /// optional DragHostId identifies only the temporary presentation surface and
 /// never replaces the source host or the Core payload.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DragHostSession {
     payload: dock_core::DragPayload,
     handle: dock_core::DragHandle,
     source_host: DragSourceHost,
     source_window_id: Option<WindowId>,
     transport_host: Option<DragHostId>,
-    transferred_panel: Option<PanelId>,
-    source_detached: bool,
+    transferred_panels: Vec<PanelId>,
+    detached_panels: Vec<PanelId>,
 }
 
 impl DragHostSession {
@@ -96,8 +96,8 @@ impl DragHostSession {
             source_host,
             source_window_id,
             transport_host: None,
-            transferred_panel: None,
-            source_detached: false,
+            transferred_panels: Vec::new(),
+            detached_panels: Vec::new(),
         }
     }
 
@@ -126,15 +126,27 @@ impl DragHostSession {
         }
     }
 
-    /// Returns the Panel whose cached view is currently presented by DragHost.
-    pub const fn transferred_panel(&self) -> Option<PanelId> {
-        self.transferred_panel
+    /// Returns the cached PanelViews currently transported by DragHost.
+    pub fn transferred_panels(&self) -> &[PanelId] {
+        &self.transferred_panels
+    }
+
+    /// Returns the first transported Panel for single-panel compatibility.
+    pub fn transferred_panel(&self) -> Option<PanelId> {
+        self.transferred_panels.first().copied()
+    }
+
+    /// Returns whether every transferred PanelView has left its source host.
+    pub fn all_panel_views_source_detached(&self) -> bool {
+        self.transferred_panels
+            .iter()
+            .all(|panel| self.detached_panels.contains(panel))
     }
 
     pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
         self.handle == dock_core::DragHandle::PanelTab
             && matches!(self.payload, dock_core::DragPayload::Panel { panel: active } if active == panel)
-            && self.transferred_panel.is_none()
+            && self.transferred_panels.is_empty()
     }
 
     pub(crate) fn can_begin_group_view_transfer(
@@ -144,7 +156,7 @@ impl DragHostSession {
     ) -> bool {
         self.handle == dock_core::DragHandle::GroupGrip
             && matches!(self.payload, dock_core::DragPayload::Group { group: active } if active == group)
-            && self.transferred_panel.is_none()
+            && self.transferred_panels.is_empty()
     }
 
     pub(crate) fn begin_group_view_transfer(
@@ -155,8 +167,32 @@ impl DragHostSession {
         if self.transport_host.is_none() || !self.can_begin_group_view_transfer(group, panel) {
             return false;
         }
-        self.transferred_panel = Some(panel);
-        self.source_detached = false;
+        self.transferred_panels.push(panel);
+        true
+    }
+
+    pub(crate) fn can_begin_column_view_transfer(
+        &self,
+        column: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        self.handle == dock_core::DragHandle::ColumnHeader
+            && matches!(self.payload, dock_core::DragPayload::Column { column: active } if active == column)
+            && self.transferred_panels.is_empty()
+            && panels.iter().enumerate().all(|(index, panel)| !panels[..index].contains(panel))
+    }
+
+    pub(crate) fn begin_column_view_transfer(
+        &mut self,
+        column: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        if self.transport_host.is_none()
+            || !self.can_begin_column_view_transfer(column, panels)
+        {
+            return false;
+        }
+        self.transferred_panels.extend_from_slice(panels);
         true
     }
 
@@ -164,14 +200,13 @@ impl DragHostSession {
         if self.transport_host.is_none() || !self.can_begin_panel_view_transfer(panel) {
             return false;
         }
-        self.transferred_panel = Some(panel);
-        self.source_detached = false;
+        self.transferred_panels.push(panel);
         true
     }
 
-    /// Returns whether the source host has rendered its placeholder frame.
+    /// Returns whether this PanelView has left its source host.
     pub fn panel_view_source_detached(&self, panel: PanelId) -> bool {
-        self.transferred_panel == Some(panel) && self.source_detached
+        self.transferred_panels.contains(&panel) && self.detached_panels.contains(&panel)
     }
 
     pub(crate) fn confirm_panel_view_source_detached(
@@ -179,22 +214,22 @@ impl DragHostSession {
         panel: PanelId,
         source_window_id: WindowId,
     ) -> bool {
-        if self.transferred_panel != Some(panel)
+        if !self.transferred_panels.contains(&panel)
             || self.source_window_id != Some(source_window_id)
-            || self.source_detached
+            || self.detached_panels.contains(&panel)
         {
             return false;
         }
-        self.source_detached = true;
+        self.detached_panels.push(panel);
         true
     }
 
     pub(crate) fn finish_panel_view_transfer(&mut self, panel: PanelId) -> bool {
-        if self.transferred_panel != Some(panel) {
+        if !self.transferred_panels.contains(&panel) {
             return false;
         }
-        self.transferred_panel = None;
-        self.source_detached = false;
+        self.transferred_panels.retain(|active| *active != panel);
+        self.detached_panels.retain(|active| *active != panel);
         true
     }
 
@@ -254,6 +289,7 @@ mod tests {
         assert_eq!(session.source_window_id(), None);
         assert_eq!(session.transport_host(), None);
         assert_eq!(session.transferred_panel(), None);
+        assert!(session.transferred_panels().is_empty());
         assert!(!session.panel_view_source_detached(panel));
         assert!(session.can_begin_panel_view_transfer(panel));
         assert!(!session.begin_panel_view_transfer(panel));
@@ -266,6 +302,7 @@ mod tests {
         );
         assert!(session.begin_panel_view_transfer(panel));
         assert_eq!(session.transferred_panel(), Some(panel));
+        assert_eq!(session.transferred_panels(), &[panel]);
         assert!(!session.panel_view_source_detached(panel));
         assert!(!session.begin_panel_view_transfer(panel));
         assert_eq!(session.payload(), DragPayload::Panel { panel });
@@ -277,6 +314,7 @@ mod tests {
         assert!(!session.finish_panel_view_transfer(other_panel));
         assert!(session.finish_panel_view_transfer(panel));
         assert_eq!(session.transferred_panel(), None);
+        assert!(session.transferred_panels().is_empty());
         assert!(!session.panel_view_source_detached(panel));
         assert!(!session.clear_transport_host(DragHostId::from_raw(12)));
         assert!(session.clear_transport_host(drag_host));
