@@ -407,22 +407,24 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
 
-        if active.visible {
-            if let Err(error) = self.native_ops.hide(active.native_window) {
+        let still_visible = match self.native_ops.hide(active.native_window) {
+            Ok(()) => false,
+            Err(error) => {
                 tracing::debug!(
                     ?id,
                     %error,
-                    "DragHost was already hidden or unavailable during close"
+                    "DragHost could not be confirmed hidden during close"
                 );
+                true
             }
-        }
+        };
 
         if let Err(error) = active
             .window
             .update(cx, |_, window, _| window.remove_window())
         {
             self.active = Some(ActiveDragHost {
-                visible: false,
+                visible: still_visible,
                 ..active
             });
             return Err(DragHostError::WindowUpdate(error.to_string()));
