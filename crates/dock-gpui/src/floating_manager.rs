@@ -993,9 +993,6 @@ impl FloatingWindowManager {
         // The target may belong to the main window or another floating window.
         // Both have already resolved their own local coordinates into a Core target.
         let drop_target = state.drop_target.map(|target| (target.target, target.point));
-        let is_free_release = drop_target
-            .is_none_or(|(target, _)| target == DropTarget::FreeArea);
-
         let mut floating_bounds = self.controller.update(cx, |controller, _| {
             controller
                 .layout()
@@ -1018,10 +1015,6 @@ impl FloatingWindowManager {
             )
         });
         if let Err(error) = result {
-            if let Some((client_size, position)) = rollback_header_expansion {
-                let _ = self.native_ops.resize_window(state.native_window, client_size);
-                let _ = self.native_ops.move_window(state.native_window, position);
-            }
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
         }
