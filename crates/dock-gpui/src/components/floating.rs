@@ -289,8 +289,8 @@ struct FloatingHostSnapshot {
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
 
-/// Floating tab drags detach one Panel after leaving the source strip or
-/// entering another docking window. The shared DockAreaHeader moves the whole window.
+/// Floating tab drags transfer one Panel to DragHost after leaving the source strip
+/// or entering another docking window. The shared DockAreaHeader moves the whole window.
 fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool) -> bool {
     leaves_source || over_other_window
 }
