@@ -595,8 +595,9 @@ impl FloatingWindowManager {
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
     }
 
-    /// Starts native movement for a group created by the current main-window drag.
-    /// PanelTab and GroupGrip tear-offs hide DockAreaHeader until this native move finishes.
+    /// Starts native movement for a persistent Floating window created by a legacy
+    /// Panel or Column tear-off.
+    /// PanelTab tear-offs may hide DockAreaHeader until this native move finishes.
     /// ColumnHeader drags hide the header only when they start on DockTab, not ColumnDragArea.
     pub(crate) fn begin_tearoff_move(
         &mut self,
@@ -941,11 +942,9 @@ impl FloatingWindowManager {
                 _ => return None,
             };
             match payload {
-                // A tear-off keeps the original logical source. state.group is
-                // only the temporary native host and must never be used to
-                // reconstruct whether the user dragged a Panel, Group or Column.
+                // A legacy tear-off keeps the original logical source. state.group is
+                // only the temporary native host and must never replace its payload.
                 DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
-                DragPayload::Group { group } => Some(DropSource::Group { group }),
                 DragPayload::Column { column } => Some(DropSource::Column { column }),
                 DragPayload::DockArea { .. } => None,
                 // An already-floating window is a different gesture: its entire
@@ -1194,10 +1193,10 @@ impl FloatingWindowManager {
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
-        // A DockTab or GroupGrip tear-off temporarily crops ColumnHeader from the native
+        // A PanelTab tear-off may temporarily crop ColumnHeader from the native
         // client area. When the pointer is released into free space, restore
         // that client height and move the top edge up by exactly the same
-        // physical amount. The Group/tab row therefore stays stationary.
+        // physical amount. The tab row therefore stays stationary.
         let mut rollback_header_expansion = None;
         let mut native_bounds_changed = false;
         if state.kind == NativeMoveKind::TearOff && state.hide_header && is_free_release {
