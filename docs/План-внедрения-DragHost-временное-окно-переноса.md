@@ -432,6 +432,8 @@ Core не менялся. Native move/resize заголовка постоянн
 - Для переноса используется та же cached `PanelView`. Исходный Host сохраняет геометрию и подтверждает placeholder после кадра. Подтверждение работает и для неактивной вкладки, у которой нет собственного PanelRect в текущем снимке.
 - DragHost Manager на отпускании выполняет `pointer_up`, передаёт последнюю DropTarget и при FreeArea — экранные bounds, рассчитанные по геометрии исходного Main/Floating Host. После этого выполняется одна Core-команда, затем DragHost закрывается и view становится доступен конечному Host.
 - Escape обрабатывается MainHost, FloatingHost и native polling. Отмена закрывает DragHost и возвращает ту же PanelView без изменения Layout.
+- Если мышь отпущена до подтверждения исходного placeholder, либо native routing/show временного окна завершается ошибкой, передача отменяется и исходный Host восстанавливает view.
+- Для FreeArea `DragDropRequest.point` остаётся в локальной системе координат исходного Host; экранные физические bounds передаются отдельно. Координаты Main и Floating не смешиваются.
 - Удалён старый `begin_floating_tab_tearoff`, который создавал временный FloatingGroup для Floating PanelTab. Group/Column/DockArea пока остаются на прежнем механизме и будут переведены на следующих этапах.
 
 Core не менялся. `dock-components/tab.rs` не требовал изменений: семантический запуск по-прежнему выполняется общим Host pointer pipeline.
