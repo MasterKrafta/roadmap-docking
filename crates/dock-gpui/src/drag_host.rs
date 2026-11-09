@@ -167,7 +167,10 @@ mod tests {
             Some(DockWindowRole::Dragging { id: drag_host })
         );
         assert_eq!(session.payload(), DragPayload::Panel { panel });
-        assert_eq!(session.source_host(), super::DragSourceHost::Floating { group: source_group });
+        assert_eq!(
+            session.source_host(),
+            super::DragSourceHost::Floating { group: source_group }
+        );
 
         assert!(!session.clear_transport_host(DragHostId::from_raw(12)));
         assert!(session.clear_transport_host(drag_host));
