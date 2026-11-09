@@ -420,6 +420,19 @@ impl FloatingWindowManager {
 
 
 
+    /// Returns whether an HWND belongs to the persistent Main/Floating hosts.
+    ///
+    /// DragHost is checked separately because it is a temporary window owned by
+    /// DragHostManager rather than part of the persistent window registry.
+    pub(crate) fn is_managed_native_window(&self, window: NativeWindowId) -> bool {
+        is_managed_foreground_window(
+            window,
+            self.main_native_window,
+            self.registry.windows.values().map(|entry| entry.native_window),
+            None,
+        )
+    }
+
     /// A GPUI host losing focus is not a cancellation when another managed
     /// window of this application received the OS foreground activation.
     ///
@@ -454,11 +467,7 @@ impl FloatingWindowManager {
             })
         });
 
-        self.main_native_window == Some(foreground)
-            || self.registry.windows.values().any(|entry| {
-                entry.native_window == Some(foreground)
-            })
-            || drag_host_is_foreground
+        self.is_managed_native_window(foreground) || drag_host_is_foreground
     }
 
 
@@ -2210,6 +2219,20 @@ impl FloatingWindowManager {
 }
 
 
+fn is_managed_foreground_window(
+    foreground: NativeWindowId,
+    main_window: Option<NativeWindowId>,
+    floating_windows: impl IntoIterator<Item = Option<NativeWindowId>>,
+    drag_host: Option<NativeWindowId>,
+) -> bool {
+    main_window == Some(foreground)
+        || floating_windows
+            .into_iter()
+            .flatten()
+            .any(|window| window == foreground)
+        || drag_host == Some(foreground)
+}
+
 fn collect_panel_order(
     layout: &dock_core::Layout,
     root: NodeId,
@@ -2312,6 +2335,57 @@ impl Drop for FloatingWindowManager {
         if self.native_move.is_some_and(|state| state.high_resolution_timer) {
             let _ = self.native_ops.end_high_resolution_timer();
         }
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::is_managed_foreground_window;
+    use platform::NativeWindowId;
+
+    fn window(raw: isize) -> NativeWindowId {
+        NativeWindowId::from_raw(raw).expect("test HWND must be nonzero")
+    }
+
+    #[test]
+    fn managed_main_floating_and_drag_hosts_preserve_cross_window_focus() {
+        let main = window(1);
+        let floating = window(2);
+        let drag_host = window(3);
+
+        assert!(is_managed_foreground_window(
+            main,
+            Some(main),
+            [Some(floating)],
+            Some(drag_host),
+        ));
+        assert!(is_managed_foreground_window(
+            floating,
+            Some(main),
+            [Some(floating)],
+            Some(drag_host),
+        ));
+        assert!(is_managed_foreground_window(
+            drag_host,
+            Some(main),
+            [Some(floating)],
+            Some(drag_host),
+        ));
+    }
+
+    #[test]
+    fn foreground_outside_all_managed_hosts_is_a_real_focus_loss() {
+        let main = window(1);
+        let floating = window(2);
+        let drag_host = window(3);
+        let external = window(4);
+
+        assert!(!is_managed_foreground_window(
+            external,
+            Some(main),
+            [Some(floating)],
+            Some(drag_host),
+        ));
     }
 }
 
