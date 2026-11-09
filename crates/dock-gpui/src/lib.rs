@@ -14,6 +14,7 @@ mod app_shell;
 pub mod controller;
 pub mod dock_host;
 pub mod drag_host;
+pub mod drag_host_manager;
 pub mod floating_manager;
 
 mod geometry;
@@ -136,6 +137,7 @@ pub use components::{
 };
 pub use dock_host::DockHost;
 pub use drag_host::{DockWindowRole, DragHostId};
+pub use drag_host_manager::{DragHostError, DragHostManager};
 pub use floating_manager::{
     CompositionHostRegistry, FloatingWindowManager, PanelLayoutLocation, PanelWindowRegistry,
     PanelWindowVisibility,
