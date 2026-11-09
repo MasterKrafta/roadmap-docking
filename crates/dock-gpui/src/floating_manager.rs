@@ -457,7 +457,12 @@ impl FloatingWindowManager {
                     %error,
                     "could not determine the foreground window while handling focus loss"
                 );
-                return self.native_move_active();
+                let drag_host_active = self.drag_host_manager().is_some_and(|manager| {
+                    manager.update(cx, |manager, _| manager.active_drag_host_id().is_some())
+                });
+                // Let DragHost's own foreground poll distinguish a managed
+                // window handoff from a real application focus loss.
+                return self.native_move_active() || drag_host_active;
             }
         };
 
