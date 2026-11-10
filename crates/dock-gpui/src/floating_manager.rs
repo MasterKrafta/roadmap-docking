@@ -141,13 +141,16 @@ impl CompositionHostRegistry {
 }
 
 /// A registered persistent DockHost under the physical cursor, together with
-/// the point converted into that host's Core-local coordinate system.
+/// the pointer converted to that host's Core-local logical coordinate system.
+/// The point is always target-host-local; it is not the original drag source point.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum DockingWindowAtPoint {
     ForeignWindow,
+    /// The pointer in MainHost-local logical coordinates.
     Main {
         point: Point,
     },
+    /// The pointer in this FloatingHost's local logical coordinates.
     Floating {
         group: FloatingGroupId,
         window_id: WindowId,
@@ -871,6 +874,8 @@ impl FloatingWindowManager {
         });
     }
 
+    /// Finds the topmost managed target and converts the screen point into that target's
+    /// own Core-local logical coordinates. A foreign topmost window is reported distinctly.
     pub(crate) fn docking_window_at_point(
         &self,
         screen: PhysicalPoint,
@@ -954,6 +959,8 @@ impl FloatingWindowManager {
         )
     }
 
+    /// Converts the screen cursor into the original source host's Core-local logical
+    /// coordinates. This can differ from the target point returned by docking_window_at_point.
     pub(crate) fn core_point_for_drag_source(
         &self,
         source_host: DragSourceHost,
@@ -977,6 +984,8 @@ impl FloatingWindowManager {
         }
     }
 
+    /// Converts bounds expressed in the original source host's Core-local coordinates
+    /// into physical screen coordinates.
     pub(crate) fn screen_bounds_for_drag_source(
         &self,
         source_host: DragSourceHost,
