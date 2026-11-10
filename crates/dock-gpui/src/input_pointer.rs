@@ -218,6 +218,23 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
+            // Column grips are narrow strips rendered inside the shared Main
+            // DockArea header. Resolve them from the same geometry directly:
+            // after a Floating -> Main drop, Core hit-test may classify that
+            // point as a different overlapping node instead of HitResult::Column.
+            if let Some(column) = main_column_drag_handle_at_point(&controller, core_point, app) {
+                begin_drag_at(
+                    &controller,
+                    DragPayload::Column { column },
+                    DragHandle::ColumnHeader,
+                    core_point,
+                    DragSourceHost::Main,
+                    source_window_id,
+                    app,
+                );
+                return;
+            }
+
             let Some(hit) = hit else {
                 return;
             };
@@ -1276,6 +1293,46 @@ fn dock_area_drag_handle_side(
     })
 }
 
+fn main_column_drag_handle_at_point(
+    controller: &Entity<DockController>,
+    point: Point,
+    app: &mut App,
+) -> Option<NodeId> {
+    controller.update(app, |controller, _| {
+        let metrics = controller.metrics();
+        let rects = controller.geometry().ok()?;
+        let layout = controller.layout();
+
+        for side in [DockSide::Left, DockSide::Right] {
+            let Some(area) = layout.main_area(side) else {
+                continue;
+            };
+            let mut area_column_ids = Vec::new();
+            collect_dock_area_columns(layout, area.root, &mut area_column_ids);
+            let area_columns = area_column_ids
+                .iter()
+                .filter_map(|id| rects.columns.iter().find(|rect| rect.column == *id).copied())
+                .collect::<Vec<_>>();
+            let Some(area_rect) = dock_area_bounds(&area_columns) else {
+                continue;
+            };
+
+            if let Some(column) = area_columns.iter().find(|column| {
+                DockAreaDragArea::column_drag_handle_contains_in_area(
+                    area_rect,
+                    **column,
+                    point,
+                    metrics.column_header_height,
+                )
+            }) {
+                return Some(column.column);
+            }
+        }
+
+        None
+    })
+}
+
 fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
     let first = columns.first()?.rect;
     let mut left = first.origin.x;
@@ -1518,6 +1575,40 @@ mod hit_dispatch_tests {
             column,
             Point::new(12.0, 52.0),
             32.0,
+        ));
+    }
+
+    #[test]
+    fn column_grip_uses_the_shared_header_top_after_reparenting() {
+        let area = Rect::new(
+            Point::new(10.0, 20.0),
+            dock_core::Size::new(500.0, 500.0),
+        );
+        let column_rect = Rect::new(
+            Point::new(250.0, 90.0),
+            dock_core::Size::new(260.0, 300.0),
+        );
+        let column = dock_core::ColumnRect::new(NodeId::null(), column_rect);
+
+        assert!(crate::dock_components::DockAreaDragArea::column_drag_handle_contains_in_area(
+            area,
+            column,
+            Point::new(252.0, 30.0),
+            32.0,
+        ));
+        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains_in_area(
+            area,
+            column,
+            Point::new(252.0, 100.0),
+            32.0,
+        ));
+        assert!(!crate::dock_components::DockAreaDragArea::contains(
+            area,
+            &[column],
+            &[column],
+            Point::new(252.0, 30.0),
+            32.0,
+            28.0,
         ));
     }
 
