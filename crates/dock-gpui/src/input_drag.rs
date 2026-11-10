@@ -1,6 +1,6 @@
 use dock_core::{
     ColumnRect, ComputeRectsError, DragDropAction, DragDropRequest, DragHandle, DragPayload,
-    DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
+    DragState, DockSide, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
     LayoutRects, PanelId, Point, Rect, Size,
 };
 use gpui::{App, Entity, WindowId};
@@ -394,6 +394,119 @@ pub(crate) fn begin_column_drag_host(
             false
         }
     }
+}
+
+/// Starts DragHost for an entire Main DockArea composition and transfers
+/// every active cached PanelView belonging to that DockArea.
+pub(crate) fn begin_dock_area_drag_host(
+    controller: &Entity<DockController>,
+    drag_host_manager: &Entity<DragHostManager>,
+    app: &mut App,
+) -> bool {
+    let candidate = controller.update(app, |controller, _| {
+        let (side, origin) = match controller.drag().session().state() {
+            DragState::Dragging {
+                payload: DragPayload::DockArea { side },
+                origin,
+                ..
+            } if controller.drag().session().handle() == Some(DragHandle::DockAreaHeader) => {
+                (side, origin)
+            }
+            _ => return None,
+        };
+        let host_session = controller.drag().host_session()?;
+        if host_session.source_host() != DragSourceHost::Main
+            || host_session.source_window_id().is_none()
+        {
+            return None;
+        }
+
+        let rects = controller.geometry().ok()?;
+        let area = controller.layout().main_area(side)?;
+        let mut column_ids = Vec::new();
+        collect_dock_area_columns(controller.layout(), area.root, &mut column_ids);
+        let columns = column_ids
+            .iter()
+            .filter_map(|column| {
+                rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == *column)
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        let area_rect = dock_area_bounds(&columns)?;
+        let panels = controller.active_dock_area_panel_ids(side)?;
+
+        let grab_offset = Point::new(
+            (origin.x - area_rect.origin.x).clamp(0.0, area_rect.size.width),
+            (origin.y - area_rect.origin.y).clamp(0.0, area_rect.size.height),
+        );
+        Some((side, panels, grab_offset, area_rect.size))
+    });
+
+    let Some((side, panels, grab_offset, logical_size)) = candidate else {
+        tracing::debug!("DockAreaHeader drag has no valid source geometry for DragHost");
+        controller.update(app, |controller, cx| {
+            if let Err(error) = controller.cancel_pointer_interaction() {
+                tracing::debug!(%error, "could not cancel DockArea drag without source geometry");
+            }
+            cx.notify();
+        });
+        return false;
+    };
+
+    match drag_host_manager.update(app, |manager, manager_cx| {
+        manager.open_dock_area_at_cursor(side, panels, grab_offset, logical_size, manager_cx)
+    }) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, "could not start DockArea DragHost");
+            controller.update(app, |controller, cx| {
+                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(%cancel_error, "could not cancel failed DockArea DragHost start");
+                }
+                cx.notify();
+            });
+            false
+        }
+    }
+}
+
+fn collect_dock_area_columns(
+    layout: &dock_core::Layout,
+    node: NodeId,
+    columns: &mut Vec<NodeId>,
+) {
+    match layout.node(node) {
+        Some(Node::Split(split)) => {
+            for child in &split.children {
+                collect_dock_area_columns(layout, *child, columns);
+            }
+        }
+        Some(Node::Column(_)) => columns.push(node),
+        _ => {}
+    }
+}
+
+fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
+    let first = columns.first()?.rect;
+    let mut left = first.origin.x;
+    let mut top = first.origin.y;
+    let mut right = first.origin.x + first.size.width;
+    let mut bottom = first.origin.y + first.size.height;
+
+    for column in columns.iter().skip(1) {
+        left = left.min(column.rect.origin.x);
+        top = top.min(column.rect.origin.y);
+        right = right.max(column.rect.origin.x + column.rect.size.width);
+        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
+    }
+
+    Some(Rect::new(
+        Point::new(left, top),
+        Size::new(right - left, bottom - top),
+    ))
 }
 
 /// Updates a tab drag that started inside a floating host. The resolver is
