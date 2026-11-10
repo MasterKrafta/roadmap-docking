@@ -73,10 +73,10 @@ impl DockAreaDragArea {
             }
     }
 
-    pub(crate) fn render_column_grip(
+    pub(crate) fn render_column_drag_strip(
         id: String,
         left: f32,
-        theme: Theme,
+        _theme: Theme,
     ) -> impl IntoElement {
         div()
             .id(id)
@@ -85,13 +85,7 @@ impl DockAreaDragArea {
             .top_0()
             .w(gpui::px(Self::COLUMN_GRIP_WIDTH))
             .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
             .cursor_move()
-            .bg(rgb(theme.colors.group_grip_background))
-            .text_color(rgb(theme.colors.primary_text))
-            .child("⋮")
     }
 
     pub fn render(id: String, theme: Theme) -> impl IntoElement {
