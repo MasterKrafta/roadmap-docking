@@ -92,10 +92,13 @@ impl DockController {
             .get(&window_id)
             .map(|cache| cache.key)
             .ok_or(ComputeRectsError::InvalidLayoutState)?;
-        let resolver_key = ResolverCacheKey::Floating(key);
-        let resolver_is_current = self.drag.resolver.is_some()
-            && self.drag.resolver_key == Some(resolver_key)
-            && self.drag.resolver_source == Some(source);
+        let resolver_is_current = self
+            .drag
+            .floating_resolver
+            .as_ref()
+            .is_some_and(|(cached_key, cached_source, _)| {
+                *cached_key == key && *cached_source == source
+            });
 
         if !resolver_is_current {
             let resolver = {
@@ -106,7 +109,9 @@ impl DockController {
                 self.layout
                     .prepare_drop_resolver(source, &cache.rects, &self.metrics)?
             };
-            self.drag.set_resolver(resolver, resolver_key, source);
+            self.drag.set_floating_resolver(resolver, key, source);
+        } else {
+            self.drag.resolver_key = Some(ResolverCacheKey::Floating(key));
         }
 
         self.drag
@@ -144,10 +149,14 @@ impl DockController {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
         self.ensure_geometry()?;
-        let key = ResolverCacheKey::Main(self.rect_cache_key());
-        let resolver_is_current = self.drag.resolver.is_some()
-            && self.drag.resolver_key == Some(key)
-            && self.drag.resolver_source == Some(source);
+        let key = self.rect_cache_key();
+        let resolver_is_current = self
+            .drag
+            .main_resolver
+            .as_ref()
+            .is_some_and(|(cached_key, cached_source, _)| {
+                *cached_key == key && *cached_source == source
+            });
 
         if !resolver_is_current {
             let resolver = self.layout.prepare_drop_resolver(
@@ -157,7 +166,9 @@ impl DockController {
                     .ok_or(ComputeRectsError::InvalidLayoutState)?,
                 &self.metrics,
             )?;
-            self.drag.set_resolver(resolver, key, source);
+            self.drag.set_main_resolver(resolver, key, source);
+        } else {
+            self.drag.resolver_key = Some(ResolverCacheKey::Main(key));
         }
 
         self.drag
