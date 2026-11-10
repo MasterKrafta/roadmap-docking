@@ -199,48 +199,58 @@ pub(crate) fn begin_panel_drag_host(
         );
         let preferred_size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
 
-        let source_rect = match source_host {
+        let (source_group, source_rect) = match source_host {
             DragSourceHost::Main => {
                 let rects = controller.geometry().ok()?;
                 match handle {
-                    DragHandle::PanelTab => rects
-                        .tab_headers
-                        .iter()
-                        .find(|header| header.panel == panel)
-                        .map(|header| header.rect)?,
-                    DragHandle::FlyoutPanel => rects
-                        .flyout
-                        .filter(|flyout| flyout.panel == panel)
-                        .map(|flyout| flyout.rect)
-                        .or_else(|| {
-                            rects
-                                .panels
-                                .iter()
-                                .find(|panel_rect| panel_rect.panel == panel)
-                                .map(|panel_rect| panel_rect.rect)
-                        })?,
+                    DragHandle::PanelTab => {
+                        let header = rects
+                            .tab_headers
+                            .iter()
+                            .find(|header| header.panel == panel)?;
+                        (Some(header.group), header.rect)
+                    }
+                    DragHandle::FlyoutPanel => {
+                        let rect = rects
+                            .flyout
+                            .filter(|flyout| flyout.panel == panel)
+                            .map(|flyout| flyout.rect)
+                            .or_else(|| {
+                                rects
+                                    .panels
+                                    .iter()
+                                    .find(|panel_rect| panel_rect.panel == panel)
+                                    .map(|panel_rect| panel_rect.rect)
+                            })?;
+                        (None, rect)
+                    }
                     _ => return None,
                 }
             }
             DragSourceHost::Floating { group } => {
                 let rects = controller.floating_geometry(source_window_id, group).ok()?;
                 match handle {
-                    DragHandle::PanelTab => rects
-                        .tab_headers
-                        .iter()
-                        .find(|header| header.panel == panel)
-                        .map(|header| header.rect)?,
-                    DragHandle::FlyoutPanel => rects
-                        .flyout
-                        .filter(|flyout| flyout.panel == panel)
-                        .map(|flyout| flyout.rect)
-                        .or_else(|| {
-                            rects
-                                .panels
-                                .iter()
-                                .find(|panel_rect| panel_rect.panel == panel)
-                                .map(|panel_rect| panel_rect.rect)
-                        })?,
+                    DragHandle::PanelTab => {
+                        let header = rects
+                            .tab_headers
+                            .iter()
+                            .find(|header| header.panel == panel)?;
+                        (Some(header.group), header.rect)
+                    }
+                    DragHandle::FlyoutPanel => {
+                        let rect = rects
+                            .flyout
+                            .filter(|flyout| flyout.panel == panel)
+                            .map(|flyout| flyout.rect)
+                            .or_else(|| {
+                                rects
+                                    .panels
+                                    .iter()
+                                    .find(|panel_rect| panel_rect.panel == panel)
+                                    .map(|panel_rect| panel_rect.rect)
+                            })?;
+                        (None, rect)
+                    }
                     _ => return None,
                 }
             }
@@ -253,9 +263,9 @@ pub(crate) fn begin_panel_drag_host(
                 .clamp(0.0, source_rect.size.height)
                 .min(preferred_size.height),
         );
-        Some((panel, grab_offset, preferred_size, promote_on_float))
+        Some((panel, source_group, grab_offset, preferred_size, promote_on_float))
     });
-    let Some((panel, grab_offset, preferred_size, promote_on_float)) = candidate else {
+    let Some((panel, source_group, grab_offset, preferred_size, promote_on_float)) = candidate else {
         tracing::debug!("Panel drag has no valid source geometry for DragHost");
         controller.update(app, |controller, cx| {
             if let Err(error) = controller.cancel_pointer_interaction() {
@@ -267,8 +277,15 @@ pub(crate) fn begin_panel_drag_host(
     };
 
     match drag_host_manager.update(app, |manager, manager_cx| {
-        if promote_on_float {
-            manager.open_panel_tab_at_cursor(panel, grab_offset, preferred_size, manager_cx)
+        if let Some(group) = source_group {
+            manager.open_panel_tab_at_cursor(
+                panel,
+                group,
+                grab_offset,
+                preferred_size,
+                promote_on_float,
+                manager_cx,
+            )
         } else {
             manager.open_panel_at_cursor(panel, grab_offset, preferred_size, manager_cx)
         }
