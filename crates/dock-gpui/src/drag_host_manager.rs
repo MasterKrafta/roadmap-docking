@@ -42,7 +42,7 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
-    dock_area: Option<DockSide>,
+    promote_on_float: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
     focus_loss_since: Option<Instant>,
@@ -142,6 +142,7 @@ impl DragHostManager {
             None,
             None,
             None,
+            false,
             cx,
         )
     }
@@ -170,6 +171,34 @@ impl DragHostManager {
             None,
             None,
             None,
+            false,
+            cx,
+        )
+    }
+
+    /// Opens DragHost for a Main-host tab tear-off that can be promoted to Floating
+    /// after release without replacing its native window.
+    pub fn open_panel_tab_at_cursor(
+        &mut self,
+        panel: PanelId,
+        grab_offset: Point,
+        logical_size: Size,
+        cx: &mut Context<Self>,
+    ) -> Result<DragHostId, DragHostError> {
+        let can_transfer = self.controller.update(cx, |controller, _| {
+            controller.can_begin_panel_view_transfer(panel)
+        });
+        if !can_transfer {
+            return Err(DragHostError::PanelTransferUnavailable(panel));
+        }
+        self.open_at_cursor_with_content(
+            grab_offset,
+            logical_size,
+            vec![panel],
+            None,
+            None,
+            None,
+            true,
             cx,
         )
     }
@@ -196,6 +225,7 @@ impl DragHostManager {
             Some(group),
             None,
             None,
+            false,
             cx,
         )
     }
@@ -225,6 +255,7 @@ impl DragHostManager {
             None,
             Some(column),
             None,
+            false,
             cx,
         )
     }
@@ -254,6 +285,7 @@ impl DragHostManager {
             None,
             None,
             Some(side),
+            true,
             cx,
         )
     }
@@ -266,6 +298,7 @@ impl DragHostManager {
         group: Option<NodeId>,
         column: Option<NodeId>,
         dock_area: Option<DockSide>,
+        promote_on_float: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         if self.active.is_some() {
@@ -327,7 +360,7 @@ impl DragHostManager {
         let window = cx
             .open_window(options, move |_, app| {
                 app.new(|surface_cx| {
-                    let floating_host = if dock_area.is_some() {
+                    let floating_host = if dock_area.is_some() || promote_on_float {
                         floating_manager.map(|manager| {
                             let controller = controller.clone();
                             surface_cx.new(move |_| {
@@ -509,7 +542,7 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
-            dock_area,
+            promote_on_float,
             pending_release_cursor: None,
             focus_loss_since: None,
             source_detach_subscription: None,
@@ -935,7 +968,7 @@ impl DragHostManager {
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
-        let dock_area = active.dock_area;
+        let promote_on_float = active.promote_on_float;
 
         let finished = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -976,7 +1009,7 @@ impl DragHostManager {
                     match action {
                         Ok(DragDropAction::NoOp) => {}
                         Ok(DragDropAction::Command(command)) => {
-                            let result = if dock_area.is_some() {
+                            let result = if promote_on_float {
                                 // Delay LayoutChanged publication until the current
                                 // DragHost has been registered as the Floating host.
                                 controller.dispatch(command)
@@ -1016,13 +1049,13 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            if dock_area.is_some()
+            if promote_on_float
                 && target == Some(DropTarget::FreeArea)
                 && self.promote_active_drag_host_to_floating(id, target_group, cx)
             {
                 return;
             }
-            if dock_area.is_some() {
+            if promote_on_float {
                 self.flush_controller_events(cx);
             }
 
@@ -1039,7 +1072,7 @@ impl DragHostManager {
             return;
         }
 
-        if dock_area.is_some() {
+        if promote_on_float {
             self.flush_controller_events(cx);
         }
         if let Err(error) = self.close(id, cx) {
@@ -1058,7 +1091,7 @@ impl DragHostManager {
         let Some((panel, window, window_id, native_window)) = self
             .active
             .as_ref()
-            .filter(|active| active.id == id && active.dock_area.is_some())
+            .filter(|active| active.id == id && active.promote_on_float)
             .and_then(|active| {
                 Some((
                     active.panels.first().copied()?,
