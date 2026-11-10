@@ -1364,16 +1364,6 @@ fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
     );
     builder.main_area(DockSide::Left, source_column);
 
-    let (_, target_panel) = builder.panel(key("dock-area-target"), constraints());
-    let target_group = builder.tabs(vec![target_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
-    );
-    builder.main_area(DockSide::Right, target_column);
-
     let mut layout = builder.build();
     let rects = layout
         .compute_rects(
@@ -1392,7 +1382,7 @@ fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
         .unwrap();
     let target = DropTarget::MainColumn {
         side: DockSide::Right,
-        index: 1,
+        index: 0,
     };
     assert!(zones
         .iter()
@@ -1428,7 +1418,7 @@ fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
     assert!(layout.main_area(DockSide::Left).is_none());
     assert_eq!(
         layout.main_columns(DockSide::Right).unwrap(),
-        vec![target_column, source_column]
+        vec![source_column]
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
