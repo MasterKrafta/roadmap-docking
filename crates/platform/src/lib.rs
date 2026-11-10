@@ -170,8 +170,9 @@ pub trait NativeWindowOps {
         size: Option<PhysicalSize>,
     ) -> Result<(), NativeError>;
 
-    /// Finds the topmost of known_windows under a screen point. The window
-    /// being dragged can be excluded so it cannot become its own drop target.
+    /// Finds the topmost window under a screen point. Foreign windows are
+    /// reported separately so callers cannot mistake them for empty desktop space.
+    /// The dragged window can be excluded so it cannot become its own drop target.
     fn window_from_point(
         &self,
         point: PhysicalPoint,
@@ -1224,6 +1225,15 @@ mod drop_window_target_tests {
             }
             result
         })
+    }
+
+    #[test]
+    fn empty_desktop_point_is_distinct_from_a_foreign_window() {
+        let point = PhysicalPoint { x: 700, y: 500 };
+        assert_eq!(
+            resolve(point, &[], &[], None),
+            NativeWindowAtPoint::Empty,
+        );
     }
 
     #[test]
