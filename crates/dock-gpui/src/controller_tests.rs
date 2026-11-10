@@ -95,6 +95,80 @@ fn content_drag_cancel_before_drag_host_creation_preserves_layout_and_history() 
 }
 
 #[test]
+fn new_content_drag_rearms_dropped_and_cancelled_terminal_sessions() {
+    let mut controller = controller();
+    let panel = PanelId::null();
+    let source_window = WindowId::from(73);
+
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_down_with_handle(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::new(10.0, 10.0),
+        )
+        .expect("first low-level drag should start");
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_move(Point::new(20.0, 10.0))
+        .expect("first drag should cross its threshold");
+    controller
+        .drag_mut()
+        .session_mut()
+        .set_drop_target(Some(DropTarget::FreeArea))
+        .expect("first drag target should be accepted");
+    controller
+        .drag_mut()
+        .session_mut()
+        .pointer_up(Point::new(20.0, 10.0), Some(DropTarget::FreeArea))
+        .expect("first drag should finish");
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Dropped { .. }
+    ));
+
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::new(30.0, 10.0),
+            DragSourceHost::Main,
+            source_window,
+        )
+        .expect("a new drag should rearm a previously dropped session");
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Pressed { .. }
+    ));
+
+    controller
+        .drag_mut()
+        .session_mut()
+        .escape()
+        .expect("second drag should be cancellable");
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Cancelled { .. }
+    ));
+
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Panel { panel },
+            DragHandle::PanelTab,
+            Point::new(40.0, 10.0),
+            DragSourceHost::Main,
+            source_window,
+        )
+        .expect("a new drag should rearm a previously cancelled session");
+    assert!(matches!(
+        controller.drag().session().state(),
+        DragState::Pressed { .. }
+    ));
+}
+
+#[test]
 fn content_drag_cancel_after_drag_host_attachment_preserves_layout_and_history() {
     let mut controller = controller();
     let panel = PanelId::null();
