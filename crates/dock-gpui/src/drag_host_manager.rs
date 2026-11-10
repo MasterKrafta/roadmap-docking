@@ -225,7 +225,7 @@ impl DragHostManager {
             Some(group),
             None,
             None,
-            false,
+            true,
             cx,
         )
     }
@@ -255,7 +255,7 @@ impl DragHostManager {
             None,
             Some(column),
             None,
-            false,
+            true,
             cx,
         )
     }
