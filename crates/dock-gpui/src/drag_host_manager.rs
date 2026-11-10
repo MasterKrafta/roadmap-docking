@@ -22,7 +22,8 @@ use dock_core::{
 use crate::{
     components::{context_menu::GroupMenuToggle, MainDockView, PanelHost},
     dock_components::{
-        collect_group_presentations, DockCompositionView, DockGroupView, GroupPresentation,
+        collect_group_presentations, DockAreaView, DockCompositionView, DockGroupView,
+        GroupPresentation,
     },
     floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
@@ -1450,7 +1451,7 @@ impl Render for DragHostSurface {
                 &HashMap::new(),
                 self.controller.clone(),
                 self.theme,
-                false,
+                true,
             ));
         } else if let Some(column) = self.column
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
@@ -1623,9 +1624,17 @@ impl Render for DragHostSurface {
                 self.controller.clone(),
                 self.theme,
                 None,
-                false,
+                true,
                 None,
                 None,
+            ));
+            root = root.child(DockAreaView::render_header(
+                format!("drag-host-column-header-{:?}", snapshot.column.column),
+                snapshot.column.rect,
+                &[snapshot.column],
+                None,
+                snapshot.metrics,
+                self.theme,
             ));
         } else if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
