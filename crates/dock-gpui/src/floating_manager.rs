@@ -1546,9 +1546,7 @@ impl FloatingWindowManager {
             return None;
         }
         let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
-        drag_host
-            .update(cx, |manager, _| manager.pending_handoff_panels(group))
-            .flatten()
+        drag_host.update(cx, |manager, _| manager.pending_handoff_panels(group))
     }
 
     /// Called after the destination FloatingHost has completed a frame with
