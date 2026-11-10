@@ -2,13 +2,13 @@ use dock_core::{Point, Rect};
 use gpui::{IntoElement, InteractiveElement, Styled, div, rgb};
 use ui::Theme;
 
-/// Flexible drag surface for one complete DockArea composition.
+/// Flexible drag surface for one complete composition.
 ///
 /// Its hit region spans the shared header and excludes the narrow per-Column
-/// drag strips, every Column collapse control, and the single DockArea close control.
-pub struct DockAreaDragArea;
+/// drag strips, every Column collapse control, and the single composition close control.
+pub struct CompositionDragArea;
 
-impl DockAreaDragArea {
+impl CompositionDragArea {
     pub(crate) const COLUMN_GRIP_WIDTH: f32 = 24.0;
 
     pub(crate) fn column_drag_handle_contains(

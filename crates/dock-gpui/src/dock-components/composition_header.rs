@@ -1,9 +1,9 @@
-#[path = "dock_area_drag_area.rs"]
+#[path = "composition_drag_area.rs"]
 mod drag_area;
 #[path = "collapse_column_button.rs"]
 mod collapse_column_button;
-#[path = "close_dock_area_button.rs"]
-mod close_dock_area_button;
+#[path = "close_composition_button.rs"]
+mod close_composition_button;
 
 use dock_core::{ColumnRect, DockMetrics, NodeId, Rect};
 
@@ -11,16 +11,16 @@ use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb}
 use ui::Theme;
 
 pub use collapse_column_button::CollapseColumnButton;
-pub use close_dock_area_button::CloseDockAreaButton;
-pub use drag_area::DockAreaDragArea;
+pub use close_composition_button::CloseCompositionButton;
+pub use drag_area::CompositionDragArea;
 
-/// Shared header for one complete DockArea composition.
+/// Shared header for one complete composition.
 ///
 /// Each Column has one collapse control aligned to its right edge, while the
 /// whole composition has a single close control at the far right.
-pub struct DockAreaHeader;
+pub struct CompositionHeader;
 
-impl DockAreaHeader {
+impl CompositionHeader {
     pub(crate) fn render(
         id: String,
         area_rect: Rect,
@@ -41,14 +41,14 @@ impl DockAreaHeader {
             .bg(rgb(theme.colors.dock_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
-            .child(DockAreaDragArea::render(
+            .child(CompositionDragArea::render(
                 format!("{id}-drag-area"),
                 theme,
             ));
 
         for (index, column) in columns.iter().enumerate() {
             if dragged_column != Some(column.column) {
-                header = header.child(DockAreaDragArea::render_column_drag_strip(
+                header = header.child(CompositionDragArea::render_column_drag_strip(
                     format!("{id}-column-drag-strip-{index}"),
                     column.rect.origin.x - area_rect.origin.x,
                 ));
@@ -58,7 +58,7 @@ impl DockAreaHeader {
                 continue;
             }
             let button_x =
-                DockAreaDragArea::collapse_button_left(area_rect, *column, button_width);
+                CompositionDragArea::collapse_button_left(area_rect, *column, button_width);
 
             header = header.child(
                 div()
@@ -83,7 +83,7 @@ impl DockAreaHeader {
                 .top_0()
                 .w(px(button_width))
                 .h_full()
-                .child(CloseDockAreaButton::render_with_metrics(
+                .child(CloseCompositionButton::render_with_metrics(
                     format!("{id}-close"),
                     theme,
                     button_width,

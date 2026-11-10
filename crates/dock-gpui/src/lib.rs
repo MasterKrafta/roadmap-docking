@@ -7,7 +7,7 @@
 
 pub mod actions;
 pub mod components;
-/// Visual building blocks for DockArea, Column, Group, Tabs and Panel.
+/// Visual building blocks for Composition, Column, Group, Tabs and Panel.
 #[path = "dock-components/mod.rs"]
 pub mod dock_components;
 mod app_shell;

@@ -10,7 +10,7 @@ use ui::Theme;
 
 use crate::{
     DockController,
-    dock_components::{DockAreaView, GroupPresentation},
+    dock_components::{DockCompositionView, GroupPresentation},
 };
 
 use super::{context_menu::GroupMenuToggle, splitter::SplitterView};
@@ -52,7 +52,7 @@ impl MainDockView {
         theme: Theme,
         render_area_headers: bool,
     ) -> impl IntoElement {
-        let mut layer = DockAreaView::render_root();
+        let mut layer = DockCompositionView::render_root();
 
         for column in columns {
             if dragged_dock_area == main_column_sides.get(&column.column).copied() {
@@ -138,7 +138,7 @@ impl MainDockView {
                         DockSide::Left => "left",
                         DockSide::Right => "right",
                     };
-                    layer = layer.child(DockAreaView::render_header(
+                    layer = layer.child(DockCompositionView::render_header(
                         format!("main-dock-area-{side_name}"),
                         area_rect,
                         &area_columns,
@@ -161,7 +161,7 @@ impl MainDockView {
                     DockSide::Left => "left",
                     DockSide::Right => "right",
                 };
-                layer = layer.child(DockAreaView::render_drag_placeholder(
+                layer = layer.child(DockCompositionView::render_drag_placeholder(
                     format!("main-dock-area-{side_name}-drag-placeholder"),
                     area_rect,
                     theme,

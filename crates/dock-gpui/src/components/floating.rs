@@ -19,7 +19,7 @@ use ui::Theme;
 
 use crate::{
     dock_components::{
-        collect_group_presentations, DockAreaDragArea, DockAreaView, DockCompositionView,
+        collect_group_presentations, CompositionDragArea, DockCompositionView,
         DockGroupView, DockTab, GroupDragArea, GroupPresentation,
     },
     dock_host::{
@@ -106,7 +106,7 @@ impl FloatingWindowContent {
 
         // MainDockView and FloatingWindowContent use the same composition
         // renderer. Only the host-local coordinates, floating identity and
-        // shared DockAreaHeader visibility differ between the two windows.
+        // shared CompositionHeader visibility differ between the two windows.
         for column in columns {
             let group_ids = column_groups
                 .get(&column.column)
@@ -232,8 +232,8 @@ impl FloatingWindowContent {
         root = root.child(PanelHost::render(loose_panels, origin, theme));
 
         if !hide_header {
-            root = root.child(DockAreaView::render_header(
-                format!("floating-dock-area-{:?}", floating.group),
+            root = root.child(DockCompositionView::render_header(
+                format!("floating-composition-{:?}", floating.group),
                 floating.rect,
                 columns,
                 dragged_column,
@@ -290,7 +290,7 @@ struct FloatingHostSnapshot {
 }
 
 /// Floating tab drags transfer one Panel to DragHost after leaving the source strip
-/// or entering another docking window. The shared DockAreaHeader moves the whole window.
+/// or entering another docking window. The shared CompositionHeader moves the whole window.
 fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool) -> bool {
     leaves_source || over_other_window
 }
@@ -327,7 +327,7 @@ fn floating_has_single_tab_dock(
     matches!(layout.node(*panel), Some(Node::Panel(_)))
 }
 
-/// Gives the shared DockAreaHeader input priority over every Column below it.
+/// Gives the shared CompositionHeader input priority over every Column below it.
 /// Returns Some(false) for controls and all separate Column drag grips.
 fn floating_dock_area_title_pointer_region(
     area_rect: Rect,
@@ -346,7 +346,7 @@ fn floating_dock_area_title_pointer_region(
         return None;
     }
 
-    Some(DockAreaDragArea::contains(
+    Some(CompositionDragArea::contains(
         area_rect,
         columns,
         columns,
@@ -673,7 +673,7 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // The shared DockAreaHeader moves the complete floating composition.
+        // The shared CompositionHeader moves the complete floating composition.
         // Every visible DockTab remains an individual panel drag source, including
         // the only tab in a floating window; it can detach and join another group.
         let manager = self.manager.clone();
@@ -774,7 +774,7 @@ impl Render for FloatingHost {
                             dock_area_drag_area.as_ref().and_then(
                                 |(_, columns, metrics)| {
                                     columns.iter().find_map(|column| {
-                                        DockAreaDragArea::column_drag_handle_contains(
+                                        CompositionDragArea::column_drag_handle_contains(
                                             *column,
                                             point,
                                             metrics.column_header_height,
@@ -819,7 +819,7 @@ impl Render for FloatingHost {
                             return;
                         }
 
-                        // The remaining DockAreaHeader region controls moving the whole Floating.
+                        // The remaining CompositionHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
                                 |(area_rect, columns, metrics)| {

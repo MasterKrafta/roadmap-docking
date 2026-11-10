@@ -12,7 +12,7 @@ use gpui::{
 use crate::{
     DockController, DragHostManager, DragSourceHost, FloatingWindowManager,
     components::context_menu::{ContextMenuTarget, ContextMenuToggle},
-    dock_components::{DockAreaDragArea, DockTab, GroupDragArea},
+    dock_components::{CompositionDragArea, DockTab, GroupDragArea},
     geometry::host_point_from_gpui_window,
 };
 
@@ -1127,7 +1127,7 @@ fn column_header_drag_handle_contains(
             else {
                 return Some(false);
             };
-            Some(DockAreaDragArea::column_drag_handle_contains(
+            Some(CompositionDragArea::column_drag_handle_contains(
                 column_rect,
                 point,
                 controller.metrics().column_header_height,
@@ -1160,7 +1160,7 @@ fn dock_area_drag_handle_side(
                 continue;
             };
             let column_grip_columns = area_columns.clone();
-            if DockAreaDragArea::contains(
+            if CompositionDragArea::contains(
                 area_rect,
                 &area_columns,
                 &column_grip_columns,
@@ -1201,7 +1201,7 @@ fn main_column_drag_handle_at_point(
             };
 
             if let Some(column) = area_columns.iter().find(|column| {
-                DockAreaDragArea::column_drag_handle_contains_in_area(
+                CompositionDragArea::column_drag_handle_contains_in_area(
                     area_rect,
                     **column,
                     point,
@@ -1444,17 +1444,17 @@ mod hit_dispatch_tests {
         let rect = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(240.0, 500.0));
         let column = dock_core::ColumnRect::new(NodeId::null(), rect);
 
-        assert!(crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+        assert!(crate::dock_components::CompositionDragArea::column_drag_handle_contains(
             column,
             Point::new(12.0, 30.0),
             32.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains(
             column,
             Point::new(35.0, 30.0),
             32.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains(
+        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains(
             column,
             Point::new(12.0, 52.0),
             32.0,
@@ -1473,19 +1473,19 @@ mod hit_dispatch_tests {
         );
         let column = dock_core::ColumnRect::new(NodeId::null(), column_rect);
 
-        assert!(crate::dock_components::DockAreaDragArea::column_drag_handle_contains_in_area(
+        assert!(crate::dock_components::CompositionDragArea::column_drag_handle_contains_in_area(
             area,
             column,
             Point::new(252.0, 30.0),
             32.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::column_drag_handle_contains_in_area(
+        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains_in_area(
             area,
             column,
             Point::new(252.0, 100.0),
             32.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::contains(
+        assert!(!crate::dock_components::CompositionDragArea::contains(
             area,
             &[column],
             &[column],
@@ -1504,7 +1504,7 @@ mod hit_dispatch_tests {
 
         let columns = [dock_core::ColumnRect::new(NodeId::null(), rect)];
 
-        assert!(crate::dock_components::DockAreaDragArea::contains(
+        assert!(crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
             &[],
@@ -1512,7 +1512,7 @@ mod hit_dispatch_tests {
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::contains(
+        assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
             &[],
@@ -1520,7 +1520,7 @@ mod hit_dispatch_tests {
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::contains(
+        assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
             &[],
@@ -1528,7 +1528,7 @@ mod hit_dispatch_tests {
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::contains(
+        assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
             &[],
@@ -1545,7 +1545,7 @@ mod hit_dispatch_tests {
         ];
         let composition = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(500.0, 500.0));
 
-        assert!(crate::dock_components::DockAreaDragArea::contains(
+        assert!(crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
             &[],
@@ -1553,7 +1553,7 @@ mod hit_dispatch_tests {
             32.0,
             28.0,
         ));
-        assert!(!crate::dock_components::DockAreaDragArea::contains(
+        assert!(!crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
             &[],

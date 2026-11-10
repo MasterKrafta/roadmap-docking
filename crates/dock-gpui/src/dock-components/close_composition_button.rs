@@ -1,10 +1,10 @@
 use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
-/// Visual close control for the entire DockArea composition.
-pub struct CloseDockAreaButton;
+/// Visual close control for the entire composition.
+pub struct CloseCompositionButton;
 
-impl CloseDockAreaButton {
+impl CloseCompositionButton {
     pub fn render(id: String, theme: Theme) -> impl IntoElement {
         Self::render_with_metrics(id, theme, 32.0, 14.0)
     }
