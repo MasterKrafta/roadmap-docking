@@ -989,7 +989,7 @@ impl DragHostManager {
             panel.and_then(|panel| {
                 self.controller.update(cx, |controller, _| {
                     floating_group_for_panel(controller.layout(), panel)
-                }).ok().flatten()
+                })
             })
         } else {
             None
