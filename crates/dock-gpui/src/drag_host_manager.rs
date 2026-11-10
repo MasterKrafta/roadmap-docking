@@ -621,11 +621,16 @@ impl DragHostManager {
                 })
         });
         let now = Instant::now();
+        let button_is_down = self.native_ops.left_button_down().unwrap_or(true);
         let focus_loss_expired = if let Some(active) =
             self.active.as_mut().filter(|active| active.id == id)
         {
             if managed_foreground {
                 active.focus_loss_since = None;
+                false
+            } else if !button_is_down {
+                // A released gesture must still finish at its captured pointer
+                // position, even if Windows has already changed foreground.
                 false
             } else {
                 let since = *active.focus_loss_since.get_or_insert(now);
