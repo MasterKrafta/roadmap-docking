@@ -49,7 +49,7 @@ pub(crate) fn begin_drag_at(
     });
 
     match result {
-        Ok(Ok(())) => {
+        Ok(()) => {
             tracing::trace!(
                 ?payload,
                 ?handle,
@@ -57,20 +57,12 @@ pub(crate) fn begin_drag_at(
                 "dock drag gesture started"
             );
         }
-        Ok(Err(error)) => {
-            tracing::warn!(
-                %error,
-                ?payload,
-                ?handle,
-                "DockCore rejected the dock drag gesture"
-            );
-        }
         Err(error) => {
             tracing::warn!(
                 %error,
                 ?payload,
                 ?handle,
-                "could not access DockController to begin dock drag gesture"
+                "DockCore rejected the dock drag gesture"
             );
         }
     }
