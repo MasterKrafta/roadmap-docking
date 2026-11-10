@@ -4,7 +4,7 @@
 //! FloatingWindowManager. It hosts the existing source presentation and routes
 //! drop feedback to the persistent Main/Floating window under the cursor.
 
-use std::{collections::{HashMap, HashSet}, rc::Rc, time::Duration};
+use std::{collections::{HashMap, HashSet}, rc::Rc, time::{Duration, Instant}};
 
 use gpui::{
     AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled,
@@ -43,6 +43,7 @@ struct ActiveDragHost {
     free_area_bounds: Option<Rect>,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
+    focus_loss_since: Option<Instant>,
     source_detach_subscription: Option<Subscription>,
 }
 
@@ -480,6 +481,7 @@ impl DragHostManager {
             target_role: None,
             free_area_bounds: None,
             pending_release_cursor: None,
+            focus_loss_since: None,
             source_detach_subscription: None,
         });
 
@@ -606,42 +608,37 @@ impl DragHostManager {
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
 
-        // DragHost is shown without activation, so a valid cross-window drag
-        // may leave either MainHost or FloatingHost as the OS foreground window.
-        // Those windows and DragHost itself belong to the same managed session.
-        // An external foreground HWND means the application really lost focus;
-        // cancel before interpreting a later mouse-up as a successful drop.
-        let foreground = match self.native_ops.foreground_window() {
-            Ok(Some(window)) => window,
-            Ok(None) => {
-                tracing::debug!(
-                    ?id,
-                    "application has no foreground window; cancelling DragHost"
-                );
-                self.cancel_active_drag_on_focus_loss(id, cx);
-                return false;
-            }
-            Err(error) => {
-                tracing::warn!(
-                    ?id,
-                    %error,
-                    "could not verify foreground window during DragHost tracking"
-                );
-                self.cancel_active_drag_on_focus_loss(id, cx);
-                return false;
-            }
-        };
-        let drag_host_is_foreground = foreground == native_drag_host;
-        let managed_host_is_foreground = floating_manager.as_ref().is_some_and(|manager| {
-            manager.update(cx, |manager, _| {
-                manager.is_managed_native_window(foreground)
-            })
+        // DragHost is shown without activation, so Windows may briefly report
+        // no foreground window while focus moves between managed dock hosts.
+        // Debounce that transition; a sustained loss still cancels the gesture.
+        let foreground = self.native_ops.foreground_window().ok().flatten();
+        let managed_foreground = foreground.is_some_and(|window| {
+            window == native_drag_host
+                || floating_manager.as_ref().is_some_and(|manager| {
+                    manager.update(cx, |manager, _| {
+                        manager.is_managed_native_window(window)
+                    })
+                })
         });
-        if !drag_host_is_foreground && !managed_host_is_foreground {
+        let now = Instant::now();
+        let focus_loss_expired = if let Some(active) =
+            self.active.as_mut().filter(|active| active.id == id)
+        {
+            if managed_foreground {
+                active.focus_loss_since = None;
+                false
+            } else {
+                let since = *active.focus_loss_since.get_or_insert(now);
+                now.duration_since(since) >= Duration::from_millis(150)
+            }
+        } else {
+            true
+        };
+        if focus_loss_expired {
             tracing::debug!(
                 ?id,
                 ?foreground,
-                "foreground moved outside managed docking windows; cancelling DragHost"
+                "foreground stayed outside managed docking windows; cancelling DragHost"
             );
             self.cancel_active_drag_on_focus_loss(id, cx);
             return false;
