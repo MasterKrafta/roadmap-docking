@@ -30,11 +30,15 @@ pub(crate) fn begin_drag_at(
     source_window_id: WindowId,
     app: &mut App,
 ) {
-    eprintln!(
-        "[DOCK-INPUT] begin_drag payload={:?} handle={:?} origin=({:.1}, {:.1})",
-        payload, handle, position.x, position.y
-    );
-    if let Err(error) = controller.update(app, |controller, _| {
+    let result = controller.update(app, |controller, cx| {
+        // A layout change may have invalidated a gesture that did not receive
+        // its normal release/cancel event. Clear that stale state before arming
+        // the new pointer-down; a still-current active gesture is left intact
+        // and DragSession will reject an overlapping start.
+        if !controller.ensure_pointer_interaction_current() {
+            cx.notify();
+        }
+
         controller.begin_content_drag_interaction(
             payload,
             handle,
@@ -42,8 +46,33 @@ pub(crate) fn begin_drag_at(
             source_host,
             source_window_id,
         )
-    }) {
-        tracing::debug!(%error, "could not begin dock drag gesture");
+    });
+
+    match result {
+        Ok(Ok(())) => {
+            tracing::trace!(
+                ?payload,
+                ?handle,
+                source_window_id = ?source_window_id,
+                "dock drag gesture started"
+            );
+        }
+        Ok(Err(error)) => {
+            tracing::warn!(
+                %error,
+                ?payload,
+                ?handle,
+                "DockCore rejected the dock drag gesture"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                %error,
+                ?payload,
+                ?handle,
+                "could not access DockController to begin dock drag gesture"
+            );
+        }
     }
 }
 
