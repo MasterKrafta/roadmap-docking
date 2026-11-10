@@ -769,15 +769,23 @@ impl DragHostManager {
             self.cancel_active_drag(id, cx);
             return false;
         };
-        let source = crate::input::drag::drop_source(payload);
+        // A DockArea made of one Column can reuse Core's existing whole-Column
+        // resolver. Multi-Column DockAreas retain their existing FreeArea-only path.
+        let source = match payload {
+            DragPayload::DockArea { side } => self.controller.update(cx, |controller, _| {
+                let root = controller.layout().main_area(side)?.root;
+                matches!(controller.layout().node(root), Some(Node::Column(_)))
+                    .then_some(dock_core::DropSource::Column { column: root })
+            }),
+            _ => crate::input::drag::drop_source(payload),
+        };
 
         let update: Result<(Option<DropTarget>, Option<Rect>), String> =
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
-                if matches!(payload, DragPayload::DockArea { .. }) {
-                    // DockArea has no docking destination resolver. It may detach
-                    // over managed hosts or empty desktop space, but a foreign
-                    // topmost window must block the drop.
+                if matches!(payload, DragPayload::DockArea { .. }) && source.is_none() {
+                    // A multi-Column DockArea can still detach as one composition,
+                    // but cannot yet be inserted into another DockArea as a whole.
                     if matches!(target_window, Some(DockingWindowAtPoint::ForeignWindow)) {
                         Ok(None)
                     } else {
@@ -822,8 +830,8 @@ impl DragHostManager {
             // FreeArea has no target Host, so keep the pointer in the original
             // source Host's local coordinate system instead of mixing Main/Floating
             // coordinate spaces in the DragDropRequest.
-            let pointer_point = if matches!(payload, DragPayload::DockArea { .. }) {
-                // FreeArea bounds are calculated in the original MainHost's
+            let pointer_point = if target == Some(DropTarget::FreeArea) {
+                // FreeArea bounds are calculated in the original source Host's
                 // coordinate space, never in a window under the release cursor.
                 source_point
             } else {
@@ -939,27 +947,8 @@ impl DragHostManager {
                 let can_resolve = request.target != Some(DropTarget::FreeArea)
                     || request.floating_bounds.is_some();
                 if can_resolve {
-                    let action = match request.payload {
-                        DragPayload::DockArea { side } => {
-                            let command = if request.target == Some(DropTarget::FreeArea) {
-                                controller
-                                    .layout()
-                                    .main_area(side)
-                                    .zip(request.floating_bounds)
-                                    .map(|(area, bounds)| DockCommand::Float {
-                                        node: area.root,
-                                        bounds,
-                                    })
-                            } else {
-                                None
-                            };
-                            Ok(command.map_or(DragDropAction::NoOp, DragDropAction::Command))
-                        }
-                        _ => {
-                            let metrics = controller.metrics();
-                            controller.layout().resolve_drag_drop(&request, &metrics)
-                        }
-                    };
+                    let metrics = controller.metrics();
+                    let action = controller.layout().resolve_drag_drop(&request, &metrics);
                     match action {
                         Ok(DragDropAction::NoOp) => {}
                         Ok(DragDropAction::Command(command)) => {
@@ -1061,6 +1050,13 @@ impl DragHostManager {
             return;
         };
         handoff.source_placeholder_rendered = true;
+
+        // The next-frame callback already confirms that the empty source
+        // placeholder was rendered. Try the handoff immediately instead of
+        // always waiting for the first 8 ms polling tick.
+        if !self.try_release_handoff_source(id, cx) {
+            return;
+        }
 
         let manager = cx.entity().downgrade();
         cx.spawn(async move |_, app| {
