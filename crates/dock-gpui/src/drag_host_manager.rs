@@ -759,10 +759,14 @@ impl DragHostManager {
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
                 if matches!(payload, DragPayload::DockArea { .. }) {
-                    // DockArea has no docking destination resolver. Releasing its
-                    // DragHost completes the detach as one floating composition,
-                    // even when the cursor is still over an empty part of MainHost.
-                    Ok(Some(DropTarget::FreeArea))
+                    // DockArea has no docking destination resolver. It may detach
+                    // over managed hosts or empty desktop space, but a foreign
+                    // topmost window must block the drop.
+                    if matches!(target_window, Some(DockingWindowAtPoint::ForeignWindow)) {
+                        Ok(None)
+                    } else {
+                        Ok(Some(DropTarget::FreeArea))
+                    }
                 } else {
                     match (source, target_window) {
                         (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => {
