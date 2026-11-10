@@ -110,8 +110,8 @@ pub(crate) fn update_drag_at(
             return was_pressed;
         }
 
-        // Main-host content drags transported by DragHost resolve targets in its
-        // tracking loop. A floating title moves its own window and never resolves dock targets.
+        // Detached content drags resolve targets in DragHost's tracking loop.
+        // Floating-title gestures move their own window and never resolve dock targets.
         if !main_drag_uses_drop_targets(handle) {
             cx.notify();
             return was_pressed;
@@ -574,14 +574,13 @@ pub(crate) fn update_floating_tab_drag(
         }
 
         let source = DropSource::Panel { panel: drag.panel };
-        let local_reorder_target =
-            floating_panel_tab_reorder_target(
-                controller,
-                drag.source_window_id,
-                drag.source_group,
-                drag.panel,
-                position,
-            );
+        let local_reorder_target = floating_panel_tab_reorder_target(
+            controller,
+            drag.source_window_id,
+            drag.source_group,
+            drag.panel,
+            position,
+        );
         let target = if local_reorder_target.is_some() {
             local_reorder_target
         } else {
