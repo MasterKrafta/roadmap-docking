@@ -1023,8 +1023,15 @@ impl FloatingWindowManager {
                 .map(|floating| floating.bounds)
         }).unwrap_or(state.start_bounds);
 
-        let native_rect = self.native_ops.window_rect(state.native_window).ok();
-        if let Some(rect) = native_rect {
+        // The native move can cross onto a monitor with a different DPI.
+        // Capture both the actual outer origin and the current client size at
+        // that monitor's scale, rather than preserving a potentially stale
+        // logical size from the source monitor.
+        if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
+            floating_bounds = native_bounds;
+        } else if let Ok(rect) = self.native_ops.window_rect(state.native_window) {
+            // Keep the final native position even if client-size/DPI querying
+            // failed; the last valid Core size remains a safe fallback.
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
