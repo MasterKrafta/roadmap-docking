@@ -783,13 +783,17 @@ impl DragHostManager {
                         ) => controller
                             .prepare_floating_window_drop_resolver(window_id, group, source)
                             .and_then(|resolver| resolver.resolve(point)),
+                        (Some(_), Some(DockingWindowAtPoint::ForeignWindow)) => Ok(None),
                         (Some(source), None) => controller
                             .prepare_drop_resolver(source)
                             .map(|resolver| {
                                 resolver
                                     .zones()
                                     .iter()
-                                    .any(|zone| zone.target == DropTarget::FreeArea)
+                                    .any(|zone| {
+                                        zone.target == DropTarget::FreeArea
+                                            && zone.rect.contains(source_point).unwrap_or(false)
+                                    })
                                     .then_some(DropTarget::FreeArea)
                             }),
                         (None, _) => Ok(None),
@@ -807,9 +811,10 @@ impl DragHostManager {
                 source_point
             } else {
                 target_window
-                    .map(|target| match target {
+                    .and_then(|target| match target {
                         DockingWindowAtPoint::Main { point, .. }
-                        | DockingWindowAtPoint::Floating { point, .. } => point,
+                        | DockingWindowAtPoint::Floating { point, .. } => Some(point),
+                        DockingWindowAtPoint::ForeignWindow => None,
                     })
                     .unwrap_or(source_point)
             };
@@ -857,7 +862,7 @@ impl DragHostManager {
         });
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
-            active.target_role = target_window.map(DockingWindowAtPoint::role);
+            active.target_role = target_window.and_then(DockingWindowAtPoint::role);
             active.free_area_bounds = screen_free_area_bounds;
         }
 
