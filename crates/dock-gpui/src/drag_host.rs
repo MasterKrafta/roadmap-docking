@@ -138,9 +138,11 @@ impl DragHostSession {
 
     /// Returns whether every transferred PanelView has left its source host.
     pub fn all_panel_views_source_detached(&self) -> bool {
-        self.transferred_panels
-            .iter()
-            .all(|panel| self.detached_panels.contains(panel))
+        !self.transferred_panels.is_empty()
+            && self
+                .transferred_panels
+                .iter()
+                .all(|panel| self.detached_panels.contains(panel))
     }
 
     pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
@@ -299,6 +301,23 @@ mod tests {
         assert_ne!(first, second);
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
+    }
+
+    #[test]
+    fn new_drag_host_session_has_no_detached_panel_views() {
+        use dock_core::{DragHandle, DragPayload, PanelId};
+
+        let session = super::DragHostSession::new(
+            DragPayload::Panel {
+                panel: PanelId::null(),
+            },
+            DragHandle::PanelTab,
+            super::DragSourceHost::Main,
+            None,
+        );
+
+        assert!(session.transferred_panels().is_empty());
+        assert!(!session.all_panel_views_source_detached());
     }
 
     #[test]
