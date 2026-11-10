@@ -1027,7 +1027,7 @@ impl DragHostManager {
             source_placeholder_rendered: false,
             source_released: false,
         });
-        let window = active.window;
+        let window = active.window.clone();
 
         let manager = cx.entity().downgrade();
         match window.update(cx, move |surface, window, host_cx| {
