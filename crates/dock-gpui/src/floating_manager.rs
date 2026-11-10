@@ -15,7 +15,7 @@ use gpui::{
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeKey, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize,
+    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize,
     SystemNativeWindowOps,
 };
 
@@ -144,6 +144,7 @@ impl CompositionHostRegistry {
 /// the point converted into that host's Core-local coordinate system.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum DockingWindowAtPoint {
+    ForeignWindow,
     Main {
         point: Point,
     },
@@ -870,8 +871,12 @@ impl FloatingWindowManager {
         drag_host: NativeWindowId,
         excluded_source_window: Option<WindowId>,
     ) -> Option<DockingWindowAtPoint> {
-        let main_window_id = self.host_registry.main_window_id?;
-        let main_native_window = self.main_native_window?;
+        let Some(main_window_id) = self.host_registry.main_window_id else {
+            return Some(DockingWindowAtPoint::ForeignWindow);
+        };
+        let Some(main_native_window) = self.main_native_window else {
+            return Some(DockingWindowAtPoint::ForeignWindow);
+        };
         let mut known_windows = Vec::with_capacity(self.registry.windows.len() + 1);
 
         if excluded_source_window != Some(main_window_id) {
@@ -886,27 +891,40 @@ impl FloatingWindowManager {
 
         // The temporary DragHost is never an input target. The native resolver
         // skips it and continues through the desktop Z-order to a registered host.
-        let target_native = self
+        let target_native = match self
             .native_ops
             .window_from_point(screen, &known_windows, Some(drag_host))
-            .ok()
-            .flatten()?;
+        {
+            Ok(NativeWindowAtPoint::Known(window)) => window,
+            Ok(NativeWindowAtPoint::Foreign) | Err(_) => {
+                return Some(DockingWindowAtPoint::ForeignWindow);
+            }
+            Ok(NativeWindowAtPoint::Empty) => return None,
+        };
 
         if target_native == main_native_window {
-            return Some(DockingWindowAtPoint::Main {
-                point: self.core_point_for_main(screen)?,
-            });
+            return self
+                .core_point_for_main(screen)
+                .map(|point| DockingWindowAtPoint::Main { point })
+                .or(Some(DockingWindowAtPoint::ForeignWindow));
         }
 
-        let entry = self.registry.windows.values().find(|entry| {
+        let Some(entry) = self.registry.windows.values().find(|entry| {
             entry.visibility == PanelWindowVisibility::Visible
                 && entry.native_window == Some(target_native)
-        })?;
-        let group = entry.host_group?;
+        }) else {
+            return Some(DockingWindowAtPoint::ForeignWindow);
+        };
+        let (Some(group), Some(point)) = (
+            entry.host_group,
+            self.core_point_for_floating(target_native, screen),
+        ) else {
+            return Some(DockingWindowAtPoint::ForeignWindow);
+        };
         Some(DockingWindowAtPoint::Floating {
             group,
             window_id: entry.window_id,
-            point: self.core_point_for_floating(target_native, screen)?,
+            point,
         })
     }
 
@@ -924,11 +942,10 @@ impl FloatingWindowManager {
                 .then_some(entry.native_window)
                 .flatten()
         }));
-        self.native_ops
-            .window_from_point(cursor, &known, None)
-            .ok()
-            .flatten()
-            .is_some_and(|window| window != main)
+        matches!(
+            self.native_ops.window_from_point(cursor, &known, None),
+            Ok(NativeWindowAtPoint::Known(window)) if window != main
+        )
     }
 
     pub(crate) fn core_point_for_drag_source(
