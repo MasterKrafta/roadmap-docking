@@ -1017,6 +1017,7 @@ impl DragHostManager {
 
         if let Some(target_group) = floating_target {
             if dock_area.is_some()
+                && target == Some(DropTarget::FreeArea)
                 && self.promote_active_drag_host_to_floating(id, target_group, cx)
             {
                 return;
