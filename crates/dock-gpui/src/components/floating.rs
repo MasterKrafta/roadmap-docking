@@ -1802,11 +1802,9 @@ impl Render for FloatingHost {
         // A DragHost handoff completes only after this persistent host has
         // built a frame that can mount every transferred active PanelView.
         let handoff_panels = self.manager.upgrade().and_then(|manager| {
-            manager
-                .update(cx, |manager, manager_cx| {
-                    manager.pending_drag_host_handoff_panels(group, window_id, manager_cx)
-                })
-                .flatten()
+            manager.update(cx, |manager, manager_cx| {
+                manager.pending_drag_host_handoff_panels(group, window_id, manager_cx)
+            })
         });
         if let Some(required_panels) = handoff_panels.filter(|required| {
             required.iter().all(|panel| {
