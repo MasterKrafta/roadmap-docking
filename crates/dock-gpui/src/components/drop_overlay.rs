@@ -57,6 +57,11 @@ impl DropOverlay {
         let Some(zone) = resolved_zone
             .filter(|zone| zone_matches_preview(zone, Some(target), preview.point))
         else {
+            if let Some(line) =
+                same_group_panel_tab_insertion_rect(preview, target, tab_headers, tab_strips)
+            {
+                layer = layer.child(guide_rect(line, theme));
+            }
             return layer;
         };
 
@@ -360,6 +365,29 @@ fn group_edge_half(rect: Rect, zone: DropZone) -> Rect {
     }
 }
 
+fn same_group_panel_tab_insertion_rect(
+    preview: DragPreview,
+    target: DropTarget,
+    headers: &[TabHeaderRect],
+    strips: &[TabStripRect],
+) -> Option<Rect> {
+    let DragPayload::Panel { panel } = preview.payload else {
+        return None;
+    };
+    let DropTarget::Tabs { group, .. } = target else {
+        return None;
+    };
+    if headers
+        .iter()
+        .find(|header| header.panel == panel)
+        .is_none_or(|header| header.group != group)
+    {
+        return None;
+    }
+    let strip = strips.iter().find(|strip| strip.group == group)?;
+    tab_insertion_rect(target, strip.rect, headers, strips)
+}
+
 fn tab_insertion_rect(
     target: DropTarget,
     zone_rect: Rect,
@@ -470,10 +498,14 @@ fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use dock_core::{
-        DockSide, DropTarget, DropZone, DropZoneRect, Point, Rect, Size,
+        DockSide, DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, NodeId,
+        PanelId, Point, Rect, Size, TabHeaderRect, TabStripRect,
     };
 
-    use super::{group_edge_half, main_dock_edge_guide_rect, zone_matches_preview};
+    use super::{
+        group_edge_half, main_dock_edge_guide_rect, same_group_panel_tab_insertion_rect,
+        zone_matches_preview,
+    };
 
     #[test]
     fn group_edge_preview_covers_half_of_the_target_group() {
@@ -525,6 +557,38 @@ mod tests {
             Some(DropTarget::FreeArea),
             Point::new(111.0, 60.0),
         ));
+    }
+
+    #[test]
+    fn same_group_panel_tab_preview_shows_an_insertion_marker_without_a_drop_zone() {
+        let group = NodeId::null();
+        let panel = PanelId::null();
+        let strip_rect = Rect::new(Point::new(10.0, 20.0), Size::new(180.0, 24.0));
+        let headers = [TabHeaderRect::new(
+            group,
+            panel,
+            0,
+            Rect::new(Point::new(10.0, 20.0), Size::new(40.0, 24.0)),
+        )];
+        let strips = [TabStripRect::new(group, strip_rect)];
+        let preview = DragPreview {
+            payload: DragPayload::Panel { panel },
+            point: Point::new(55.0, 30.0),
+            target: Some(DropTarget::Tabs { group, index: 1 }),
+        };
+
+        assert_eq!(
+            same_group_panel_tab_insertion_rect(
+                preview,
+                DropTarget::Tabs { group, index: 1 },
+                &headers,
+                &strips,
+            ),
+            Some(Rect::new(
+                Point::new(48.5, 20.0),
+                Size::new(3.0, 24.0),
+            ))
+        );
     }
 
     #[test]
