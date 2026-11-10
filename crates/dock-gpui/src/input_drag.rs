@@ -574,7 +574,13 @@ pub(crate) fn update_floating_tab_drag(
 
         let source = DropSource::Panel { panel: drag.panel };
         let local_reorder_target =
-            floating_panel_tab_reorder_target(controller, drag, position);
+            floating_panel_tab_reorder_target(
+                controller,
+                drag.source_window_id,
+                drag.source_group,
+                drag.panel,
+                position,
+            );
         let resolved_target = match controller
             .prepare_floating_window_drop_resolver(
                 drag.source_window_id,
@@ -649,17 +655,19 @@ fn main_panel_tab_reorder_target(
 /// reduced drag zone as the FloatingHost tear-off pipeline.
 fn floating_panel_tab_reorder_target(
     controller: &mut DockController,
-    drag: FloatingTabDrag,
+    window_id: WindowId,
+    floating_group: FloatingGroupId,
+    panel: PanelId,
     position: Point,
 ) -> Option<DropTarget> {
     let (group, strip_rect, group_rect, headers) = {
         let rects = controller
-            .floating_geometry(drag.source_window_id, drag.source_group)
+            .floating_geometry(window_id, floating_group)
             .ok()?;
         let source = rects
             .tab_headers
             .iter()
-            .find(|header| header.panel == drag.panel)?;
+            .find(|header| header.panel == panel)?;
         let group = source.group;
         let strip_rect = rects
             .tab_strips
@@ -744,14 +752,14 @@ pub(crate) fn finish_floating_tab_drag(
             return true;
         }
 
-        let drag = FloatingTabDrag {
-            source_window_id: window_id,
+        let target = floating_panel_tab_reorder_target(
+            controller,
+            window_id,
             source_group,
             panel,
-            press_origin: controller.drag().session().state().origin().unwrap_or(position),
-            layout_version: controller.layout().version(),
-        };
-        let target = floating_panel_tab_reorder_target(controller, drag, position).or_else(|| {
+            position,
+        )
+        .or_else(|| {
             controller
                 .prepare_floating_window_drop_resolver(
                     window_id,
