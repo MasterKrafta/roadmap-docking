@@ -52,9 +52,8 @@ impl DockAreaHeader {
         for (index, column) in columns.iter().enumerate() {
             if dragged_column != Some(column.column) {
                 header = header.child(DockAreaDragArea::render_column_drag_strip(
-                    format!("{id}-column-grip-{index}"),
+                    format!("{id}-column-drag-strip-{index}"),
                     column.rect.origin.x - area_rect.origin.x,
-                    theme,
                 ));
             }
 
