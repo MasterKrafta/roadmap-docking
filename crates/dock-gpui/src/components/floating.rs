@@ -1806,7 +1806,6 @@ impl Render for FloatingHost {
                 .update(cx, |manager, manager_cx| {
                     manager.pending_drag_host_handoff_panels(group, window_id, manager_cx)
                 })
-                .ok()
                 .flatten()
         });
         if let Some(required_panels) = handoff_panels.filter(|required| {
