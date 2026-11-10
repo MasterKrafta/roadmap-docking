@@ -1300,7 +1300,7 @@ fn main_column_drag_handle_at_point(
 ) -> Option<NodeId> {
     controller.update(app, |controller, _| {
         let metrics = controller.metrics();
-        let rects = controller.geometry().ok()?;
+        let rects = controller.geometry().cloned().ok()?;
         let layout = controller.layout();
 
         for side in [DockSide::Left, DockSide::Right] {
