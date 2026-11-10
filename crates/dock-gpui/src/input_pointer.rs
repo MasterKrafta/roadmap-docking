@@ -160,6 +160,9 @@ pub(crate) fn register_pointer_events(
                 || !root_hitbox.is_hovered(window)
                 || DockInteractionCoordinator::has_capture(&pointer_capture)
                 || DockInteractionCoordinator::window_has_capture(window)
+                || controller.update(app, |controller, _| {
+                    controller.has_active_pointer_interaction()
+                })
                 || drag_host_manager.update(app, |manager, _| {
                     manager.active_drag_host_id().is_some()
                 })
