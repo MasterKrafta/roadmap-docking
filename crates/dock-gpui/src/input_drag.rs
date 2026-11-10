@@ -1255,9 +1255,11 @@ mod main_drop_resolution_tests {
 
 #[cfg(test)]
 mod floating_bounds_tests {
-    use dock_core::{Point, Rect, Size};
+    use dock_core::{NodeId, PanelId, Point, Rect, Size};
 
-    use super::{column_tab_floating_bounds, desired_floating_bounds};
+    use super::{
+        column_tab_floating_bounds, desired_floating_bounds, tab_insertion_index,
+    };
 
     #[test]
     fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
