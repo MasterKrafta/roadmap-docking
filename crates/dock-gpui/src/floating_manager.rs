@@ -1107,9 +1107,14 @@ impl FloatingWindowManager {
         }
         self.reconciling = true;
 
-        let (mut groups, panel_locations, recover_initial_bounds) =
+        let (mut groups, panel_locations, recover_initial_bounds, transferred_panels) =
             self.controller.update(cx, |controller, _| {
                 let recover_initial_bounds = controller.take_initial_monitor_recovery_pending();
+                let transferred_panels = controller
+                    .drag()
+                    .host_session()
+                    .map(|session| session.transferred_panels().to_vec())
+                    .unwrap_or_default();
                 let layout = controller.layout();
                 let metrics = controller.metrics();
                 let mut panel_locations = HashMap::new();
@@ -1147,7 +1152,7 @@ impl FloatingWindowManager {
                     });
                 }
 
-                (groups, panel_locations, recover_initial_bounds)
+                (groups, panel_locations, recover_initial_bounds, transferred_panels)
             });
 
         groups.sort_by_key(|group| group.z_order);
@@ -1370,7 +1375,7 @@ impl FloatingWindowManager {
         }
         self.host_registry.floating_groups = active_hosts.clone();
 
-        self.synchronize_native_z_order(&groups, &active_hosts);
+        self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
 
         for (panel, entry) in &mut self.registry.windows {
             if entry.host_group.is_none()
@@ -1446,6 +1451,7 @@ impl FloatingWindowManager {
         &mut self,
         groups: &[FloatingGroupSnapshot],
         active_hosts: &HashMap<FloatingGroupId, PanelId>,
+        transferred_panels: &[PanelId],
     ) {
         for group in groups {
             if self.native_move.is_some_and(|session| session.group == group.id) {
@@ -1457,6 +1463,14 @@ impl FloatingWindowManager {
             let Some(entry) = self.registry.windows.get_mut(&panel) else {
                 continue;
             };
+            // A newly-created FloatingHost for a transferred composition stays
+            // hidden until DragHost has rendered its empty placeholder and
+            // released the cached AnyViews. Already-visible hosts remain visible.
+            if entry.visibility == PanelWindowVisibility::Hidden
+                && group.panels.iter().any(|panel| transferred_panels.contains(panel))
+            {
+                continue;
+            }
             let Some(native_window) = entry.native_window else {
                 continue;
             };
@@ -1470,6 +1484,101 @@ impl FloatingWindowManager {
                     "could not show the native window hosting a floating composition"
                 ),
             }
+        }
+    }
+
+    /// Shows the persistent FloatingHost only after DragHost has stopped
+    /// mounting the transferred AnyViews. This prevents a newly-created host
+    /// from presenting an empty frame while DragHost still owns the content.
+    pub(crate) fn show_handoff_target(
+        &mut self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return false;
+        };
+        let Some((native_window, already_visible)) = self.registry.windows.get(&panel).and_then(|entry| {
+            (entry.host_group == Some(group))
+                .then_some((entry.native_window?, entry.visibility == PanelWindowVisibility::Visible))
+        }) else {
+            return false;
+        };
+        if already_visible {
+            return true;
+        }
+
+        match self.native_ops.show_no_activate(native_window) {
+            Ok(()) => {
+                if let Some(entry) = self.registry.windows.get_mut(&panel) {
+                    entry.visibility = PanelWindowVisibility::Visible;
+                }
+                cx.notify();
+                true
+            }
+            Err(error) => {
+                tracing::warn!(
+                    ?group,
+                    ?panel,
+                    %error,
+                    "could not show the persistent FloatingHost during DragHost handoff"
+                );
+                false
+            }
+        }
+    }
+
+    /// Returns the transferred panels whose destination FloatingHost is ready
+    /// to render. FloatingHost calls this from its render pass before scheduling
+    /// a next-frame handoff confirmation.
+    pub(crate) fn pending_drag_host_handoff_panels(
+        &self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<PanelId>> {
+        let host_panel = self.host_registry.panel_for_group(group)?;
+        let entry = self.registry.windows.get(&host_panel)?;
+        if entry.window_id != window_id
+            || entry.host_group != Some(group)
+            || entry.visibility != PanelWindowVisibility::Visible
+        {
+            return None;
+        }
+        let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
+        drag_host
+            .update(cx, |manager, _| manager.pending_handoff_panels(group))
+            .ok()
+            .flatten()
+    }
+
+    /// Called after the destination FloatingHost has completed a frame with
+    /// the transferred PanelViews mounted. Only then is the temporary DragHost
+    /// removed from the desktop.
+    pub(crate) fn notify_drag_host_handoff_rendered(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        rendered_panels: &[PanelId],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(host_panel) = self.host_registry.panel_for_group(group) else {
+            return;
+        };
+        let Some(entry) = self.registry.windows.get(&host_panel) else {
+            return;
+        };
+        if entry.window_id != window_id
+            || entry.host_group != Some(group)
+            || entry.visibility != PanelWindowVisibility::Visible
+        {
+            return;
+        }
+
+        if let Some(drag_host) = self.drag_host_manager.as_ref().and_then(|manager| manager.upgrade()) {
+            drag_host.update(cx, |manager, manager_cx| {
+                manager.complete_floating_handoff(group, rendered_panels, manager_cx);
+            }).ok();
         }
     }
 
