@@ -76,7 +76,6 @@ impl DockAreaDragArea {
     pub(crate) fn render_column_drag_strip(
         id: String,
         left: f32,
-        _theme: Theme,
     ) -> impl IntoElement {
         div()
             .id(id)
