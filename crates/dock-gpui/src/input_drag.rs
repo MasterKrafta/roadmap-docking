@@ -47,8 +47,9 @@ pub(crate) fn begin_drag_at(
     }
 }
 
-/// Content drags transported by DragHost defer drop-target tracking to its
-/// native polling loop. FloatingTitle remains a native move of its own window.
+/// Dock content gestures that have left their source surface defer drop-target
+/// tracking to DragHost's native polling loop. Same-strip PanelTab reorders are
+/// handled separately before this resolver-routing decision.
 fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
     !matches!(
         handle,
@@ -1238,7 +1239,7 @@ mod main_drop_resolution_tests {
     use super::main_drag_uses_drop_targets;
 
     #[test]
-    fn main_content_drags_defer_drop_target_resolution_to_drag_host() {
+    fn detached_content_drags_defer_drop_target_resolution_to_drag_host() {
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::PanelTab)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::FlyoutPanel)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
