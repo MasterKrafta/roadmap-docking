@@ -200,23 +200,11 @@ pub(crate) fn register_pointer_events(
             if event.button != MouseButton::Left {
                 return;
             }
-            let Some(hit) = hit else {
-                return;
-            };
-            // DockColumnView renders DockTab as a dedicated component while Core's
-            // generic hit-test can classify the same header area as Group/TabStrip.
-            // Normalize that area back to its semantic TabHeader before dispatching
-            // the pointer-down intent, so dragging the visible DockTab starts PanelTab.
-            let hit = dock_component_tab_hit_at_point(&controller, core_point, app).unwrap_or(hit);
-            eprintln!(
-                "[DOCK-INPUT][main] down_intent={:?}",
-                pointer_down_intent_for_hit(hit)
-            );
 
             let source_window_id = window.window_handle().window_id();
-            // Resolve the shared DockArea header from its geometry before
-            // dispatching the broader Core Column hit. This keeps the complete
-            // composition draggable after it has been returned from Floating.
+            // Resolve the shared DockArea header from its geometry before Core
+            // hit dispatch. The geometric surface remains authoritative even if
+            // hit-test falls through to an overlapping Column or returns Miss.
             if let Some(side) = dock_area_drag_handle_side(&controller, core_point, app) {
                 begin_drag_at(
                     &controller,
@@ -229,6 +217,19 @@ pub(crate) fn register_pointer_events(
                 );
                 return;
             }
+
+            let Some(hit) = hit else {
+                return;
+            };
+            // DockColumnView renders DockTab as a dedicated component while Core's
+            // generic hit-test can classify the same header area as Group/TabStrip.
+            // Normalize that area back to its semantic TabHeader before dispatching
+            // the pointer-down intent, so dragging the visible DockTab starts PanelTab.
+            let hit = dock_component_tab_hit_at_point(&controller, core_point, app).unwrap_or(hit);
+            eprintln!(
+                "[DOCK-INPUT][main] down_intent={:?}",
+                pointer_down_intent_for_hit(hit)
+            );
 
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
