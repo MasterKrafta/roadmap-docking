@@ -716,7 +716,10 @@ impl DragHostManager {
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
                 if matches!(payload, DragPayload::DockArea { .. }) {
-                    Ok(target_window.is_none().then_some(DropTarget::FreeArea))
+                    // DockArea has no docking destination resolver. Releasing its
+                    // DragHost completes the detach as one floating composition,
+                    // even when the cursor is still over an empty part of MainHost.
+                    Ok(Some(DropTarget::FreeArea))
                 } else {
                     match (source, target_window) {
                         (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => {
@@ -752,12 +755,18 @@ impl DragHostManager {
             // FreeArea has no target Host, so keep the pointer in the original
             // source Host's local coordinate system instead of mixing Main/Floating
             // coordinate spaces in the DragDropRequest.
-            let pointer_point = target_window
-                .map(|target| match target {
-                    DockingWindowAtPoint::Main { point, .. }
-                    | DockingWindowAtPoint::Floating { point, .. } => point,
-                })
-                .unwrap_or(source_point);
+            let pointer_point = if matches!(payload, DragPayload::DockArea { .. }) {
+                // FreeArea bounds are calculated in the original MainHost's
+                // coordinate space, never in a window under the release cursor.
+                source_point
+            } else {
+                target_window
+                    .map(|target| match target {
+                        DockingWindowAtPoint::Main { point, .. }
+                        | DockingWindowAtPoint::Floating { point, .. } => point,
+                    })
+                    .unwrap_or(source_point)
+            };
             controller
                 .drag_mut()
                 .session_mut()
@@ -831,6 +840,7 @@ impl DragHostManager {
         let finished = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
                 let _ = controller.cancel_pointer_interaction();
+                let _ = controller.drag_mut().session_mut().reset();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
                 controller_cx.notify();
@@ -919,6 +929,11 @@ impl DragHostManager {
             if let Err(error) = controller.cancel_pointer_interaction_on_escape() {
                 tracing::debug!(?id, %error, "could not cancel DragHost pointer interaction");
             }
+            if let Err(error) = controller.drag_mut().session_mut().reset() {
+                tracing::debug!(?id, %error, "could not reset cancelled DragHost session");
+            }
+            controller.drag_mut().clear_resolver();
+            controller.drag_mut().clear_layout_version();
             controller_cx.notify();
         });
     }
@@ -939,6 +954,11 @@ impl DragHostManager {
                     "could not cancel DragHost pointer interaction after focus loss"
                 );
             }
+            if let Err(error) = controller.drag_mut().session_mut().reset() {
+                tracing::debug!(?id, %error, "could not reset DragHost session after focus loss");
+            }
+            controller.drag_mut().clear_resolver();
+            controller.drag_mut().clear_layout_version();
             controller_cx.notify();
         });
     }
