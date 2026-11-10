@@ -53,8 +53,8 @@ impl DropOverlay {
         let Some(target) = preview.target else {
             return layer;
         };
-        // Core has already selected the exact affordance from its resolver.
-        // The overlay only verifies that it still corresponds to this preview.
+        // Resolver-backed affordances are painted only when they still match
+        // the preview. Same-group PanelTab reordering is handled by the fallback below.
         let Some(zone) = resolved_zone
             .filter(|zone| zone_matches_preview(zone, Some(target), preview.point))
         else {
