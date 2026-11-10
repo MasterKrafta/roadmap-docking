@@ -682,6 +682,14 @@ impl Render for FloatingHost {
                         if phase != DispatchPhase::Capture
                             || event.button != MouseButton::Left
                             || !hitbox.is_hovered(window)
+                            || DockInteractionCoordinator::has_capture(&pointer_capture_for_down)
+                            || DockInteractionCoordinator::window_has_capture(window)
+                            || tab_press_for_down.get().is_some()
+                            || group_press_for_down.get().is_some()
+                            || column_press_for_down.get().is_some()
+                            || controller_for_down.update(app, |controller, _| {
+                                controller.has_active_pointer_interaction()
+                            })
                         {
                             return;
                         }
