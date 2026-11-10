@@ -887,6 +887,22 @@ impl Render for FloatingHost {
                             Some((tab_group, panel, controller.layout().version()))
                         });
                         if let Some((tab_group, panel, layout_version)) = press {
+                            if dock_component_tab_zones_for_down.contains_key(&panel) {
+                                let moved_existing_window =
+                                    manager_for_down.upgrade().is_some_and(|manager| {
+                                        manager.update(app, |manager, manager_cx| {
+                                            manager.begin_existing_window_move(
+                                                group,
+                                                point,
+                                                manager_cx,
+                                            )
+                                        })
+                                    });
+                                if moved_existing_window {
+                                    app.stop_propagation();
+                                    return;
+                                }
+                            }
                             tab_press_for_down.set(Some(FloatingTabPress {
                                 tab_group,
                                 panel,
