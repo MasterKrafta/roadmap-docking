@@ -888,6 +888,32 @@ impl DragHostManager {
                 manager.screen_bounds_for_drag_source(source_host, bounds)
             })
         });
+
+        // Prepare the persistent destination as soon as a whole Main DockArea
+        // enters FreeArea. The hidden host is reused by FloatingWindowManager
+        // after mouse-up, moving window creation out of the release path.
+        if target == Some(DropTarget::FreeArea)
+            && matches!(payload, DragPayload::DockArea { .. })
+            && let Some(panel) = self
+                .active
+                .as_ref()
+                .filter(|active| active.id == id)
+                .and_then(|active| active.panels.first().copied())
+            && let Some(bounds) = screen_free_area_bounds
+            && let Some(manager) = floating_manager.as_ref()
+        {
+            let prepared = manager.update(cx, |manager, manager_cx| {
+                manager.prepare_drag_float_window(panel, bounds, manager_cx)
+            });
+            if !prepared {
+                tracing::debug!(
+                    ?id,
+                    ?panel,
+                    "could not prewarm the FloatingHost; release will use normal window creation"
+                );
+            }
+        }
+
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
             active.target_role = target_window.and_then(DockingWindowAtPoint::role);
@@ -1253,6 +1279,17 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
         drop(active.source_detach_subscription.take());
+
+        // A prepared host is consumed by FloatingWindowManager on a successful
+        // float. If the drag was cancelled or docked, discard the unused hidden
+        // window while preserving the still-open Panel's Main location.
+        if let Some(manager) = self.floating_manager.as_ref() {
+            for panel in &active.panels {
+                manager.update(cx, |manager, manager_cx| {
+                    manager.discard_prepared_panel_window(*panel, manager_cx);
+                });
+            }
+        }
 
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(
