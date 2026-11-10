@@ -12,10 +12,11 @@ use ui::Theme;
 
 use crate::dock_components::GroupPresentation;
 
-/// Visual feedback for the current Core-resolved destination.
+/// Visual feedback for the current dock destination.
 ///
-/// The adapter never creates a target here: only zones captured by
-/// DropZoneResolver and equal to DragPreview.target are painted.
+/// Most targets are painted from the active DropZoneResolver snapshot. A
+/// same-group PanelTab reorder has no resolver zone by design, so its insertion
+/// marker is derived from the source group's existing tab geometry.
 pub struct DropOverlay;
 
 /// A non-interactive visual card that follows the active drag pointer.
