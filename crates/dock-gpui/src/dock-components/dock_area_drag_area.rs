@@ -16,12 +16,21 @@ impl DockAreaDragArea {
         point: Point,
         header_height: f32,
     ) -> bool {
+        Self::column_drag_handle_contains_in_area(column.rect, column, point, header_height)
+    }
+
+    pub(crate) fn column_drag_handle_contains_in_area(
+        area_rect: Rect,
+        column: dock_core::ColumnRect,
+        point: Point,
+        header_height: f32,
+    ) -> bool {
         let width = Self::COLUMN_GRIP_WIDTH.min(column.rect.size.width);
-        let height = header_height.min(column.rect.size.height);
+        let height = header_height.min(area_rect.size.height);
         point.x >= column.rect.origin.x
             && point.x < column.rect.origin.x + width
-            && point.y >= column.rect.origin.y
-            && point.y < column.rect.origin.y + height
+            && point.y >= area_rect.origin.y
+            && point.y < area_rect.origin.y + height
     }
 
     pub(crate) fn contains(
@@ -45,7 +54,12 @@ impl DockAreaDragArea {
         let close_left = area_right - button_width;
         if point.x >= close_left
             || column_grip_columns.iter().any(|column| {
-                Self::column_drag_handle_contains(*column, point, header_height)
+                Self::column_drag_handle_contains_in_area(
+                    area_rect,
+                    *column,
+                    point,
+                    header_height,
+                )
             })
         {
             return false;
