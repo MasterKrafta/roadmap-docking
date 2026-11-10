@@ -214,6 +214,22 @@ pub(crate) fn register_pointer_events(
             );
 
             let source_window_id = window.window_handle().window_id();
+            // Resolve the shared DockArea header from its geometry before
+            // dispatching the broader Core Column hit. This keeps the complete
+            // composition draggable after it has been returned from Floating.
+            if let Some(side) = dock_area_drag_handle_side(&controller, core_point, app) {
+                begin_drag_at(
+                    &controller,
+                    DragPayload::DockArea { side },
+                    DragHandle::DockAreaHeader,
+                    core_point,
+                    DragSourceHost::Main,
+                    source_window_id,
+                    app,
+                );
+                return;
+            }
+
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
                     let tab_is_clickable = tab_header_clickable_contains(
@@ -277,21 +293,6 @@ pub(crate) fn register_pointer_events(
                             &controller,
                             DragPayload::Column { column },
                             DragHandle::ColumnHeader,
-                            core_point,
-                            DragSourceHost::Main,
-                            source_window_id,
-                            app,
-                        );
-                    } else if let Some(side) = dock_area_drag_handle_side(
-                        &controller,
-                        column,
-                        core_point,
-                        app,
-                    ) {
-                        begin_drag_at(
-                            &controller,
-                            DragPayload::DockArea { side },
-                            DragHandle::DockAreaHeader,
                             core_point,
                             DragSourceHost::Main,
                             source_window_id,
@@ -1236,7 +1237,6 @@ fn column_header_drag_handle_contains(
 
 fn dock_area_drag_handle_side(
     controller: &Entity<DockController>,
-    column: NodeId,
     point: Point,
     app: &mut App,
 ) -> Option<DockSide> {
@@ -1251,10 +1251,6 @@ fn dock_area_drag_handle_side(
             };
             let mut area_column_ids = Vec::new();
             collect_dock_area_columns(layout, area.root, &mut area_column_ids);
-            if !area_column_ids.contains(&column) {
-                continue;
-            }
-
             let area_columns = area_column_ids
                 .iter()
                 .filter_map(|id| rects.columns.iter().find(|rect| rect.column == *id).copied())
