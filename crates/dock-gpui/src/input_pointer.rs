@@ -19,7 +19,8 @@ use crate::{
 use super::{
     interaction::DockInteractionCoordinator,
     drag::{
-        begin_column_drag_host, begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
+        begin_column_drag_host, begin_dock_area_drag_host, begin_drag_at, begin_group_drag_host,
+        begin_panel_drag_host,
         finish_drag_at, update_drag_at,
     },
     resize::{begin_resize_hit, finish_resize, update_resize},
@@ -504,6 +505,15 @@ pub(crate) fn register_pointer_events(
                     }
                 ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
             });
+            let dock_area_header_active = controller.update(app, |controller, _| {
+                matches!(
+                    controller.drag().session().state(),
+                    DragState::Dragging {
+                        payload: DragPayload::DockArea { .. },
+                        ..
+                    }
+                ) && controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
+            });
             let over_floating = (panel_drag_active || group_grip_active)
                 && manager.update(app, |manager, _| {
                     manager.cursor_over_floating_window_from_main()
@@ -533,6 +543,19 @@ pub(crate) fn register_pointer_events(
                 if !started {
                     tracing::debug!(
                         "Column drag could not start DragHost; source gesture was cancelled"
+                    );
+                }
+                DockInteractionCoordinator::release(window, &pointer_capture);
+                pointer_press.set(None);
+                app.stop_propagation();
+                return;
+            }
+
+            if dock_area_header_active && should_start_drag_host {
+                let started = begin_dock_area_drag_host(&controller, &drag_host_manager, app);
+                if !started {
+                    tracing::debug!(
+                        "DockArea drag could not start DragHost; source gesture was cancelled"
                     );
                 }
                 DockInteractionCoordinator::release(window, &pointer_capture);
@@ -702,6 +725,15 @@ pub(crate) fn register_pointer_events(
                         }
                     ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
                 });
+                let dock_area_header_active = controller.update(app, |controller, _| {
+                    matches!(
+                        controller.drag().session().state(),
+                        DragState::Dragging {
+                            payload: DragPayload::DockArea { .. },
+                            ..
+                        }
+                    ) && controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
+                });
                 let over_floating = (panel_drag_active || group_grip_active)
                     && manager.update(app, |manager, _| {
                         manager.cursor_over_floating_window_from_main()
@@ -730,6 +762,16 @@ pub(crate) fn register_pointer_events(
                     let started = begin_column_drag_host(&controller, &drag_host_manager, app);
                     if !started {
                         tracing::debug!("Column drag could not start DragHost on release");
+                    }
+                    DockInteractionCoordinator::release(window, &pointer_capture);
+                    pointer_press.set(None);
+                    app.stop_propagation();
+                    return;
+                }
+                if dock_area_header_active && should_start_drag_host {
+                    let started = begin_dock_area_drag_host(&controller, &drag_host_manager, app);
+                    if !started {
+                        tracing::debug!("DockArea drag could not start DragHost on release");
                     }
                     DockInteractionCoordinator::release(window, &pointer_capture);
                     pointer_press.set(None);
