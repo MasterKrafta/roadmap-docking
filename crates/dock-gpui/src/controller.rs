@@ -695,6 +695,14 @@ impl DockController {
         handle: DragHandle,
         point: Point,
     ) -> Result<(), DragSessionError> {
+        // A host-specific completion/cancellation path may leave a terminal
+        // state behind. Re-arm it here so the next physical gesture can start.
+        if matches!(
+            self.drag.session().state(),
+            DragState::Dropped { .. } | DragState::Cancelled { .. }
+        ) {
+            self.drag.session_mut().reset()?;
+        }
         self.drag
             .session_mut()
             .pointer_down_with_handle(payload, handle, point)?;
