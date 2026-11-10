@@ -1799,6 +1799,38 @@ impl Render for FloatingHost {
             });
         }
 
+        // A DragHost handoff completes only after this persistent host has
+        // built a frame that can mount every transferred active PanelView.
+        let handoff_panels = self.manager.upgrade().and_then(|manager| {
+            manager
+                .update(cx, |manager, manager_cx| {
+                    manager.pending_drag_host_handoff_panels(group, window_id, manager_cx)
+                })
+                .ok()
+                .flatten()
+        });
+        if let Some(required_panels) = handoff_panels.filter(|required| {
+            required.iter().all(|panel| {
+                panel_views
+                    .iter()
+                    .all(|(rect, view)| rect.panel != *panel || view.is_some())
+            })
+        }) {
+            let manager = self.manager.clone();
+            window.on_next_frame(move |_, app| {
+                if let Some(manager) = manager.upgrade() {
+                    let _ = manager.update(app, |manager, manager_cx| {
+                        manager.notify_drag_host_handoff_rendered(
+                            group,
+                            window_id,
+                            &required_panels,
+                            manager_cx,
+                        );
+                    });
+                }
+            });
+        }
+
         if self.open_context_menu.as_ref().is_some_and(|open| {
             !context_menu_target_exists(
                 open.target,
