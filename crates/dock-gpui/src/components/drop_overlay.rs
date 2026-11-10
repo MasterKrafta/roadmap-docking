@@ -501,6 +501,7 @@ mod tests {
         DockSide, DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, NodeId,
         PanelId, Point, Rect, Size, TabHeaderRect, TabStripRect,
     };
+    use slotmap::Key;
 
     use super::{
         group_edge_half, main_dock_edge_guide_rect, same_group_panel_tab_insertion_rect,
