@@ -21,7 +21,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
-    components::FloatingHost, geometry::DockGeometry,
+    components::FloatingHost, drag_host_manager::DragHostSurface, geometry::DockGeometry,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,8 +36,66 @@ pub enum PanelWindowVisibility {
     Visible,
 }
 
+#[derive(Clone, Copy)]
+enum PanelWindowHandle {
+    Floating(WindowHandle<FloatingHost>),
+    DragHost(WindowHandle<DragHostSurface>),
+}
+
+impl PanelWindowHandle {
+    fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
+        match self {
+            Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
+            Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
+        }
+    }
+
+    fn set_group(
+        &self,
+        group: Option<FloatingGroupId>,
+        cx: &mut Context<FloatingWindowManager>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Floating(window) => window
+                .update(cx, |host, window, host_cx| {
+                    host.set_host_group(group, window);
+                    host_cx.notify();
+                })
+                .map_err(|error| error.to_string()),
+            Self::DragHost(window) => {
+                match window.update(cx, |surface, window, host_cx| {
+                    let updated = surface.set_floating_group(group, window, host_cx);
+                    host_cx.notify();
+                    updated
+                }) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => Err("DragHost could not switch its Floating composition".into()),
+                    Err(error) => Err(error.to_string()),
+                }
+            }
+        }
+    }
+
+    fn remove_window(&self, cx: &mut Context<FloatingWindowManager>) {
+        match self {
+            Self::Floating(window) => {
+                let _ = window.update(cx, |host, window, _| {
+                    host.set_host_group(None, window);
+                    window.remove_window();
+                });
+            }
+            Self::DragHost(window) => {
+                let _ = window.update(cx, |surface, window, surface_cx| {
+                    let _ = surface.set_floating_group(None, window, surface_cx);
+                    window.remove_window();
+                });
+            }
+        }
+    }
+}
+
 struct PanelWindowEntry {
-    window: WindowHandle<FloatingHost>,
+    window: PanelWindowHandle,
     window_id: WindowId,
     native_window: Option<NativeWindowId>,
     bounds: Rect,
@@ -72,7 +130,10 @@ impl PanelWindowRegistry {
     }
 
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
-        self.windows.get(&panel).map(|entry| entry.window)
+        match self.windows.get(&panel)?.window {
+            PanelWindowHandle::Floating(window) => Some(window),
+            PanelWindowHandle::DragHost(_) => None,
+        }
     }
 
     pub fn window_id_for_panel(&self, panel: PanelId) -> Option<WindowId> {
@@ -257,6 +318,62 @@ impl FloatingWindowManager {
 
     pub(crate) fn drag_host_manager(&self) -> Option<Entity<DragHostManager>> {
         self.drag_host_manager.as_ref()?.upgrade()
+    }
+
+    /// Registers an already-open DragHost as the native host for a newly floated DockArea.
+    /// The HWND is transferred to the persistent registry instead of opening another window.
+    pub(crate) fn adopt_drag_host_window(
+        &mut self,
+        panel: PanelId,
+        group: FloatingGroupId,
+        window: WindowHandle<DragHostSurface>,
+        window_id: WindowId,
+        native_window: NativeWindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.registry.windows.contains_key(&panel) {
+            return false;
+        }
+        let Some(bounds) = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
+        }) else {
+            return false;
+        };
+
+        let configured = window.update(cx, |surface, native, surface_cx| {
+            surface.set_floating_group(Some(group), native, surface_cx)
+        });
+        if !matches!(configured, Ok(true)) {
+            return false;
+        }
+
+        let scale = self.native_ops.scale_factor(native_window).ok();
+        self.registry.windows.insert(
+            panel,
+            PanelWindowEntry {
+                window: PanelWindowHandle::DragHost(window),
+                window_id,
+                native_window: Some(native_window),
+                bounds,
+                native_min_size: None,
+                native_scale_factor: scale,
+                resize_enabled: false,
+                host_group: Some(group),
+                visibility: PanelWindowVisibility::Visible,
+            },
+        );
+        // Preserve the adopted panel as the selected host during the first
+        // reconciliation; otherwise the normal first-panel selection may open
+        // a second native window for the same composition.
+        self.host_registry.floating_groups.insert(group, panel);
+        self.reconcile(cx);
+
+        self.host_registry.floating_groups.get(&group) == Some(&panel)
+            && self.registry.windows.get(&panel).is_some_and(|entry| {
+                entry.host_group == Some(group)
+                    && entry.native_window == Some(native_window)
+                    && entry.window_id == window_id
+            })
     }
 
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
@@ -1201,11 +1318,7 @@ impl FloatingWindowManager {
             .windows
             .iter()
             .filter_map(|(panel, entry)| {
-                entry
-                    .window
-                    .update(cx, |_, _, _| ())
-                    .is_err()
-                    .then_some(*panel)
+                (!entry.window.is_available(cx)).then_some(*panel)
             })
             .collect::<Vec<_>>();
         for panel in unavailable_panels {
@@ -1260,10 +1373,7 @@ impl FloatingWindowManager {
         for panel in detached_panels {
             if let Some(entry) = self.registry.windows.get_mut(&panel) {
                 let previous_group = entry.host_group;
-                let detached = match entry.window.update(cx, |host, window, host_cx| {
-                    host.set_host_group(None, window);
-                    host_cx.notify();
-                }) {
+                let detached = match entry.window.set_group(None, cx) {
                     Ok(()) => true,
                     Err(error) => {
                         tracing::warn!(
@@ -1352,10 +1462,7 @@ impl FloatingWindowManager {
             };
 
             if entry.host_group != Some(group.id) {
-                match entry.window.update(cx, |host, window, host_cx| {
-                    host.set_host_group(Some(group.id), window);
-                    host_cx.notify();
-                }) {
+                match entry.window.set_group(Some(group.id), cx) {
                     Ok(()) => entry.host_group = Some(group.id),
                     Err(error) => {
                         tracing::warn!(
@@ -1671,10 +1778,7 @@ impl FloatingWindowManager {
             }
         }
 
-        let _ = entry.window.update(cx, |host, window, _| {
-            host.set_host_group(None, window);
-            window.remove_window();
-        });
+        entry.window.remove_window(cx);
     }
 
     fn create_panel_window(
@@ -1809,7 +1913,7 @@ impl FloatingWindowManager {
         }
 
         Some(PanelWindowEntry {
-            window,
+            window: PanelWindowHandle::Floating(window),
             window_id,
             native_window,
             bounds,
