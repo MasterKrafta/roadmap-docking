@@ -685,6 +685,20 @@ impl Render for FloatingHost {
                         {
                             return;
                         }
+                        let native_interaction_active =
+                            manager_for_down.upgrade().is_some_and(|manager| {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.native_move_active()
+                                        || manager.drag_host_manager().is_some_and(|drag_host| {
+                                            drag_host.update(manager_cx, |drag_host, _| {
+                                                drag_host.active_drag_host_id().is_some()
+                                            })
+                                        })
+                                })
+                            });
+                        if native_interaction_active {
+                            return;
+                        }
                         let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
                             return;
                         };
