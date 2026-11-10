@@ -147,6 +147,8 @@ pub(crate) fn register_pointer_events(
     let last_drag_hit = Rc::new(RefCell::new(None::<String>));
 
     window.on_mouse_event({
+        let manager = manager.clone();
+        let drag_host_manager = drag_host_manager.clone();
         let controller = controller.clone();
         let scroll_handles = scroll_handles.clone();
         let toggle_context_menu = toggle_context_menu.clone();
@@ -158,6 +160,10 @@ pub(crate) fn register_pointer_events(
                 || !root_hitbox.is_hovered(window)
                 || DockInteractionCoordinator::has_capture(&pointer_capture)
                 || DockInteractionCoordinator::window_has_capture(window)
+                || drag_host_manager.update(app, |manager, _| {
+                    manager.active_drag_host_id().is_some()
+                })
+                || manager.update(app, |manager, _| manager.native_move_active())
             {
                 return;
             }
