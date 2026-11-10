@@ -181,10 +181,8 @@ impl DragHostManager {
     pub fn open_panel_tab_at_cursor(
         &mut self,
         panel: PanelId,
-        group: NodeId,
         grab_offset: Point,
         logical_size: Size,
-        promote_on_float: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         let can_transfer = self.controller.update(cx, |controller, _| {
@@ -197,10 +195,10 @@ impl DragHostManager {
             grab_offset,
             logical_size,
             vec![panel],
-            Some(group),
             None,
             None,
-            promote_on_float,
+            None,
+            true,
             cx,
         )
     }
@@ -2063,19 +2061,14 @@ impl Render for DragHostSurface {
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let (source_host, source_window_id, panel) = {
                     let session = controller.drag().host_session()?;
+                    if !matches!(
+                        session.payload(),
+                        DragPayload::Group { group: active } if active == group
+                    ) {
+                        return None;
+                    }
                     let panel = session.transferred_panel()?;
-                    let matching_source = match (session.payload(), session.handle()) {
-                        (
-                            DragPayload::Group { group: active },
-                            DragHandle::GroupGrip,
-                        ) => active == group,
-                        (
-                            DragPayload::Panel { panel: active },
-                            DragHandle::PanelTab,
-                        ) => active == panel,
-                        _ => false,
-                    };
-                    if !matching_source || !session.panel_view_source_detached(panel) {
+                    if !session.panel_view_source_detached(panel) {
                         return None;
                     }
                     (session.source_host(), session.source_window_id()?, panel)
