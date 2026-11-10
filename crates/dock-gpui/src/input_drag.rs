@@ -5,7 +5,10 @@ use dock_core::{
 };
 use gpui::{App, Entity, WindowId};
 
-use crate::{DockController, DragHostManager, DragSourceHost, FloatingWindowManager};
+use crate::{
+    dock_components::DockTab, DockController, DragHostManager, DragSourceHost,
+    FloatingWindowManager,
+};
 
 /// Identifies a FloatingHost tab gesture across pointer updates and DragHost detach.
 #[derive(Clone, Copy)]
@@ -90,6 +93,20 @@ pub(crate) fn update_drag_at(
             // Keep Pressed alive until Core's configured threshold is crossed.
             // No resolver or drag preview exists before this transition.
             return false;
+        }
+
+        if handle == Some(DragHandle::PanelTab)
+            && let DragPayload::Panel { panel } = payload
+        {
+            let target = main_panel_tab_reorder_target(controller, panel, position);
+            if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
+                tracing::debug!(%error, "could not update same-group tab insertion target");
+                cancel_drag(controller);
+                cx.notify();
+                return was_pressed;
+            }
+            cx.notify();
+            return was_pressed;
         }
 
         // Main-host content drags transported by DragHost resolve targets in its
@@ -556,7 +573,9 @@ pub(crate) fn update_floating_tab_drag(
         }
 
         let source = DropSource::Panel { panel: drag.panel };
-        let target = match controller
+        let local_reorder_target =
+            floating_panel_tab_reorder_target(controller, drag, position);
+        let resolved_target = match controller
             .prepare_floating_window_drop_resolver(
                 drag.source_window_id,
                 drag.source_group,
@@ -572,6 +591,7 @@ pub(crate) fn update_floating_tab_drag(
                 return false;
             }
         };
+        let target = local_reorder_target.or(resolved_target);
         if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
             tracing::debug!(%error, "could not update floating tab drop target");
             cancel_drag(controller);
@@ -582,6 +602,117 @@ pub(crate) fn update_floating_tab_drag(
         cx.notify();
         true
     })
+}
+
+/// Computes a same-group insertion slot for a Main-host PanelTab gesture.
+/// The tab remains in the source host while the pointer stays inside its tab drag zone.
+fn main_panel_tab_reorder_target(
+    controller: &mut DockController,
+    panel: PanelId,
+    position: Point,
+) -> Option<DropTarget> {
+    let (group, group_rect, headers) = {
+        let rects = controller.geometry().ok()?;
+        let source = rects.tab_headers.iter().find(|header| header.panel == panel)?;
+        let group = source.group;
+        let group_rect = rects
+            .groups
+            .iter()
+            .find(|group_rect| group_rect.group == group)?
+            .rect;
+        let headers = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == group)
+            .copied()
+            .collect::<Vec<_>>();
+        (group, group_rect, headers)
+    };
+
+    let drag_zone = DockTab::drag_zone(group_rect, controller.metrics());
+    if DockTab::leaves_strip_zone(drag_zone, position) {
+        return None;
+    }
+
+    let tab_count = match controller.layout().node(group) {
+        Some(Node::Tabs(tabs)) => tabs.children.len(),
+        _ => return None,
+    };
+    Some(DropTarget::Tabs {
+        group,
+        index: tab_insertion_index(&headers, tab_count, position.x),
+    })
+}
+
+/// Computes a same-group insertion slot for a FloatingHost tab gesture.
+/// Multi-tab groups use their actual TabStrip; a single tab uses the same
+/// reduced drag zone as the FloatingHost tear-off pipeline.
+fn floating_panel_tab_reorder_target(
+    controller: &mut DockController,
+    drag: FloatingTabDrag,
+    position: Point,
+) -> Option<DropTarget> {
+    let (group, strip_rect, group_rect, headers) = {
+        let rects = controller
+            .floating_geometry(drag.source_window_id, drag.source_group)
+            .ok()?;
+        let source = rects
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == drag.panel)?;
+        let group = source.group;
+        let strip_rect = rects
+            .tab_strips
+            .iter()
+            .find(|strip| strip.group == group)?
+            .rect;
+        let group_rect = rects
+            .groups
+            .iter()
+            .find(|group_rect| group_rect.group == group)?
+            .rect;
+        let headers = rects
+            .tab_headers
+            .iter()
+            .filter(|header| header.group == group)
+            .copied()
+            .collect::<Vec<_>>();
+        (group, strip_rect, group_rect, headers)
+    };
+
+    let tab_count = match controller.layout().node(group) {
+        Some(Node::Tabs(tabs)) => tabs.children.len(),
+        _ => return None,
+    };
+    let allowed_zone = if tab_count == 1 {
+        DockTab::drag_zone(group_rect, controller.metrics())
+    } else {
+        strip_rect
+    };
+    if DockTab::leaves_strip_zone(allowed_zone, position) {
+        return None;
+    }
+
+    Some(DropTarget::Tabs {
+        group,
+        index: tab_insertion_index(&headers, tab_count, position.x),
+    })
+}
+
+/// Converts the pointer's horizontal position into an insertion slot.
+/// Header midpoints split the slots; the end of the visible strip maps to append.
+fn tab_insertion_index(
+    headers: &[dock_core::TabHeaderRect],
+    tab_count: usize,
+    pointer_x: f32,
+) -> usize {
+    let mut ordered = headers.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|header| header.index);
+    ordered
+        .into_iter()
+        .find(|header| pointer_x < header.rect.origin.x + header.rect.size.width * 0.5)
+        .map(|header| header.index)
+        .unwrap_or(tab_count)
 }
 
 /// Finishes a tab drag that remains inside its source TabStrip. Leaving that
@@ -613,14 +744,23 @@ pub(crate) fn finish_floating_tab_drag(
             return true;
         }
 
-        let target = controller
-            .prepare_floating_window_drop_resolver(
-                window_id,
-                source_group,
-                DropSource::Panel { panel },
-            )
-            .and_then(|resolver| resolver.resolve(position))
-            .unwrap_or(None);
+        let drag = FloatingTabDrag {
+            source_window_id: window_id,
+            source_group,
+            panel,
+            press_origin: controller.drag().session().state().origin().unwrap_or(position),
+            layout_version: controller.layout().version(),
+        };
+        let target = floating_panel_tab_reorder_target(controller, drag, position).or_else(|| {
+            controller
+                .prepare_floating_window_drop_resolver(
+                    window_id,
+                    source_group,
+                    DropSource::Panel { panel },
+                )
+                .and_then(|resolver| resolver.resolve(position))
+                .unwrap_or(None)
+        });
         if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
             tracing::debug!(%error, "could not set final floating tab drop target");
             cancel_drag(controller);
@@ -701,7 +841,16 @@ pub(crate) fn finish_drag_at(
             controller.drag().session().state(),
             DragState::Dragging { .. }
         );
-        let mut target = if !drag_started || !main_drag_uses_drop_targets(handle) {
+        let mut target = if !drag_started {
+            None
+        } else if handle == Some(DragHandle::PanelTab) {
+            match payload {
+                DragPayload::Panel { panel } => {
+                    main_panel_tab_reorder_target(controller, panel, position)
+                }
+                _ => None,
+            }
+        } else if !main_drag_uses_drop_targets(handle) {
             None
         } else {
             match drop_source(payload) {
@@ -724,7 +873,7 @@ pub(crate) fn finish_drag_at(
         // Keep DragPreview.target synchronized with the final pointer position
         // before asking DragSession to finish the gesture.
         if drag_started
-            && main_drag_uses_drop_targets(handle)
+            && (main_drag_uses_drop_targets(handle) || handle == Some(DragHandle::PanelTab))
             && let Err(error) = controller.drag_mut().session_mut().set_drop_target(target)
         {
             tracing::debug!(%error, "could not set final dock drop target");
@@ -1164,5 +1313,28 @@ mod floating_bounds_tests {
             bounds,
             Rect::new(Point::new(540.0, 500.0), Size::new(160.0, 100.0))
         );
+    }
+
+    #[test]
+    fn tab_insertion_index_uses_header_midpoints_and_appends_at_the_end() {
+        let group = NodeId::null();
+        let headers = [
+            dock_core::TabHeaderRect::new(
+                group,
+                PanelId::null(),
+                0,
+                Rect::new(Point::new(10.0, 10.0), Size::new(80.0, 24.0)),
+            ),
+            dock_core::TabHeaderRect::new(
+                group,
+                PanelId::null(),
+                1,
+                Rect::new(Point::new(90.0, 10.0), Size::new(80.0, 24.0)),
+            ),
+        ];
+
+        assert_eq!(tab_insertion_index(&headers, 2, 40.0), 0);
+        assert_eq!(tab_insertion_index(&headers, 2, 60.0), 1);
+        assert_eq!(tab_insertion_index(&headers, 2, 150.0), 2);
     }
 }
