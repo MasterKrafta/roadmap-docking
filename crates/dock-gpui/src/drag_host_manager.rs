@@ -7,7 +7,8 @@
 use std::{collections::{HashMap, HashSet}, rc::Rc, time::Duration};
 
 use gpui::{
-    AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
+    AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window,
     WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
@@ -39,6 +40,7 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
+    source_detach_subscription: Option<Subscription>,
 }
 
 /// Creates, positions, and closes the single temporary DragHost allowed during
@@ -474,14 +476,23 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
+            source_detach_subscription: None,
         });
 
         if !panels.is_empty() {
             let controller = self.controller.clone();
-            cx.observe(&controller, move |manager, controller, manager_cx| {
+            let subscription = cx.observe(&controller, move |manager, controller, manager_cx| {
+                // An observer queued by a previous drag must never affect a newer
+                // DragHost session. Its Subscription is also dropped by close().
+                if manager.active_drag_host_id() != Some(id) {
+                    return;
+                }
+
                 let source_detached = controller.update(manager_cx, |controller, _| {
                     controller.drag().host_session().is_some_and(|session| {
-                        session.all_panel_views_source_detached()
+                        session.transport_host() == Some(id)
+                            && !session.transferred_panels().is_empty()
+                            && session.all_panel_views_source_detached()
                     })
                 });
                 if !source_detached {
@@ -511,8 +522,10 @@ impl DragHostManager {
                         controller_cx.notify();
                     });
                 }
-            })
-            .detach();
+            });
+            if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+                active.source_detach_subscription = Some(subscription);
+            }
         }
 
         self.schedule_drop_tracking(cx, id);
@@ -992,13 +1005,14 @@ impl DragHostManager {
         id: DragHostId,
         cx: &mut Context<Self>,
     ) -> Result<(), DragHostError> {
-        let Some(active) = self.active.take() else {
+        let Some(mut active) = self.active.take() else {
             return Ok(());
         };
         if active.id != id {
             self.active = Some(active);
             return Err(DragHostError::NotActive(id));
         }
+        drop(active.source_detach_subscription.take());
 
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(
