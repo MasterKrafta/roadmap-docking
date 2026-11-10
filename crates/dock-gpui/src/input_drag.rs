@@ -1257,6 +1257,7 @@ mod main_drop_resolution_tests {
 #[cfg(test)]
 mod floating_bounds_tests {
     use dock_core::{NodeId, PanelId, Point, Rect, Size};
+    use slotmap::Key;
 
     use super::{
         column_tab_floating_bounds, desired_floating_bounds, tab_insertion_index,
