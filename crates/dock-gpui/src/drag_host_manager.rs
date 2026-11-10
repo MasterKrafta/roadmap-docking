@@ -926,6 +926,16 @@ impl DragHostManager {
                 return false;
             };
 
+            // A Main DockArea released over FreeArea must not create a second,
+            // persistent Floating window. Keep its Core layout unchanged; the
+            // temporary DragHost is closed below and the source DockArea returns.
+            let is_main_dock_area_drag = matches!(
+                controller.drag().session().state(),
+                DragState::Dragging {
+                    payload: DragPayload::DockArea { .. },
+                    ..
+                }
+            );
             let request = match controller
                 .drag_mut()
                 .session_mut()
@@ -939,28 +949,34 @@ impl DragHostManager {
             };
 
             if let Some(mut request) = request {
-                if request.target == Some(DropTarget::FreeArea) {
-                    if let Some(bounds) = free_area_bounds {
-                        request.floating_bounds = Some(bounds);
-                    } else {
-                        tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
-                    }
-                }
-
-                let can_resolve = request.target != Some(DropTarget::FreeArea)
-                    || request.floating_bounds.is_some();
-                if can_resolve {
-                    let metrics = controller.metrics();
-                    let action = controller.layout().resolve_drag_drop(&request, &metrics);
-                    match action {
-                        Ok(DragDropAction::NoOp) => {}
-                        Ok(DragDropAction::Command(command)) => {
-                            if let Err(error) = controller.dispatch_in(command, controller_cx) {
-                                tracing::warn!(?id, %error, "DragHost drop command was rejected");
-                            }
+                let suppress_dock_area_float = is_main_dock_area_drag
+                    && request.target == Some(DropTarget::FreeArea);
+                if !suppress_dock_area_float {
+                    if request.target == Some(DropTarget::FreeArea) {
+                        if let Some(bounds) = free_area_bounds {
+                            request.floating_bounds = Some(bounds);
+                        } else {
+                            tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
                         }
-                        Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
                     }
+
+                    let can_resolve = request.target != Some(DropTarget::FreeArea)
+                        || request.floating_bounds.is_some();
+                    if can_resolve {
+                        let metrics = controller.metrics();
+                        let action = controller.layout().resolve_drag_drop(&request, &metrics);
+                        match action {
+                            Ok(DragDropAction::NoOp) => {}
+                            Ok(DragDropAction::Command(command)) => {
+                                if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                                    tracing::warn!(?id, %error, "DragHost drop command was rejected");
+                                }
+                            }
+                            Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
+                        }
+                    }
+                } else {
+                    tracing::debug!(?id, "DockArea release over FreeArea leaves the DockArea in its original Main location");
                 }
             }
 
