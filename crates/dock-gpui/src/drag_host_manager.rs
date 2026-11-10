@@ -15,8 +15,9 @@ use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNa
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DockSide, DragDropAction,
-    DragHandle, DragPayload, DragState, DropTarget, GroupRect, Node, NodeId, PanelId, PanelRect,
-    Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
+    DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
+    PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
+    VerticalOverflow,
 };
 
 use crate::{
@@ -1109,16 +1110,13 @@ impl DragHostManager {
         }
 
         if !source_released {
-            let released = self.controller.update(cx, |controller, controller_cx| {
+            self.controller.update(cx, |controller, controller_cx| {
                 for panel in &panels {
                     controller.finish_panel_view_transfer(*panel);
                 }
                 controller.drag_mut().finish_host_session();
                 controller_cx.notify();
             });
-            if released.is_err() {
-                return true;
-            }
             if let Some(active) = self.active.as_mut().filter(|active| active.id == id)
                 && let Some(handoff) = active.handoff.as_mut()
             {
@@ -1129,14 +1127,11 @@ impl DragHostManager {
         let target_shown = self
             .floating_manager
             .as_ref()
-            .and_then(|manager| {
-                manager
-                    .update(cx, |manager, manager_cx| {
-                        manager.show_handoff_target(target_group, manager_cx)
-                    })
-                    .ok()
-            })
-            .unwrap_or(false);
+            .is_some_and(|manager| {
+                manager.update(cx, |manager, manager_cx| {
+                    manager.show_handoff_target(target_group, manager_cx)
+                })
+            });
         !target_shown
     }
 
