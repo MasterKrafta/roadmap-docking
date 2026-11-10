@@ -1576,9 +1576,9 @@ impl FloatingWindowManager {
         }
 
         if let Some(drag_host) = self.drag_host_manager.as_ref().and_then(|manager| manager.upgrade()) {
-            drag_host.update(cx, |manager, manager_cx| {
+            let _ = drag_host.update(cx, |manager, manager_cx| {
                 manager.complete_floating_handoff(group, rendered_panels, manager_cx);
-            }).ok();
+            });
         }
     }
 
