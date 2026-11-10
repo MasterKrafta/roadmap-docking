@@ -49,10 +49,8 @@ impl Layout {
             (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
                 self.resolve_column_header_drag(request, column, metrics)
             }
-            (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
-                Err(CommandError::InvalidTarget {
-                    reason: "a main DockArea header drag must be converted to a floating window by the adapter",
-                })
+            (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
+                self.resolve_dock_area_header_drag(request, side, metrics)
             }
             _ => Err(CommandError::InvalidTarget {
                 reason: "drag handle and payload do not describe a supported drag operation",
@@ -292,6 +290,61 @@ impl Layout {
         }
 
         None
+    }
+
+    /// Resolves a whole Main DockArea drag. A single-Column DockArea can use
+    /// the existing Column transfer semantics; a multi-Column DockArea can still
+    /// be floated as one composition, but is not split apart for a dock-side drop.
+    fn resolve_dock_area_header_drag(
+        &self,
+        request: &DragDropRequest,
+        side: DockSide,
+        metrics: &DockMetrics,
+    ) -> Result<DragDropAction, CommandError> {
+        let root = self.main_area(side).map(|area| area.root).ok_or(
+            CommandError::InvalidTarget {
+                reason: "DockArea drag source no longer exists",
+            },
+        )?;
+        let target = request.target.ok_or(CommandError::InvalidTarget {
+            reason: "DockArea header drag requires a resolved drop target",
+        })?;
+
+        if target == crate::DropTarget::FreeArea {
+            let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
+                reason: "FreeArea Float requests require explicit window bounds",
+            })?;
+            bounds
+                .validate_non_empty()
+                .map_err(|_| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: "floating bounds must be finite and positive",
+                })?;
+            self.validate_panel_ids_allowed_for_area(
+                &self.panel_ids_in_subtree(root),
+                AllowedArea::FLOATING,
+            )?;
+            return Ok(DragDropAction::Command(DockCommand::Float {
+                node: root,
+                bounds,
+            }));
+        }
+
+        if !matches!(self.node(root), Some(Node::Column(_))) {
+            return Err(CommandError::InvalidTarget {
+                reason: "a multi-Column DockArea can only be detached as one floating composition",
+            });
+        }
+
+        let column_request = DragDropRequest {
+            payload: DragPayload::Column { column: root },
+            handle: DragHandle::ColumnHeader,
+            origin: request.origin,
+            point: request.point,
+            target: request.target,
+            floating_bounds: request.floating_bounds,
+        };
+        self.resolve_column_header_drag(&column_request, root, metrics)
     }
 
     pub(super) fn resolve_column_header_drag(
