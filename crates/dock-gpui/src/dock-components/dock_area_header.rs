@@ -37,9 +37,6 @@ impl DockAreaHeader {
             .top(px(area_rect.origin.y))
             .w(px(area_rect.size.width))
             .h(px(metrics.column_header_height))
-            .flex()
-            .flex_none()
-            .items_stretch()
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .border_1()
@@ -68,6 +65,7 @@ impl DockAreaHeader {
                     .absolute()
                     .left(px(button_x))
                     .top_0()
+                    .w(px(button_width))
                     .h_full()
                     .child(CollapseColumnButton::render_with_metrics(
                         format!("{id}-collapse-column-{index}"),
@@ -83,6 +81,7 @@ impl DockAreaHeader {
                 .absolute()
                 .left(px((area_rect.size.width - button_width).max(0.0)))
                 .top_0()
+                .w(px(button_width))
                 .h_full()
                 .child(CloseDockAreaButton::render_with_metrics(
                     format!("{id}-close"),
