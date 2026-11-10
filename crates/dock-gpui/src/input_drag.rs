@@ -581,23 +581,26 @@ pub(crate) fn update_floating_tab_drag(
                 drag.panel,
                 position,
             );
-        let resolved_target = match controller
-            .prepare_floating_window_drop_resolver(
-                drag.source_window_id,
-                drag.source_group,
-                source,
-            )
-            .and_then(|resolver| resolver.resolve(position))
-        {
-            Ok(target) => target,
-            Err(error) => {
-                tracing::debug!(%error, "could not resolve floating tab drop target");
-                cancel_drag(controller);
-                cx.notify();
-                return false;
+        let target = if local_reorder_target.is_some() {
+            local_reorder_target
+        } else {
+            match controller
+                .prepare_floating_window_drop_resolver(
+                    drag.source_window_id,
+                    drag.source_group,
+                    source,
+                )
+                .and_then(|resolver| resolver.resolve(position))
+            {
+                Ok(target) => target,
+                Err(error) => {
+                    tracing::debug!(%error, "could not resolve floating tab drop target");
+                    cancel_drag(controller);
+                    cx.notify();
+                    return false;
+                }
             }
         };
-        let target = local_reorder_target.or(resolved_target);
         if let Err(error) = controller.drag_mut().session_mut().set_drop_target(target) {
             tracing::debug!(%error, "could not update floating tab drop target");
             cancel_drag(controller);
