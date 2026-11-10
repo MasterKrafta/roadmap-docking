@@ -143,7 +143,7 @@ pub trait NativeWindowOps {
     fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     /// Returns the current OS foreground window, or None when no window is foreground.
-    fn foreground_window(&self) -> Result<NativeWindowAtPoint, NativeError>;
+    fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
     /// Assigns the native owner of a top-level floating window.
@@ -177,7 +177,7 @@ pub trait NativeWindowOps {
         point: PhysicalPoint,
         known_windows: &[NativeWindowId],
         exclude: Option<NativeWindowId>,
-    ) -> Result<Option<NativeWindowId>, NativeError>;
+    ) -> Result<NativeWindowAtPoint, NativeError>;
 
     fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError>;
 
