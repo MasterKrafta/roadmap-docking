@@ -783,9 +783,12 @@ impl DragHostManager {
         let update: Result<(Option<DropTarget>, Option<Rect>), String> =
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
-                if matches!(payload, DragPayload::DockArea { .. }) && source.is_none() {
-                    // A multi-Column DockArea can still detach as one composition,
-                    // but cannot yet be inserted into another DockArea as a whole.
+                if matches!(payload, DragPayload::DockArea { .. })
+                    && (source.is_none() || target_window.is_none())
+                {
+                    // A multi-Column DockArea, or a single-Column DockArea released
+                    // on the desktop, detaches as one composition. A foreign
+                    // topmost window must still block the drop.
                     if matches!(target_window, Some(DockingWindowAtPoint::ForeignWindow)) {
                         Ok(None)
                     } else {
