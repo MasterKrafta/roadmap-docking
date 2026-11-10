@@ -41,6 +41,8 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
+    /// Cursor position captured when the button is released before source detachment.
+    pending_release_cursor: Option<platform::PhysicalPoint>,
     source_detach_subscription: Option<Subscription>,
 }
 
@@ -477,6 +479,7 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
+            pending_release_cursor: None,
             source_detach_subscription: None,
         });
 
@@ -676,16 +679,45 @@ impl DragHostManager {
             return false;
         };
         let Some((payload, handle, source_host, source_window_id)) = tracking_state else {
+            // The source still owns the AnyView. Remember an early release, but
+            // keep DragHost alive until the source has rendered its placeholder.
             if !self.native_ops.left_button_down().unwrap_or(true) {
-                self.cancel_active_drag(id, cx);
-                return false;
+                let release_cursor = match self.native_ops.cursor_position() {
+                    Ok(cursor) => cursor,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?id,
+                            %error,
+                            "could not capture cursor position after early mouse release"
+                        );
+                        self.cancel_active_drag(id, cx);
+                        return false;
+                    }
+                };
+                if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+                    active.pending_release_cursor.get_or_insert(release_cursor);
+                }
             }
             return true;
         };
 
-        let Ok(cursor) = self.native_ops.cursor_position() else {
-            self.cancel_active_drag(id, cx);
-            return false;
+        // If the button was released while the source still owned the AnyView,
+        // finish at the captured release point rather than a later cursor point.
+        let pending_release_cursor = self
+            .active
+            .as_ref()
+            .filter(|active| active.id == id)
+            .and_then(|active| active.pending_release_cursor);
+        let cursor = match pending_release_cursor {
+            Some(cursor) => cursor,
+            None => match self.native_ops.cursor_position() {
+                Ok(cursor) => cursor,
+                Err(error) => {
+                    tracing::warn!(?id, %error, "could not read cursor position during DragHost tracking");
+                    self.cancel_active_drag(id, cx);
+                    return false;
+                }
+            },
         };
         if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
             tracing::warn!(?id, %error, "DragHost could not follow the cursor");
