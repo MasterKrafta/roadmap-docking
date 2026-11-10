@@ -120,9 +120,10 @@ pub enum PanelCommandError {
 /// the layout tree remains exclusively owned by dock_core::Layout.
 pub struct DragController {
     session: DragSession,
-    resolver: Option<DropZoneResolver>,
+    main_resolver: Option<(RectCacheKey, DropSource, DropZoneResolver)>,
+    floating_resolver: Option<(FloatingRectCacheKey, DropSource, DropZoneResolver)>,
+    /// Identifies which host-local resolver is currently active for preview/rendering.
     resolver_key: Option<ResolverCacheKey>,
-    resolver_source: Option<DropSource>,
     /// Layout revision captured when the current drag press began.
     layout_version: Option<u64>,
     /// Adapter context keeps the original source host separate from its transport host.
@@ -133,9 +134,9 @@ impl DragController {
     fn new(metrics: &DockMetrics) -> Result<Self, DragSessionError> {
         Ok(Self {
             session: DragSession::new(metrics)?,
-            resolver: None,
+            main_resolver: None,
+            floating_resolver: None,
             resolver_key: None,
-            resolver_source: None,
             layout_version: None,
             host_session: None,
         })
@@ -150,7 +151,18 @@ impl DragController {
     }
 
     pub fn resolver(&self) -> Option<&DropZoneResolver> {
-        self.resolver.as_ref()
+        match self.resolver_key? {
+            ResolverCacheKey::Main(key) => self
+                .main_resolver
+                .as_ref()
+                .filter(|(cached_key, _, _)| *cached_key == key)
+                .map(|(_, _, resolver)| resolver),
+            ResolverCacheKey::Floating(key) => self
+                .floating_resolver
+                .as_ref()
+                .filter(|(cached_key, _, _)| *cached_key == key)
+                .map(|(_, _, resolver)| resolver),
+        }
     }
 
     /// Returns the adapter's source/transport context for the active content drag.
@@ -226,16 +238,30 @@ impl DragController {
         self.host_session = None;
     }
 
-    fn set_resolver(&mut self, resolver: DropZoneResolver, key: ResolverCacheKey, source: DropSource) {
-        self.resolver = Some(resolver);
-        self.resolver_key = Some(key);
-        self.resolver_source = Some(source);
+    fn set_main_resolver(
+        &mut self,
+        resolver: DropZoneResolver,
+        key: RectCacheKey,
+        source: DropSource,
+    ) {
+        self.main_resolver = Some((key, source, resolver));
+        self.resolver_key = Some(ResolverCacheKey::Main(key));
+    }
+
+    fn set_floating_resolver(
+        &mut self,
+        resolver: DropZoneResolver,
+        key: FloatingRectCacheKey,
+        source: DropSource,
+    ) {
+        self.floating_resolver = Some((key, source, resolver));
+        self.resolver_key = Some(ResolverCacheKey::Floating(key));
     }
 
     pub fn clear_resolver(&mut self) {
-        self.resolver = None;
+        self.main_resolver = None;
+        self.floating_resolver = None;
         self.resolver_key = None;
-        self.resolver_source = None;
     }
 
     pub(crate) fn clear_layout_version(&mut self) {
