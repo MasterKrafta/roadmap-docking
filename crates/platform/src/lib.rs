@@ -66,6 +66,13 @@ impl PhysicalRect {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeWindowAtPoint {
+    Known(NativeWindowId),
+    Foreign,
+    Empty,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeKey {
     Escape,
 }
@@ -136,7 +143,7 @@ pub trait NativeWindowOps {
     fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     /// Returns the current OS foreground window, or None when no window is foreground.
-    fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError>;
+    fn foreground_window(&self) -> Result<NativeWindowAtPoint, NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
     /// Assigns the native owner of a top-level floating window.
@@ -189,14 +196,18 @@ fn topmost_known_window_under_point(
     known_windows: &[NativeWindowId],
     exclude: Option<NativeWindowId>,
     mut next_window: impl FnMut() -> Option<(NativeWindowId, PhysicalRect)>,
-) -> Option<NativeWindowId> {
+) -> NativeWindowAtPoint {
     while let Some((window, rect)) = next_window() {
         if Some(window) == exclude || !rect.contains(point) {
             continue;
         }
-        return known_windows.contains(&window).then_some(window);
+        return if known_windows.contains(&window) {
+            NativeWindowAtPoint::Known(window)
+        } else {
+            NativeWindowAtPoint::Foreign
+        };
     }
-    None
+    NativeWindowAtPoint::Empty
 }
 
 #[cfg(windows)]
@@ -973,7 +984,7 @@ mod windows_impl {
             point: PhysicalPoint,
             known_windows: &[NativeWindowId],
             exclude: Option<NativeWindowId>,
-        ) -> Result<Option<NativeWindowId>, NativeError> {
+        ) -> Result<NativeWindowAtPoint, NativeError> {
             // SAFETY: Walk the desktop's top-level Z-order synchronously.
             let mut current = unsafe { GetTopWindow(None) }.ok();
             let target = topmost_known_window_under_point(
@@ -1149,7 +1160,7 @@ mod stub_impl {
             _: PhysicalPoint,
             _: &[NativeWindowId],
             _: Option<NativeWindowId>,
-        ) -> Result<Option<NativeWindowId>, NativeError> {
+        ) -> Result<NativeWindowAtPoint, NativeError> {
             Err(NativeError::Unsupported)
         }
         fn monitor_work_areas(&self) -> Result<Vec<PhysicalRect>, NativeError> {
@@ -1184,7 +1195,7 @@ pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
 
 #[cfg(test)]
 mod drop_window_target_tests {
-    use super::{NativeWindowId, PhysicalPoint, PhysicalRect, topmost_known_window_under_point};
+    use super::{NativeWindowAtPoint, NativeWindowId, PhysicalPoint, PhysicalRect, topmost_known_window_under_point};
 
     fn window(id: isize) -> NativeWindowId {
         NativeWindowId::from_raw(id).unwrap()
@@ -1204,7 +1215,7 @@ mod drop_window_target_tests {
         windows: &[(NativeWindowId, PhysicalRect)],
         known: &[NativeWindowId],
         exclude: Option<NativeWindowId>,
-    ) -> Option<NativeWindowId> {
+    ) -> NativeWindowAtPoint {
         let mut index = 0;
         topmost_known_window_under_point(point, known, exclude, || {
             let result = windows.get(index).copied();
@@ -1225,7 +1236,7 @@ mod drop_window_target_tests {
             (main_window, bounds()),
         ];
 
-        assert_eq!(resolve(point, &windows, &[main_window], None), None);
+        assert_eq!(resolve(point, &windows, &[main_window], None), NativeWindowAtPoint::Foreign);
     }
 
     #[test]
@@ -1245,7 +1256,7 @@ mod drop_window_target_tests {
                 &[source_window, target_window],
                 Some(source_window),
             ),
-            Some(target_window),
+            NativeWindowAtPoint::Known(target_window),
         );
     }
 
@@ -1270,7 +1281,7 @@ mod drop_window_target_tests {
                 &[topmost_floating, lower_floating, main_window],
                 Some(drag_host),
             ),
-            Some(topmost_floating),
+            NativeWindowAtPoint::Known(topmost_floating),
         );
     }
 
@@ -1306,6 +1317,6 @@ mod drop_window_target_tests {
             (main_window, bounds()),
         ];
 
-        assert_eq!(resolve(point, &windows, &[main_window], None), Some(main_window));
+        assert_eq!(resolve(point, &windows, &[main_window], None), NativeWindowAtPoint::Known(main_window));
     }
 }
