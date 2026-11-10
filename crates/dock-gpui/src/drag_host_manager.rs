@@ -901,11 +901,9 @@ impl DragHostManager {
                 .and_then(|active| active.panels.first().copied())
             && let Some(bounds) = screen_free_area_bounds
         {
-            let prepared = floating_manager
-                .update(cx, |manager, manager_cx| {
-                    manager.prepare_drag_float_window(panel, bounds, manager_cx)
-                })
-                .unwrap_or(false);
+            let prepared = floating_manager.update(cx, |manager, manager_cx| {
+                manager.prepare_drag_float_window(panel, bounds, manager_cx)
+            });
             if !prepared {
                 tracing::debug!(
                     ?id,
@@ -1286,7 +1284,7 @@ impl DragHostManager {
         // window while preserving the still-open Panel's Main location.
         if let Some(manager) = self.floating_manager.as_ref() {
             for panel in &active.panels {
-                let _ = manager.update(cx, |manager, manager_cx| {
+                manager.update(cx, |manager, manager_cx| {
                     manager.discard_prepared_panel_window(*panel, manager_cx);
                 });
             }
