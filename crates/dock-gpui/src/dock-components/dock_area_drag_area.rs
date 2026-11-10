@@ -4,8 +4,8 @@ use ui::Theme;
 
 /// Flexible drag surface for one complete DockArea composition.
 ///
-/// Its hit region spans the shared header and excludes every Column collapse
-/// control plus the single DockArea close control on the right.
+/// Its hit region spans the shared header and excludes the narrow per-Column
+/// drag strips, every Column collapse control, and the single DockArea close control.
 pub struct DockAreaDragArea;
 
 impl DockAreaDragArea {
