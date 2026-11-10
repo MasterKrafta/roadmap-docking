@@ -215,9 +215,6 @@ pub struct FloatingWindowManager {
     native_resize: Option<NativeResizeSession>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
-    /// Hidden FloatingHost windows prepared while a Main DockArea is being
-    /// dragged toward FreeArea, so release does not need to open a new window.
-    prewarmed_panels: HashSet<PanelId>,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
@@ -235,7 +232,6 @@ impl FloatingWindowManager {
             native_resize: None,
             drag_host_manager: None,
             reconciling: false,
-            prewarmed_panels: HashSet::new(),
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
@@ -249,45 +245,6 @@ impl FloatingWindowManager {
 
     pub fn host_registry(&self) -> &CompositionHostRegistry {
         &self.host_registry
-    }
-
-    /// Creates the eventual FloatingHost hidden while a Main DockArea drag is
-    /// in progress. The entry is consumed by the next Floating reconciliation
-    /// or discarded when the drag ends without a float.
-    pub(crate) fn prepare_drag_float_window(
-        &mut self,
-        panel: PanelId,
-        bounds: Rect,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.prewarmed_panels.contains(&panel) {
-            return true;
-        }
-        if self.registry.windows.contains_key(&panel)
-            || self.registry.layout_location_for_panel(panel) != Some(PanelLayoutLocation::Main)
-            || bounds.validate_non_empty().is_err()
-        {
-            return false;
-        }
-
-        let Some(entry) = self.create_panel_window(panel, bounds, cx) else {
-            return false;
-        };
-        self.registry.windows.insert(panel, entry);
-        self.prewarmed_panels.insert(panel);
-        true
-    }
-
-    /// Destroys a prepared window when the drag was cancelled or docked back
-    /// into Main. Its PanelLayoutLocation remains valid because the Panel stays open.
-    pub(crate) fn discard_prepared_panel_window(
-        &mut self,
-        panel: PanelId,
-        cx: &mut Context<Self>,
-    ) {
-        if self.prewarmed_panels.remove(&panel) {
-            self.release_panel_window_entry(panel, false, cx);
-        }
     }
 
     /// Connects the temporary transport manager without creating an ownership cycle.
@@ -1216,12 +1173,7 @@ impl FloatingWindowManager {
                     .get(&group.id)
                     .copied()
                     .filter(|panel| group.panels.contains(panel));
-                let transferred = group
-                    .panels
-                    .iter()
-                    .copied()
-                    .find(|panel| transferred_panels.contains(panel));
-                let host = previous.or(transferred).or_else(|| group.panels.first().copied())?;
+                let host = previous.or_else(|| group.panels.first().copied())?;
                 Some((group.id, host))
             })
             .collect::<HashMap<_, _>>();
@@ -1428,7 +1380,6 @@ impl FloatingWindowManager {
             }
             self.sync_native_resize(&mut entry, group);
             self.registry.windows.insert(panel, entry);
-            self.prewarmed_panels.remove(&panel);
             active_hosts.insert(group.id, panel);
         }
         self.host_registry.floating_groups = active_hosts.clone();
@@ -1468,9 +1419,7 @@ impl FloatingWindowManager {
             .registry
             .windows
             .keys()
-            .filter(|panel| {
-                !desired_panels.contains(panel) && !self.prewarmed_panels.contains(panel)
-            })
+            .filter(|panel| !desired_panels.contains(panel))
             .copied()
             .collect::<Vec<_>>();
         for panel in removed_panels {
@@ -1687,26 +1636,10 @@ impl FloatingWindowManager {
     }
 
     fn release_panel_window(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        self.prewarmed_panels.remove(&panel);
-        self.release_panel_window_entry(panel, true, cx);
-    }
-
-    fn release_panel_window_entry(
-        &mut self,
-        panel: PanelId,
-        remove_location: bool,
-        cx: &mut Context<Self>,
-    ) {
         let Some(mut entry) = self.registry.windows.remove(&panel) else {
-            if remove_location {
-                self.registry.panel_locations.remove(&panel);
-            }
+            self.registry.panel_locations.remove(&panel);
             return;
         };
-
-        if remove_location {
-            self.registry.panel_locations.remove(&panel);
-        }
 
         if let Some(native_window) = entry.native_window {
             if entry.resize_enabled {

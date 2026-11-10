@@ -42,8 +42,6 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
-    /// Prevents repeated hidden-window creation attempts during one DockArea drag.
-    prewarm_attempted: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
     focus_loss_since: Option<Instant>,
@@ -492,7 +490,6 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
-            prewarm_attempted: false,
             pending_release_cursor: None,
             focus_loss_since: None,
             source_detach_subscription: None,
@@ -891,36 +888,6 @@ impl DragHostManager {
                 manager.screen_bounds_for_drag_source(source_host, bounds)
             })
         });
-
-        // Prepare the persistent destination as soon as a whole Main DockArea
-        // enters FreeArea. The hidden host is reused by FloatingWindowManager
-        // after mouse-up, moving window creation out of the release path.
-        if target == Some(DropTarget::FreeArea)
-            && matches!(payload, DragPayload::DockArea { .. })
-            && let Some(bounds) = screen_free_area_bounds
-        {
-            let panel = self
-                .active
-                .as_mut()
-                .filter(|active| active.id == id && !active.prewarm_attempted)
-                .and_then(|active| {
-                    active.prewarm_attempted = true;
-                    active.panels.first().copied()
-                });
-            if let Some(panel) = panel {
-                let prepared = floating_manager.update(cx, |manager, manager_cx| {
-                    manager.prepare_drag_float_window(panel, bounds, manager_cx)
-                });
-                if !prepared {
-                    tracing::debug!(
-                        ?id,
-                        ?panel,
-                        "could not prewarm the FloatingHost; release will use normal window creation"
-                    );
-                }
-            }
-        }
-
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
             active.target_role = target_window.and_then(DockingWindowAtPoint::role);
@@ -1286,17 +1253,6 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
         drop(active.source_detach_subscription.take());
-
-        // A prepared host is consumed by FloatingWindowManager on a successful
-        // float. If the drag was cancelled or docked, discard the unused hidden
-        // window while preserving the still-open Panel's Main location.
-        if let Some(manager) = self.floating_manager.as_ref() {
-            for panel in &active.panels {
-                manager.update(cx, |manager, manager_cx| {
-                    manager.discard_prepared_panel_window(*panel, manager_cx);
-                });
-            }
-        }
 
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(
