@@ -377,11 +377,10 @@ fn same_group_panel_tab_insertion_rect(
     let DropTarget::Tabs { group, .. } = target else {
         return None;
     };
-    if headers
-        .iter()
-        .find(|header| header.panel == panel)
-        .is_none_or(|header| header.group != group)
-    {
+    let Some(source_header) = headers.iter().find(|header| header.panel == panel) else {
+        return None;
+    };
+    if source_header.group != group {
         return None;
     }
     let strip = strips.iter().find(|strip| strip.group == group)?;
