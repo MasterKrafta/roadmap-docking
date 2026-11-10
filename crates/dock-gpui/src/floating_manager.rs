@@ -156,10 +156,11 @@ pub(crate) enum DockingWindowAtPoint {
 }
 
 impl DockingWindowAtPoint {
-    pub(crate) const fn role(self) -> crate::DockWindowRole {
+    pub(crate) const fn role(self) -> Option<crate::DockWindowRole> {
         match self {
-            Self::Main { .. } => crate::DockWindowRole::Main,
-            Self::Floating { group, .. } => crate::DockWindowRole::Floating { group },
+            Self::Main { .. } => Some(crate::DockWindowRole::Main),
+            Self::Floating { group, .. } => Some(crate::DockWindowRole::Floating { group }),
+            Self::ForeignWindow => None,
         }
     }
 }
