@@ -21,7 +21,7 @@ use dock_core::{
 };
 
 use crate::{
-    components::{context_menu::GroupMenuToggle, MainDockView, PanelHost},
+    components::{context_menu::GroupMenuToggle, FloatingHost, MainDockView, PanelHost},
     dock_components::{
         collect_group_presentations, DockAreaView, DockCompositionView, DockGroupView,
         GroupPresentation,
@@ -42,6 +42,7 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
+    dock_area: Option<DockSide>,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
     focus_loss_since: Option<Instant>,
@@ -318,18 +319,32 @@ impl DragHostManager {
         };
         let theme = self.theme;
         let controller = self.controller.clone();
+        let floating_manager = self
+            .floating_manager
+            .as_ref()
+            .map(|manager| manager.downgrade());
         let surface_panel = panels.first().copied();
         let window = cx
             .open_window(options, move |_, app| {
-                app.new(|_| DragHostSurface {
-                    theme,
-                    controller,
-                    controller_observed: false,
-                    panel: surface_panel,
-                    group,
-                    column,
-                    dock_area,
-                    handoff_placeholder: false,
+                app.new(|surface_cx| {
+                    let floating_host = floating_manager.map(|manager| {
+                        let controller = controller.clone();
+                        surface_cx.new(move |_| {
+                            FloatingHost::new_panel_window(controller, theme, manager)
+                        })
+                    });
+                    DragHostSurface {
+                        theme,
+                        controller,
+                        controller_observed: false,
+                        panel: surface_panel,
+                        group,
+                        column,
+                        dock_area,
+                        handoff_placeholder: false,
+                        floating_host,
+                        floating_group_active: false,
+                    }
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -490,6 +505,7 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
+            dock_area,
             pending_release_cursor: None,
             focus_loss_since: None,
             source_detach_subscription: None,
@@ -915,6 +931,7 @@ impl DragHostManager {
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
+        let dock_area = active.dock_area;
 
         let finished = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -926,16 +943,6 @@ impl DragHostManager {
                 return false;
             };
 
-            // A Main DockArea released over FreeArea must not create a second,
-            // persistent Floating window. Keep its Core layout unchanged; the
-            // temporary DragHost is closed below and the source DockArea returns.
-            let is_main_dock_area_drag = matches!(
-                controller.drag().session().state(),
-                DragState::Dragging {
-                    payload: DragPayload::DockArea { .. },
-                    ..
-                }
-            );
             let request = match controller
                 .drag_mut()
                 .session_mut()
@@ -949,34 +956,28 @@ impl DragHostManager {
             };
 
             if let Some(mut request) = request {
-                let suppress_dock_area_float = is_main_dock_area_drag
-                    && request.target == Some(DropTarget::FreeArea);
-                if !suppress_dock_area_float {
-                    if request.target == Some(DropTarget::FreeArea) {
-                        if let Some(bounds) = free_area_bounds {
-                            request.floating_bounds = Some(bounds);
-                        } else {
-                            tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
-                        }
+                if request.target == Some(DropTarget::FreeArea) {
+                    if let Some(bounds) = free_area_bounds {
+                        request.floating_bounds = Some(bounds);
+                    } else {
+                        tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
                     }
+                }
 
-                    let can_resolve = request.target != Some(DropTarget::FreeArea)
-                        || request.floating_bounds.is_some();
-                    if can_resolve {
-                        let metrics = controller.metrics();
-                        let action = controller.layout().resolve_drag_drop(&request, &metrics);
-                        match action {
-                            Ok(DragDropAction::NoOp) => {}
-                            Ok(DragDropAction::Command(command)) => {
-                                if let Err(error) = controller.dispatch_in(command, controller_cx) {
-                                    tracing::warn!(?id, %error, "DragHost drop command was rejected");
-                                }
+                let can_resolve = request.target != Some(DropTarget::FreeArea)
+                    || request.floating_bounds.is_some();
+                if can_resolve {
+                    let metrics = controller.metrics();
+                    let action = controller.layout().resolve_drag_drop(&request, &metrics);
+                    match action {
+                        Ok(DragDropAction::NoOp) => {}
+                        Ok(DragDropAction::Command(command)) => {
+                            if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                                tracing::warn!(?id, %error, "DragHost drop command was rejected");
                             }
-                            Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
                         }
+                        Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
                     }
-                } else {
-                    tracing::debug!(?id, "DockArea release over FreeArea leaves the DockArea in its original Main location");
                 }
             }
 
@@ -1004,6 +1005,12 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
+            if dock_area.is_some()
+                && self.promote_active_drag_host_to_floating(id, target_group, cx)
+            {
+                return;
+            }
+
             if !self.begin_floating_handoff(id, target_group, cx) {
                 tracing::warn!(
                     ?id,
@@ -1020,6 +1027,77 @@ impl DragHostManager {
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
         }
+    }
+
+    /// Transfers the already-visible DockArea DragHost into the persistent
+    /// Floating registry without opening a replacement native window.
+    fn promote_active_drag_host_to_floating(
+        &mut self,
+        id: DragHostId,
+        target_group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((panel, window, window_id, native_window)) = self
+            .active
+            .as_ref()
+            .filter(|active| active.id == id && active.dock_area.is_some())
+            .and_then(|active| {
+                Some((
+                    active.panels.first().copied()?,
+                    active.window,
+                    active.window_id,
+                    active.native_window,
+                ))
+            })
+        else {
+            return false;
+        };
+        let Some(manager) = self.floating_manager.as_ref() else {
+            return false;
+        };
+
+        let adopted = manager
+            .update(cx, |manager, manager_cx| {
+                manager.adopt_drag_host_window(
+                    panel,
+                    target_group,
+                    window,
+                    window_id,
+                    native_window,
+                    manager_cx,
+                )
+            })
+            .unwrap_or(false);
+        if !adopted {
+            tracing::warn!(
+                ?id,
+                ?target_group,
+                "could not adopt the DockArea DragHost as its FloatingHost"
+            );
+            return false;
+        }
+
+        let Some(mut active) = self.active.take() else {
+            return false;
+        };
+        if active.id != id {
+            self.active = Some(active);
+            return false;
+        }
+        drop(active.source_detach_subscription.take());
+
+        self.controller.update(cx, |controller, controller_cx| {
+            controller.drag_mut().clear_transport_host(id);
+            for panel in active.panels {
+                controller.finish_panel_view_transfer(panel);
+            }
+            controller.drag_mut().finish_host_session();
+            controller_cx.notify();
+        });
+
+        // Do not hide or remove the HWND: FloatingWindowManager now owns its
+        // registry entry and the root renders the regular FloatingHost inside it.
+        true
     }
 
     fn begin_floating_handoff(
@@ -1387,7 +1465,7 @@ pub enum DragHostError {
     Native(#[from] NativeError),
 }
 
-struct DragHostSurface {
+pub(crate) struct DragHostSurface {
     theme: DockTheme,
     controller: Entity<DockController>,
     controller_observed: bool,
@@ -1396,6 +1474,30 @@ struct DragHostSurface {
     column: Option<NodeId>,
     dock_area: Option<DockSide>,
     handoff_placeholder: bool,
+    floating_host: Option<Entity<FloatingHost>>,
+    floating_group_active: bool,
+}
+
+impl DragHostSurface {
+    pub(crate) fn set_floating_group(
+        &mut self,
+        group: Option<FloatingGroupId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(host) = self.floating_host.as_ref() else {
+            return false;
+        };
+        let updated = host.update(cx, |host, _| host.set_host_group(group, window));
+        if updated.is_ok() {
+            self.floating_group_active = group.is_some();
+            self.handoff_placeholder = false;
+            cx.notify();
+            true
+        } else {
+            false
+        }
+    }
 }
 
 struct DragGroupPresentation {
@@ -1485,6 +1587,12 @@ impl Render for DragHostSurface {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.window_background));
+
+        if self.floating_group_active
+            && let Some(host) = self.floating_host.as_ref()
+        {
+            return root.child(host.clone());
+        }
 
         if self.handoff_placeholder {
             return root;
