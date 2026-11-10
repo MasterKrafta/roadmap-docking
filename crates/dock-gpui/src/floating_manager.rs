@@ -377,11 +377,10 @@ impl FloatingWindowManager {
                 .filter_map(|entry| entry.native_window),
         );
 
-        self.native_ops
-            .window_from_point(cursor, &known, None)
-            .ok()
-            .flatten()
-            .is_some_and(|target_window| target_window != source_window)
+        matches!(
+            self.native_ops.window_from_point(cursor, &known, None),
+            Ok(NativeWindowAtPoint::Known(target_window)) if target_window != source_window
+        )
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
@@ -791,11 +790,17 @@ impl FloatingWindowManager {
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window { known.push(main); }
         known.extend(self.registry.windows.values().filter_map(|entry| entry.native_window));
-        let target_window = self.native_ops.window_from_point(cursor, &known, Some(state.native_window)).ok().flatten();
-        let Some(target_window) = target_window else {
-            state.drop_target = None;
-            self.clear_native_drag_target(cx);
-            return;
+        let target_window = match self.native_ops.window_from_point(
+            cursor,
+            &known,
+            Some(state.native_window),
+        ) {
+            Ok(NativeWindowAtPoint::Known(window)) => window,
+            Ok(NativeWindowAtPoint::Foreign | NativeWindowAtPoint::Empty) | Err(_) => {
+                state.drop_target = None;
+                self.clear_native_drag_target(cx);
+                return;
+            }
         };
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
