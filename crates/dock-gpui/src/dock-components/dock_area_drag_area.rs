@@ -1,5 +1,5 @@
 use dock_core::{Point, Rect};
-use gpui::{IntoElement, InteractiveElement, ParentElement, Styled, div, rgb};
+use gpui::{IntoElement, InteractiveElement, Styled, div, rgb};
 use ui::Theme;
 
 /// Flexible drag surface for one complete DockArea composition.
