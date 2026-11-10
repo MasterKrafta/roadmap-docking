@@ -1074,18 +1074,16 @@ impl DragHostManager {
             return false;
         };
 
-        let adopted = manager
-            .update(cx, |manager, manager_cx| {
-                manager.adopt_drag_host_window(
-                    panel,
-                    target_group,
-                    window,
-                    window_id,
-                    native_window,
-                    manager_cx,
-                )
-            })
-            .unwrap_or(false);
+        let adopted = manager.update(cx, |manager, manager_cx| {
+            manager.adopt_drag_host_window(
+                panel,
+                target_group,
+                window,
+                window_id,
+                native_window,
+                manager_cx,
+            )
+        });
         if !adopted {
             tracing::warn!(
                 ?id,
@@ -1514,15 +1512,11 @@ impl DragHostSurface {
         let Some(host) = self.floating_host.as_ref() else {
             return false;
         };
-        let updated = host.update(cx, |host, _| host.set_host_group(group, window));
-        if updated.is_ok() {
-            self.floating_group_active = group.is_some();
-            self.handoff_placeholder = false;
-            cx.notify();
-            true
-        } else {
-            false
-        }
+        host.update(cx, |host, _| host.set_host_group(group, window));
+        self.floating_group_active = group.is_some();
+        self.handoff_placeholder = false;
+        cx.notify();
+        true
     }
 }
 
