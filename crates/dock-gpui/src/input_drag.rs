@@ -460,15 +460,14 @@ pub(crate) fn begin_dock_area_drag_host(
             return None;
         }
 
-        let rects = controller.geometry().ok()?.clone();
+        let column_rects = controller.geometry().ok()?.columns.clone();
         let area = controller.layout().main_area(side)?;
         let mut column_ids = Vec::new();
         collect_dock_area_columns(controller.layout(), area.root, &mut column_ids);
         let columns = column_ids
             .iter()
             .filter_map(|column| {
-                rects
-                    .columns
+                column_rects
                     .iter()
                     .find(|rect| rect.column == *column)
                     .copied()
@@ -1029,13 +1028,7 @@ pub(crate) fn floating_bounds_for_drag(
         target: Some(DropTarget::FreeArea),
         floating_bounds: None,
     };
-    let rects = match source_host {
-        DragSourceHost::Main => controller.geometry().ok()?.clone(),
-        DragSourceHost::Floating { group } => {
-            controller.floating_geometry(source_window_id?, group).ok()?.clone()
-        }
-    };
-    floating_bounds_for_request_with_rects(controller, &request, &rects)
+    floating_bounds_for_request_in_host(controller, &request, source_host, source_window_id)
 }
 
 /// Calculates the FreeArea preview using the active session's original press point.
@@ -1073,17 +1066,15 @@ fn floating_bounds_for_request(
     controller: &mut DockController,
     request: &DragDropRequest,
 ) -> Option<Rect> {
-    let rects = controller.geometry().ok()?.clone();
-    floating_bounds_for_request_with_rects(controller, request, &rects)
+    floating_bounds_for_request_in_host(controller, request, DragSourceHost::Main, None)
 }
 
-fn floating_bounds_for_request_with_rects(
+fn floating_bounds_for_request_in_host(
     controller: &mut DockController,
     request: &DragDropRequest,
-    rects: &LayoutRects,
+    source_host: DragSourceHost,
+    source_window_id: Option<WindowId>,
 ) -> Option<Rect> {
-    // Capture the source rectangle from the source host's own Core geometry.
-    // The press point then gives us the cursor's offset within the dragged item.
     let column_header_height = controller.metrics().column_header_height;
     let dock_area_column_ids = match request.payload {
         DragPayload::DockArea { side } => {
@@ -1094,55 +1085,29 @@ fn floating_bounds_for_request_with_rects(
         }
         _ => None,
     };
-    let source_rect = match (request.handle, request.payload) {
-        (DragHandle::PanelTab, DragPayload::Panel { panel }) => rects
-            .tab_headers
-            .iter()
-            .find(|header| header.panel == panel)
-            .map(|header| header.rect)?,
-        (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => rects
-            .flyout
-            .filter(|flyout| flyout.panel == panel)
-            .map(|flyout| flyout.rect)
-            .or_else(|| {
-                rects
-                    .panels
-                    .iter()
-                    .find(|panel_rect| panel_rect.panel == panel)
-                    .map(|panel_rect| panel_rect.rect)
-            })?,
-        (DragHandle::GroupGrip, DragPayload::Group { group }) => rects
-            .groups
-            .iter()
-            .find(|group_rect| group_rect.group == group)
-            .map(|group_rect| group_rect.rect)?,
-        (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
-            let source = rects
-                .columns
-                .iter()
-                .find(|column_rect| column_rect.column == column)?
-                .rect;
-            column_tab_floating_bounds(source, request.origin, column_header_height)?
+
+    // Geometry is borrowed only long enough to extract the dragged item's
+    // source rectangle. The full LayoutRects snapshot is never cloned.
+    let source_rect = match source_host {
+        DragSourceHost::Main => {
+            let rects = controller.geometry().ok()?;
+            source_rect_for_request(
+                request,
+                rects,
+                dock_area_column_ids.as_deref(),
+                column_header_height,
+            )?
         }
-        (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
-            let ids = dock_area_column_ids.as_ref()?;
-            let columns = ids
-                .iter()
-                .filter_map(|id| {
-                    rects.columns.iter().find(|column| column.column == *id).copied()
-                })
-                .collect::<Vec<_>>();
-            dock_area_bounds(&columns)?
+        DragSourceHost::Floating { group } => {
+            let window_id = source_window_id?;
+            let rects = controller.floating_geometry(window_id, group).ok()?;
+            source_rect_for_request(
+                request,
+                rects,
+                dock_area_column_ids.as_deref(),
+                column_header_height,
+            )?
         }
-        (
-            DragHandle::FloatingCapture | DragHandle::FloatingTitle,
-            DragPayload::FloatingGroup { group },
-        ) => rects
-            .floating_groups
-            .iter()
-            .find(|floating| floating.group == group)
-            .map(|floating| floating.rect)?,
-        _ => return None,
     };
 
     let preferred_size = match request.payload {
@@ -1162,6 +1127,64 @@ fn floating_bounds_for_request_with_rects(
     };
 
     desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)
+}
+
+fn source_rect_for_request(
+    request: &DragDropRequest,
+    rects: &LayoutRects,
+    dock_area_column_ids: Option<&[NodeId]>,
+    column_header_height: f32,
+) -> Option<Rect> {
+    match (request.handle, request.payload) {
+        (DragHandle::PanelTab, DragPayload::Panel { panel }) => rects
+            .tab_headers
+            .iter()
+            .find(|header| header.panel == panel)
+            .map(|header| header.rect),
+        (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => rects
+            .flyout
+            .filter(|flyout| flyout.panel == panel)
+            .map(|flyout| flyout.rect)
+            .or_else(|| {
+                rects
+                    .panels
+                    .iter()
+                    .find(|panel_rect| panel_rect.panel == panel)
+                    .map(|panel_rect| panel_rect.rect)
+            }),
+        (DragHandle::GroupGrip, DragPayload::Group { group }) => rects
+            .groups
+            .iter()
+            .find(|group_rect| group_rect.group == group)
+            .map(|group_rect| group_rect.rect),
+        (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
+            let source = rects
+                .columns
+                .iter()
+                .find(|column_rect| column_rect.column == column)?
+                .rect;
+            column_tab_floating_bounds(source, request.origin, column_header_height)
+        }
+        (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
+            let ids = dock_area_column_ids?;
+            let columns = ids
+                .iter()
+                .filter_map(|id| {
+                    rects.columns.iter().find(|column| column.column == *id).copied()
+                })
+                .collect::<Vec<_>>();
+            dock_area_bounds(&columns)
+        }
+        (
+            DragHandle::FloatingCapture | DragHandle::FloatingTitle,
+            DragPayload::FloatingGroup { group },
+        ) => rects
+            .floating_groups
+            .iter()
+            .find(|floating| floating.group == group)
+            .map(|floating| floating.rect),
+        _ => None,
+    }
 }
 
 fn collect_dock_area_columns(
