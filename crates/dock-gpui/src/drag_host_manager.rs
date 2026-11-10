@@ -45,6 +45,14 @@ struct ActiveDragHost {
     pending_release_cursor: Option<platform::PhysicalPoint>,
     focus_loss_since: Option<Instant>,
     source_detach_subscription: Option<Subscription>,
+    handoff: Option<DragHostHandoff>,
+}
+
+#[derive(Clone, Copy)]
+struct DragHostHandoff {
+    target_group: FloatingGroupId,
+    source_placeholder_rendered: bool,
+    source_released: bool,
 }
 
 /// Creates, positions, and closes the single temporary DragHost allowed during
@@ -320,6 +328,7 @@ impl DragHostManager {
                     group,
                     column,
                     dock_area,
+                    handoff_placeholder: false,
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -483,6 +492,7 @@ impl DragHostManager {
             pending_release_cursor: None,
             focus_loss_since: None,
             source_detach_subscription: None,
+            handoff: None,
         });
 
         if !panels.is_empty() {
@@ -973,8 +983,200 @@ impl DragHostManager {
         {
             tracing::debug!(?id, ?panel, "DragHost release was cancelled; source view will be restored");
         }
+
+        let floating_target = if finished {
+            panel.and_then(|panel| {
+                self.controller.update(cx, |controller, _| {
+                    floating_group_for_panel(controller.layout(), panel)
+                }).ok().flatten()
+            })
+        } else {
+            None
+        };
+
+        if let Some(target_group) = floating_target {
+            if !self.begin_floating_handoff(id, target_group, cx) {
+                tracing::warn!(
+                    ?id,
+                    ?target_group,
+                    "could not prepare the DragHost-to-FloatingHost handoff; closing DragHost"
+                );
+                if let Err(error) = self.close(id, cx) {
+                    tracing::warn!(?id, %error, "could not close DragHost after handoff setup failed");
+                }
+            }
+            return;
+        }
+
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
+        }
+    }
+
+    fn begin_floating_handoff(
+        &mut self,
+        id: DragHostId,
+        target_group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(active) = self.active.as_mut().filter(|active| active.id == id) else {
+            return false;
+        };
+        active.handoff = Some(DragHostHandoff {
+            target_group,
+            source_placeholder_rendered: false,
+            source_released: false,
+        });
+        let window = active.window;
+
+        let manager = cx.entity().downgrade();
+        match window.update(cx, move |surface, window, host_cx| {
+            // Stop mounting the transferred AnyView, but keep the native
+            // DragHost surface alive at the cursor's final position.
+            surface.handoff_placeholder = true;
+            host_cx.notify();
+            window.on_next_frame(move |_, app| {
+                let _ = manager.update(app, |manager, manager_cx| {
+                    manager.source_placeholder_rendered(id, manager_cx);
+                });
+            });
+        }) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(?id, %error, "could not switch DragHost to an empty handoff placeholder");
+                if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+                    active.handoff = None;
+                }
+                false
+            }
+        }
+    }
+
+    fn source_placeholder_rendered(&mut self, id: DragHostId, cx: &mut Context<Self>) {
+        let Some(active) = self.active.as_mut().filter(|active| active.id == id) else {
+            return;
+        };
+        let Some(handoff) = active.handoff.as_mut() else {
+            return;
+        };
+        handoff.source_placeholder_rendered = true;
+
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor()
+                    .timer(Duration::from_millis(8))
+                    .await;
+                let Ok(keep_tracking) = manager.update(app, |manager, manager_cx| {
+                    manager.try_release_handoff_source(id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_tracking {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Releases the cached views only after the empty DragHost frame has rendered.
+    /// The persistent FloatingHost is shown in the same callback before the next
+    /// application frame, so it can mount the views without an empty visible frame.
+    fn try_release_handoff_source(
+        &mut self,
+        id: DragHostId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((target_group, panels, placeholder_rendered, source_released)) = self
+            .active
+            .as_ref()
+            .filter(|active| active.id == id)
+            .and_then(|active| {
+                let handoff = active.handoff?;
+                Some((
+                    handoff.target_group,
+                    active.panels.clone(),
+                    handoff.source_placeholder_rendered,
+                    handoff.source_released,
+                ))
+            })
+        else {
+            return false;
+        };
+        if !placeholder_rendered {
+            return false;
+        }
+
+        if !source_released {
+            let released = self.controller.update(cx, |controller, controller_cx| {
+                for panel in &panels {
+                    controller.finish_panel_view_transfer(*panel);
+                }
+                controller.drag_mut().finish_host_session();
+                controller_cx.notify();
+            });
+            if released.is_err() {
+                return true;
+            }
+            if let Some(active) = self.active.as_mut().filter(|active| active.id == id)
+                && let Some(handoff) = active.handoff.as_mut()
+            {
+                handoff.source_released = true;
+            }
+        }
+
+        let target_shown = self
+            .floating_manager
+            .as_ref()
+            .and_then(|manager| {
+                manager
+                    .update(cx, |manager, manager_cx| {
+                        manager.show_handoff_target(target_group, manager_cx)
+                    })
+                    .ok()
+            })
+            .unwrap_or(false);
+        !target_shown
+    }
+
+    pub(crate) fn pending_handoff_panels(
+        &self,
+        target_group: FloatingGroupId,
+    ) -> Option<Vec<PanelId>> {
+        let active = self.active.as_ref()?;
+        let handoff = active.handoff?;
+        (handoff.target_group == target_group && handoff.source_released)
+            .then(|| active.panels.clone())
+    }
+
+    pub(crate) fn complete_floating_handoff(
+        &mut self,
+        target_group: FloatingGroupId,
+        rendered_panels: &[PanelId],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(active) = self.active.as_ref() else {
+            return;
+        };
+        let Some(handoff) = active.handoff else {
+            return;
+        };
+        if handoff.target_group != target_group
+            || !handoff.source_released
+            || !active.panels.iter().all(|panel| rendered_panels.contains(panel))
+        {
+            return;
+        }
+
+        let id = active.id;
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(
+                ?id,
+                ?target_group,
+                %error,
+                "could not close DragHost after FloatingHost rendered transferred content"
+            );
         }
     }
 
@@ -1183,6 +1385,7 @@ struct DragHostSurface {
     group: Option<NodeId>,
     column: Option<NodeId>,
     dock_area: Option<DockSide>,
+    handoff_placeholder: bool,
 }
 
 struct DragGroupPresentation {
@@ -1272,6 +1475,10 @@ impl Render for DragHostSurface {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.window_background));
+
+        if self.handoff_placeholder {
+            return root;
+        }
 
         if let Some(side) = self.dock_area
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
@@ -1788,6 +1995,35 @@ impl Render for DragHostSurface {
 
         root
     }
+}
+
+fn floating_group_for_panel(
+    layout: &dock_core::Layout,
+    panel: PanelId,
+) -> Option<FloatingGroupId> {
+    fn contains_panel(layout: &dock_core::Layout, node: NodeId, panel: PanelId) -> bool {
+        match layout.node(node) {
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| contains_panel(layout, *child, panel)),
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .any(|group| contains_panel(layout, *group, panel)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| contains_panel(layout, *child, panel)),
+            Some(Node::Panel(value)) => value.panel_id == panel,
+            None => false,
+        }
+    }
+
+    layout.floating_groups().find_map(|(group_id, group)| {
+        let area = layout.dock_area(group.area)?;
+        contains_panel(layout, area.root, panel).then_some(group_id)
+    })
 }
 
 fn valid_scale(scale: f32) -> Option<f32> {
