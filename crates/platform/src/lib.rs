@@ -1307,7 +1307,7 @@ mod drop_window_target_tests {
 
         assert_eq!(
             resolve(point, &windows, &[topmost_floating, lower_main], None),
-            Some(topmost_floating),
+            NativeWindowAtPoint::Known(topmost_floating),
         );
     }
 
