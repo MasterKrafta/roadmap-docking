@@ -1,4 +1,4 @@
-use std::{cell::{Cell, RefCell}, collections::HashMap, rc::Rc};
+use std::{cell::Cell, collections::HashMap, rc::Rc};
 
 use dock_core::{
     Axis, ColumnRect, DockCommand, DockSide, DragHandle, DragPayload, DragState, HitResult,
@@ -142,10 +142,6 @@ pub(crate) fn register_pointer_events(
         pointer_capture,
         pointer_press,
     } = pointer_state;
-    // Keep console output focused: during a drag we print only when the
-    // Core hit-test result changes under the pointer.
-    let last_drag_hit = Rc::new(RefCell::new(None::<String>));
-
     window.on_mouse_event({
         let manager = manager.clone();
         let drag_host_manager = drag_host_manager.clone();
@@ -154,7 +150,6 @@ pub(crate) fn register_pointer_events(
         let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
-        let last_drag_hit_for_down = last_drag_hit.clone();
         move |event: &MouseDownEvent, phase, window, app| {
             if phase != DispatchPhase::Capture
                 || !root_hitbox.is_hovered(window)
@@ -172,7 +167,6 @@ pub(crate) fn register_pointer_events(
             }
 
             pointer_press.set(None);
-            *last_drag_hit_for_down.borrow_mut() = None;
             let Ok(host_point) = host_point_from_gpui_window(event.position, window_origin) else {
                 return;
             };
@@ -182,15 +176,6 @@ pub(crate) fn register_pointer_events(
                 return;
             };
             let hit = controller.update(app, |controller, _| controller.hit(core_point).ok());
-            let hit_label = hit
-                .as_ref()
-                .map(|hit| format!("{hit:?}"))
-                .unwrap_or_else(|| "Miss".to_owned());
-            eprintln!(
-                "[DOCK-INPUT][main] down button={:?} host=({:.1}, {:.1}) core=({:.1}, {:.1}) hit={}",
-                event.button, host_point.x, host_point.y, core_point.x, core_point.y, hit_label
-            );
-
             if event.button == MouseButton::Right {
                 let target = hit
                     .filter(|hit| !dock_component_interactions_disabled_for_hit(
@@ -252,10 +237,6 @@ pub(crate) fn register_pointer_events(
             // Normalize that area back to its semantic TabHeader before dispatching
             // the pointer-down intent, so dragging the visible DockTab starts PanelTab.
             let hit = dock_component_tab_hit_at_point(&controller, core_point, app).unwrap_or(hit);
-            eprintln!(
-                "[DOCK-INPUT][main] down_intent={:?}",
-                pointer_down_intent_for_hit(hit)
-            );
 
             match pointer_down_intent_for_hit(hit) {
                 PointerDownIntent::TabHeaderCandidate { group, panel } => {
@@ -394,7 +375,6 @@ pub(crate) fn register_pointer_events(
         let scroll_handles = scroll_handles.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
-        let last_drag_hit_for_move = last_drag_hit.clone();
         move |event: &MouseMoveEvent, phase, window, app| {
             if drag_host_manager.update(app, |manager, _| manager.active_drag_host_id().is_some()) {
                 if DockInteractionCoordinator::has_capture(&pointer_capture) {
@@ -475,120 +455,16 @@ pub(crate) fn register_pointer_events(
                 pointer_press.set(None);
             }
 
-            let drag_details = controller.update(app, |controller, _| {
-                match controller.drag().session().state() {
-                    DragState::Dragging { payload, origin, .. } => {
-                        Some((payload, controller.drag().session().handle(), origin))
-                    }
-                    _ => None,
-                }
-            });
-            if let Some((payload, handle, origin)) = drag_details {
-                let hit_label = controller.update(app, |controller, _| {
-                    controller
-                        .hit(point)
-                        .map(|hit| format!("{hit:?}"))
-                        .unwrap_or_else(|_| "Miss".to_owned())
-                });
-                let mut previous_hit = last_drag_hit_for_move.borrow_mut();
-                if previous_hit.as_deref() != Some(hit_label.as_str()) {
-                    let phase_label = if drag_just_started { "drag_start" } else { "drag_over" };
-                    eprintln!(
-                        "[DOCK-INPUT][main] {} payload={:?} handle={:?} origin=({:.1}, {:.1}) pointer=({:.1}, {:.1}) hit={}",
-                        phase_label, payload, handle, origin.x, origin.y, point.x, point.y, hit_label
-                    );
-                    *previous_hit = Some(hit_label);
-                }
-            }
-
-            let should_start_drag_host =
-                controller.update(app, |controller, _| drag_host_transition_required(controller, point));
-            let panel_drag_active = controller.update(app, |controller, _| {
-                matches!(
-                    controller.drag().session().state(),
-                    DragState::Dragging {
-                        payload: DragPayload::Panel { .. },
-                        ..
-                    }
-                ) && matches!(
-                    controller.drag().session().handle(),
-                    Some(DragHandle::PanelTab | DragHandle::FlyoutPanel)
-                )
-            });
-            let group_grip_active = controller.update(app, |controller, _| {
-                matches!(
-                    controller.drag().session().state(),
-                    DragState::Dragging {
-                        payload: DragPayload::Group { .. },
-                        ..
-                    }
-                ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
-            });
-            let column_header_active = controller.update(app, |controller, _| {
-                matches!(
-                    controller.drag().session().state(),
-                    DragState::Dragging {
-                        payload: DragPayload::Column { .. },
-                        ..
-                    }
-                ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
-            });
-            let dock_area_header_active = controller.update(app, |controller, _| {
-                matches!(
-                    controller.drag().session().state(),
-                    DragState::Dragging {
-                        payload: DragPayload::DockArea { .. },
-                        ..
-                    }
-                ) && controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
-            });
-            let over_floating = (panel_drag_active || group_grip_active)
-                && manager.update(app, |manager, _| {
-                    manager.cursor_over_floating_window_from_main()
-                });
-            if panel_drag_active && (should_start_drag_host || over_floating) {
-                let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
-                if !started {
-                    tracing::debug!("Panel drag could not start DragHost; source gesture was cancelled");
-                }
-                DockInteractionCoordinator::release(window, &pointer_capture);
-                pointer_press.set(None);
-                app.stop_propagation();
-                return;
-            }
-            if group_grip_active && (should_start_drag_host || over_floating) {
-                let started = begin_group_drag_host(&controller, &drag_host_manager, app);
-                if !started {
-                    tracing::debug!("Group drag could not start DragHost; source gesture was cancelled");
-                }
-                DockInteractionCoordinator::release(window, &pointer_capture);
-                pointer_press.set(None);
-                app.stop_propagation();
-                return;
-            }
-            if column_header_active && should_start_drag_host {
-                let started = begin_column_drag_host(&controller, &drag_host_manager, app);
-                if !started {
-                    tracing::debug!(
-                        "Column drag could not start DragHost; source gesture was cancelled"
-                    );
-                }
-                DockInteractionCoordinator::release(window, &pointer_capture);
-                pointer_press.set(None);
-                app.stop_propagation();
-                return;
-            }
-
-            if dock_area_header_active && should_start_drag_host {
-                let started = begin_dock_area_drag_host(&controller, &drag_host_manager, app);
-                if !started {
-                    tracing::debug!(
-                        "DockArea drag could not start DragHost; source gesture was cancelled"
-                    );
-                }
-                DockInteractionCoordinator::release(window, &pointer_capture);
-                pointer_press.set(None);
-                app.stop_propagation();
+            if try_start_main_drag_host(
+                &controller,
+                &manager,
+                &drag_host_manager,
+                window,
+                &pointer_capture,
+                &pointer_press,
+                point,
+                app,
+            ) {
                 return;
             }
 
@@ -641,7 +517,6 @@ pub(crate) fn register_pointer_events(
         let toggle_context_menu = toggle_context_menu.clone();
         let pointer_capture = pointer_capture.clone();
         let pointer_press = pointer_press.clone();
-        let last_drag_hit_for_up = last_drag_hit.clone();
         move |event: &MouseUpEvent, phase, window, app| {
             if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                 return;
@@ -703,17 +578,6 @@ pub(crate) fn register_pointer_events(
                 );
                 return;
             };
-            let release_hit = controller.update(app, |controller, _| {
-                controller
-                    .hit(point)
-                    .map(|hit| format!("{hit:?}"))
-                    .unwrap_or_else(|_| "Miss".to_owned())
-            });
-            eprintln!(
-                "[DOCK-INPUT][main] up host=({:.1}, {:.1}) core=({:.1}, {:.1}) drag_active={} resize_active={} hit={}",
-                host_point.x, host_point.y, point.x, point.y, drag_active, resize_active, release_hit
-            );
-
             let drag_was_started = if drag_active {
                 // MouseUp can be the first event delivered beyond the drag threshold.
                 // Update the session once more so a tab released outside its DockTab
@@ -721,89 +585,16 @@ pub(crate) fn register_pointer_events(
                 if update_drag_at(&controller, point, app) {
                     pointer_press.set(None);
                 }
-                let should_start_drag_host = controller
-                    .update(app, |controller, _| drag_host_transition_required(controller, point));
-                let panel_drag_active = controller.update(app, |controller, _| {
-                    matches!(
-                        controller.drag().session().state(),
-                        DragState::Dragging {
-                            payload: DragPayload::Panel { .. },
-                            ..
-                        }
-                    ) && matches!(
-                        controller.drag().session().handle(),
-                        Some(DragHandle::PanelTab | DragHandle::FlyoutPanel)
-                    )
-                });
-                let group_grip_active = controller.update(app, |controller, _| {
-                    matches!(
-                        controller.drag().session().state(),
-                        DragState::Dragging {
-                            payload: DragPayload::Group { .. },
-                            ..
-                        }
-                    ) && controller.drag().session().handle() == Some(DragHandle::GroupGrip)
-                });
-                let column_header_active = controller.update(app, |controller, _| {
-                    matches!(
-                        controller.drag().session().state(),
-                        DragState::Dragging {
-                            payload: DragPayload::Column { .. },
-                            ..
-                        }
-                    ) && controller.drag().session().handle() == Some(DragHandle::ColumnHeader)
-                });
-                let dock_area_header_active = controller.update(app, |controller, _| {
-                    matches!(
-                        controller.drag().session().state(),
-                        DragState::Dragging {
-                            payload: DragPayload::DockArea { .. },
-                            ..
-                        }
-                    ) && controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
-                });
-                let over_floating = (panel_drag_active || group_grip_active)
-                    && manager.update(app, |manager, _| {
-                        manager.cursor_over_floating_window_from_main()
-                    });
-                if panel_drag_active && (should_start_drag_host || over_floating) {
-                    let started = begin_panel_drag_host(&controller, &drag_host_manager, app);
-                    if !started {
-                        tracing::debug!("Panel drag could not start DragHost on release");
-                    }
-                    DockInteractionCoordinator::release(window, &pointer_capture);
-                    pointer_press.set(None);
-                    app.stop_propagation();
-                    return;
-                }
-                if group_grip_active && (should_start_drag_host || over_floating) {
-                    let started = begin_group_drag_host(&controller, &drag_host_manager, app);
-                    if !started {
-                        tracing::debug!("Group drag could not start DragHost on release");
-                    }
-                    DockInteractionCoordinator::release(window, &pointer_capture);
-                    pointer_press.set(None);
-                    app.stop_propagation();
-                    return;
-                }
-                if column_header_active && should_start_drag_host {
-                    let started = begin_column_drag_host(&controller, &drag_host_manager, app);
-                    if !started {
-                        tracing::debug!("Column drag could not start DragHost on release");
-                    }
-                    DockInteractionCoordinator::release(window, &pointer_capture);
-                    pointer_press.set(None);
-                    app.stop_propagation();
-                    return;
-                }
-                if dock_area_header_active && should_start_drag_host {
-                    let started = begin_dock_area_drag_host(&controller, &drag_host_manager, app);
-                    if !started {
-                        tracing::debug!("DockArea drag could not start DragHost on release");
-                    }
-                    DockInteractionCoordinator::release(window, &pointer_capture);
-                    pointer_press.set(None);
-                    app.stop_propagation();
+                if try_start_main_drag_host(
+                    &controller,
+                    &manager,
+                    &drag_host_manager,
+                    window,
+                    &pointer_capture,
+                    &pointer_press,
+                    point,
+                    app,
+                ) {
                     return;
                 }
                 finish_drag_at(&controller, &manager, point, app)
@@ -819,7 +610,6 @@ pub(crate) fn register_pointer_events(
             DockInteractionCoordinator::release(window, &pointer_capture);
 
             pointer_press.set(None);
-            *last_drag_hit_for_up.borrow_mut() = None;
             if drag_was_started || resize_active {
                 return;
             }
@@ -845,10 +635,6 @@ pub(crate) fn register_pointer_events(
                 app,
             );
             let intent = pointer_click_intent_for_hit(release_hit, event.click_count);
-            eprintln!(
-                "[DOCK-INPUT][main] click_dispatch click_count={} hit={:?} intent={:?}",
-                event.click_count, release_hit, intent
-            );
             let intent = if disable_component_actions
                 && matches!(intent, PointerClickIntent::CollapseGroup { .. })
             {
@@ -936,6 +722,94 @@ fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPay
 
 /// Checks whether the active drag has reached the point where content must move to DragHost.
 /// PanelTab and GroupGrip leave their source zones; FlyoutPanel/Column/DockArea start at threshold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MainDragHostKind {
+    Panel,
+    Group,
+    Column,
+    DockArea,
+}
+
+/// Starts a temporary DragHost when a Main-host gesture leaves its source surface.
+/// MouseMove and MouseUp share this transition path; MouseUp still updates the
+/// pointer first so a release beyond the threshold is handled without a move event.
+fn try_start_main_drag_host(
+    controller: &Entity<DockController>,
+    manager: &Entity<FloatingWindowManager>,
+    drag_host_manager: &Entity<DragHostManager>,
+    window: &mut Window,
+    pointer_capture: &Rc<Cell<Option<HitboxId>>>,
+    pointer_press: &Rc<Cell<Option<PointerPress>>>,
+    point: Point,
+    app: &mut App,
+) -> bool {
+    let (should_start, kind) = controller.update(app, |controller, _| {
+        let kind = match (
+            controller.drag().session().state(),
+            controller.drag().session().handle(),
+        ) {
+            (
+                DragState::Dragging {
+                    payload: DragPayload::Panel { .. },
+                    ..
+                },
+                Some(DragHandle::PanelTab | DragHandle::FlyoutPanel),
+            ) => Some(MainDragHostKind::Panel),
+            (
+                DragState::Dragging {
+                    payload: DragPayload::Group { .. },
+                    ..
+                },
+                Some(DragHandle::GroupGrip),
+            ) => Some(MainDragHostKind::Group),
+            (
+                DragState::Dragging {
+                    payload: DragPayload::Column { .. },
+                    ..
+                },
+                Some(DragHandle::ColumnHeader),
+            ) => Some(MainDragHostKind::Column),
+            (
+                DragState::Dragging {
+                    payload: DragPayload::DockArea { .. },
+                    ..
+                },
+                Some(DragHandle::DockAreaHeader),
+            ) => Some(MainDragHostKind::DockArea),
+            _ => None,
+        };
+        let should_start =
+            kind.is_some() && drag_host_transition_required(controller, point);
+        (should_start, kind)
+    });
+
+    let Some(kind) = kind else {
+        return false;
+    };
+    let over_floating = matches!(kind, MainDragHostKind::Panel | MainDragHostKind::Group)
+        && manager.update(app, |manager, _| {
+            manager.cursor_over_floating_window_from_main()
+        });
+    if !should_start && !over_floating {
+        return false;
+    }
+
+    let started = match kind {
+        MainDragHostKind::Panel => begin_panel_drag_host(controller, drag_host_manager, app),
+        MainDragHostKind::Group => begin_group_drag_host(controller, drag_host_manager, app),
+        MainDragHostKind::Column => begin_column_drag_host(controller, drag_host_manager, app),
+        MainDragHostKind::DockArea => begin_dock_area_drag_host(controller, drag_host_manager, app),
+    };
+    if !started {
+        tracing::debug!(?kind, "Main-host drag could not start DragHost");
+    }
+
+    DockInteractionCoordinator::release(window, pointer_capture);
+    pointer_press.set(None);
+    app.stop_propagation();
+    true
+}
+
 fn drag_host_transition_required(controller: &mut DockController, pointer: Point) -> bool {
     let DragState::Dragging { payload, .. } = controller.drag().session().state() else {
         return false;
