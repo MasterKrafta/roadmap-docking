@@ -718,11 +718,10 @@ fn tab_insertion_index(
     tab_count: usize,
     pointer_x: f32,
 ) -> usize {
-    let mut ordered = headers.iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|header| header.index);
-    ordered
-        .into_iter()
-        .find(|header| pointer_x < header.rect.origin.x + header.rect.size.width * 0.5)
+    headers
+        .iter()
+        .filter(|header| pointer_x < header.rect.origin.x + header.rect.size.width * 0.5)
+        .min_by_key(|header| header.index)
         .map(|header| header.index)
         .unwrap_or(tab_count)
 }
