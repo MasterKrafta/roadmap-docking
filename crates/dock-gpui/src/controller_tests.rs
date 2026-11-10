@@ -119,11 +119,12 @@ fn new_content_drag_rearms_dropped_and_cancelled_terminal_sessions() {
         .session_mut()
         .set_drop_target(Some(DropTarget::FreeArea))
         .expect("first drag target should be accepted");
-    controller
+    let request = controller
         .drag_mut()
         .session_mut()
         .pointer_up(Point::new(20.0, 10.0), Some(DropTarget::FreeArea))
         .expect("first drag should finish");
+    assert!(request.is_some());
     assert!(matches!(
         controller.drag().session().state(),
         DragState::Dropped { .. }
