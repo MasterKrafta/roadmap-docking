@@ -327,12 +327,16 @@ impl DragHostManager {
         let window = cx
             .open_window(options, move |_, app| {
                 app.new(|surface_cx| {
-                    let floating_host = floating_manager.map(|manager| {
-                        let controller = controller.clone();
-                        surface_cx.new(move |_| {
-                            FloatingHost::new_panel_window(controller, theme, manager)
+                    let floating_host = if dock_area.is_some() {
+                        floating_manager.map(|manager| {
+                            let controller = controller.clone();
+                            surface_cx.new(move |_| {
+                                FloatingHost::new_panel_window(controller, theme, manager)
+                            })
                         })
-                    });
+                    } else {
+                        None
+                    };
                     DragHostSurface {
                         theme,
                         controller,
@@ -972,7 +976,14 @@ impl DragHostManager {
                     match action {
                         Ok(DragDropAction::NoOp) => {}
                         Ok(DragDropAction::Command(command)) => {
-                            if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                            let result = if dock_area.is_some() {
+                                // Delay LayoutChanged publication until the current
+                                // DragHost has been registered as the Floating host.
+                                controller.dispatch(command)
+                            } else {
+                                controller.dispatch_in(command, controller_cx)
+                            };
+                            if let Err(error) = result {
                                 tracing::warn!(?id, %error, "DragHost drop command was rejected");
                             }
                         }
@@ -1010,6 +1021,9 @@ impl DragHostManager {
             {
                 return;
             }
+            if dock_area.is_some() {
+                self.flush_controller_events(cx);
+            }
 
             if !self.begin_floating_handoff(id, target_group, cx) {
                 tracing::warn!(
@@ -1024,6 +1038,9 @@ impl DragHostManager {
             return;
         }
 
+        if dock_area.is_some() {
+            self.flush_controller_events(cx);
+        }
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
         }
@@ -1092,6 +1109,7 @@ impl DragHostManager {
                 controller.finish_panel_view_transfer(panel);
             }
             controller.drag_mut().finish_host_session();
+            controller.flush_events(controller_cx);
             controller_cx.notify();
         });
 
@@ -1266,6 +1284,13 @@ impl DragHostManager {
                 "could not close DragHost after FloatingHost rendered transferred content"
             );
         }
+    }
+
+    fn flush_controller_events(&self, cx: &mut Context<Self>) {
+        self.controller.update(cx, |controller, controller_cx| {
+            controller.flush_events(controller_cx);
+            controller_cx.notify();
+        });
     }
 
     fn cancel_active_drag(&mut self, id: DragHostId, cx: &mut Context<Self>) {
