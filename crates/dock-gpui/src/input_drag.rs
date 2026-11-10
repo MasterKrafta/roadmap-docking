@@ -1256,12 +1256,9 @@ mod main_drop_resolution_tests {
 
 #[cfg(test)]
 mod floating_bounds_tests {
-    use dock_core::{NodeId, PanelId, Point, Rect, Size};
-    use slotmap::Key;
+    use dock_core::{Point, Rect, Size};
 
-    use super::{
-        column_tab_floating_bounds, desired_floating_bounds, tab_insertion_index,
-    };
+    use super::{column_tab_floating_bounds, desired_floating_bounds};
 
     #[test]
     fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
@@ -1329,6 +1326,15 @@ mod floating_bounds_tests {
             Rect::new(Point::new(540.0, 500.0), Size::new(160.0, 100.0))
         );
     }
+
+}
+
+#[cfg(test)]
+mod tab_insertion_tests {
+    use dock_core::{NodeId, PanelId, Point, Rect, Size};
+    use slotmap::Key;
+
+    use super::tab_insertion_index;
 
     #[test]
     fn tab_insertion_index_uses_header_midpoints_and_appends_at_the_end() {
