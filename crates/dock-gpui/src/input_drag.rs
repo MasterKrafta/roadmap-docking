@@ -1,6 +1,6 @@
 use dock_core::{
     ColumnRect, ComputeRectsError, DragDropAction, DragDropRequest, DragHandle, DragPayload,
-    DragState, DockSide, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
+    DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
     LayoutRects, PanelId, Point, Rect, Size,
 };
 use gpui::{App, Entity, WindowId};
@@ -421,7 +421,7 @@ pub(crate) fn begin_dock_area_drag_host(
             return None;
         }
 
-        let rects = controller.geometry().ok()?;
+        let rects = controller.geometry().ok()?.clone();
         let area = controller.layout().main_area(side)?;
         let mut column_ids = Vec::new();
         collect_dock_area_columns(controller.layout(), area.root, &mut column_ids);
@@ -473,41 +473,6 @@ pub(crate) fn begin_dock_area_drag_host(
     }
 }
 
-fn collect_dock_area_columns(
-    layout: &dock_core::Layout,
-    node: NodeId,
-    columns: &mut Vec<NodeId>,
-) {
-    match layout.node(node) {
-        Some(Node::Split(split)) => {
-            for child in &split.children {
-                collect_dock_area_columns(layout, *child, columns);
-            }
-        }
-        Some(Node::Column(_)) => columns.push(node),
-        _ => {}
-    }
-}
-
-fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
-    let first = columns.first()?.rect;
-    let mut left = first.origin.x;
-    let mut top = first.origin.y;
-    let mut right = first.origin.x + first.size.width;
-    let mut bottom = first.origin.y + first.size.height;
-
-    for column in columns.iter().skip(1) {
-        left = left.min(column.rect.origin.x);
-        top = top.min(column.rect.origin.y);
-        right = right.max(column.rect.origin.x + column.rect.size.width);
-        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
-    }
-
-    Some(Rect::new(
-        Point::new(left, top),
-        Size::new(right - left, bottom - top),
-    ))
-}
 
 /// Updates a tab drag that started inside a floating host. The resolver is
 /// built from that host's own local geometry, not from the main DockHost.
