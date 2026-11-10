@@ -90,8 +90,10 @@ impl DockAreaDragArea {
     pub fn render(id: String, theme: Theme) -> impl IntoElement {
         div()
             .id(id)
-            .flex_1()
-            .min_w_0()
+            .absolute()
+            .left_0()
+            .top_0()
+            .w_full()
             .h_full()
             .cursor_move()
             .bg(rgb(theme.colors.group_grip_background))
