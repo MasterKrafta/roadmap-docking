@@ -308,6 +308,11 @@ pub(crate) fn begin_group_drag_host(
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
+        // A Main-host Group tear-off can keep its DragHost HWND and promote it
+        // directly into the resulting Floating composition. A Group detached
+        // from an existing Floating host keeps the regular handoff path because
+        // that composition already owns a registered native window.
+        let promote_on_float = matches!(source_host, DragSourceHost::Main);
         let group_rect = match source_host {
             DragSourceHost::Main => controller
                 .geometry()
@@ -339,9 +344,9 @@ pub(crate) fn begin_group_drag_host(
             (origin.y - group_rect.rect.origin.y)
                 .clamp(0.0, group_rect.rect.size.height),
         );
-        Some((group, panel, grab_offset, group_rect.rect.size))
+        Some((group, panel, grab_offset, group_rect.rect.size, promote_on_float))
     });
-    let Some((group, panel, grab_offset, logical_size)) = candidate else {
+    let Some((group, panel, grab_offset, logical_size, promote_on_float)) = candidate else {
         tracing::debug!("GroupGrip drag has no valid source geometry for DragHost");
         controller.update(app, |controller, cx| {
             if let Err(error) = controller.cancel_pointer_interaction() {
@@ -353,7 +358,14 @@ pub(crate) fn begin_group_drag_host(
     };
 
     match drag_host_manager.update(app, |manager, manager_cx| {
-        manager.open_group_at_cursor(group, panel, grab_offset, logical_size, manager_cx)
+        manager.open_group_at_cursor(
+            group,
+            panel,
+            grab_offset,
+            logical_size,
+            promote_on_float,
+            manager_cx,
+        )
     }) {
         Ok(_) => true,
         Err(error) => {
