@@ -956,7 +956,7 @@ impl Render for FloatingHost {
                             if is_single_tab_floating
                                 && let Some(manager) = manager_for_down.upgrade()
                                 && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move_with_hidden_header(
+                                    manager.begin_existing_window_move(
                                         group,
                                         point,
                                         manager_cx,
