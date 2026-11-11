@@ -382,10 +382,10 @@ fn photoshop_group_side_drop_zones_cover_the_entire_target_column_height() {
         .find(|zone| {
             zone.zone == DropZone::ColumnLeft
                 && zone.target
-                    == DropTarget::GroupEdge {
+                    == (DropTarget::GroupEdge {
                         group: first_group,
                         zone: DropZone::Left,
-                    }
+                    })
         })
         .unwrap();
     let point = Point::new(
