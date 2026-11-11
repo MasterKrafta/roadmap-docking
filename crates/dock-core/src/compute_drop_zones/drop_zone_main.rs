@@ -397,18 +397,21 @@ impl Layout {
         }
 
         // A Floating composition whose root is a single-group Column may be
-        // merged into another Floating tab strip as one complete Group.
+        // merged into a Main or Floating tab strip as one complete Group.
         let floating_single_group_column = matches!(source, DropSource::Column { .. })
             && source_is_floating_root(self, source_root_id)
             && matches!(
                 self.node(source_root_id),
                 Some(Node::Column(column)) if column.groups.len() == 1
             );
-        if floating_single_group_column
-            && source_allows(self, source_panels, AllowedArea::FLOATING)
-        {
+        if floating_single_group_column {
             for strip in &rects.tab_strips {
-                if target_area(self, tree_index, strip.group) != Some(AllowedArea::FLOATING) {
+                let Some(area) = target_area(self, tree_index, strip.group) else {
+                    continue;
+                };
+                if !matches!(area, AllowedArea::MAIN_DOCK | AllowedArea::FLOATING)
+                    || !source_allows(self, source_panels, area)
+                {
                     continue;
                 }
                 let Some(Node::Tabs(tabs)) = self.node(strip.group) else {

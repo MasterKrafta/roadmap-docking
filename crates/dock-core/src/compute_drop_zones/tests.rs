@@ -2486,3 +2486,297 @@ fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_compo
     assert!(has_edge(right_group, DropZone::Right));
 }
 
+
+#[test]
+fn floating_panel_and_group_use_the_same_main_dock_drop_zones() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) =
+        builder.panel(key("floating-main-zone-source"), constraints());
+    let (_, source_sibling) =
+        builder.panel(key("floating-main-zone-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling], 0, false);
+    builder.floating_group(
+        source_group,
+        Rect::new(Point::new(900.0, 100.0), Size::new(260.0, 320.0)),
+        1,
+    );
+
+    let (_, first_node) = builder.panel(key("floating-main-zone-first"), constraints());
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let (_, second_node) = builder.panel(key("floating-main-zone-second"), constraints());
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let (_, third_node) = builder.panel(key("floating-main-zone-third"), constraints());
+    let third_group = builder.tabs(vec![third_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group, third_group],
+        vec![0.34, 0.33, 0.33],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let column_rect = rects
+        .columns
+        .iter()
+        .find(|column| column.column == target_column)
+        .expect("the Main target Column should have computed bounds")
+        .rect;
+    let first_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == first_group)
+        .expect("the first Main Group should have computed bounds")
+        .rect;
+    let target_strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == first_group)
+        .expect("the first Main Group should have a tab strip");
+
+    let sources = [
+        (
+            DropSource::Panel { panel: source_panel },
+            DropTarget::Tabs {
+                group: first_group,
+                index: 1,
+            },
+            DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 0,
+            },
+            DropTarget::MainColumn {
+                side: DockSide::Left,
+                index: 1,
+            },
+        ),
+        (
+            DropSource::Group { group: source_group },
+            DropTarget::GroupTabs {
+                group: first_group,
+                index: 1,
+            },
+            DropTarget::GroupEdge {
+                group: first_group,
+                zone: DropZone::Left,
+            },
+            DropTarget::GroupEdge {
+                group: third_group,
+                zone: DropZone::Right,
+            },
+        ),
+    ];
+
+    for (source, tab_target, left_target, right_target) in sources {
+        let zones = layout
+            .compute_drop_zones(source, &rects, &metrics)
+            .unwrap();
+
+        let tab_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::TabInsertion && zone.target == tab_target
+            })
+            .expect("a Floating source must expose the full Main tab-strip target");
+        assert_eq!(tab_zone.rect, target_strip.rect);
+        assert!(!zones.iter().any(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && match tab_target {
+                    DropTarget::Tabs { group, index }
+                    | DropTarget::GroupTabs { group, index } => {
+                        zone.target == (match tab_target {
+                            DropTarget::Tabs { .. } => DropTarget::Tabs { group, index: 0 },
+                            _ => DropTarget::GroupTabs { group, index: 0 },
+                        })
+                    }
+                    _ => false,
+                }
+        }));
+
+        let top_zone = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::Top
+                    && zone.target
+                        == DropTarget::GroupEdge {
+                            group: first_group,
+                            zone: DropZone::Top,
+                        }
+            })
+            .expect("a Floating source must use the Main composition-header top band");
+        assert_eq!(
+            top_zone.rect.origin.y + top_zone.rect.size.height,
+            first_rect.origin.y
+        );
+        assert_eq!(
+            top_zone.rect.size.height,
+            metrics.edge_drop_width.min(metrics.column_header_height)
+        );
+
+        let shared_bottom = zones
+            .iter()
+            .find(|zone| {
+                zone.zone == DropZone::Bottom
+                    && zone.target
+                        == DropTarget::GroupEdge {
+                            group: first_group,
+                            zone: DropZone::Bottom,
+                        }
+            })
+            .expect("the upper Main Group must own the shared inter-group strip");
+        assert_eq!(shared_bottom.rect.origin.x, column_rect.origin.x);
+        assert_eq!(shared_bottom.rect.size.width, column_rect.size.width);
+        assert!(!zones.iter().any(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: second_group,
+                        zone: DropZone::Top,
+                    }
+        }));
+
+        let splitter = rects
+            .splitters
+            .iter()
+            .find(|splitter| {
+                splitter.owner == target_column
+                    && splitter.axis == Axis::Y
+                    && splitter.boundary_index == 0
+            })
+            .expect("the Main Column must have a splitter between its first two groups");
+        let split_point = Point::new(
+            splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+            splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+        );
+        assert!(shared_bottom.rect.contains(split_point).unwrap());
+
+        let left_zone = zones
+            .iter()
+            .find(|zone| zone.zone == DropZone::ColumnLeft && zone.target == left_target)
+            .expect("a Floating source must expose the full-height Main left side");
+        let right_zone = zones
+            .iter()
+            .find(|zone| zone.zone == DropZone::ColumnRight && zone.target == right_target)
+            .expect("a Floating source must expose the full-height Main right side");
+        for zone in [left_zone, right_zone] {
+            assert_eq!(zone.rect.origin.y, column_rect.origin.y);
+            assert_eq!(zone.rect.size.height, column_rect.size.height);
+        }
+
+        let resolver = layout.prepare_drop_resolver(source, &rects, &metrics).unwrap();
+        let resolved_tab = resolver
+            .resolve_zone(Point::new(
+                target_strip.rect.origin.x + target_strip.rect.size.width * 0.5,
+                target_strip.rect.origin.y + target_strip.rect.size.height * 0.5,
+            ))
+            .unwrap()
+            .expect("the Main tab strip must resolve for a Floating source");
+        assert_eq!(resolved_tab.target, tab_target);
+
+        let resolved_split = resolver
+            .resolve_zone(split_point)
+            .unwrap()
+            .expect("the shared Main group strip must resolve for a Floating source");
+        assert_eq!(resolved_split.target, shared_bottom.target);
+
+        for fraction in [0.05, 0.5, 0.95] {
+            let point = Point::new(
+                right_zone.rect.origin.x + right_zone.rect.size.width * 0.5,
+                column_rect.origin.y + column_rect.size.height * fraction,
+            );
+            let resolved = resolver
+                .resolve_zone(point)
+                .unwrap()
+                .expect("the Main side zone must resolve over the complete Column height");
+            assert_eq!(resolved.target, right_target);
+            assert_eq!(resolved.zone, DropZone::ColumnRight);
+        }
+    }
+}
+
+
+#[test]
+fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_node) =
+        builder.panel(key("floating-main-column-source-first"), constraints());
+    let (_, source_second_node) =
+        builder.panel(key("floating-main-column-source-second"), constraints());
+    let source_group = builder.tabs(vec![source_first_node, source_second_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(80.0, 80.0), Size::new(420.0, 320.0)),
+        2,
+    );
+
+    let (_, target_node) = builder.panel(key("floating-main-column-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, target_column);
+
+    let mut layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let source = DropSource::Column { column: source_column };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let expected_target = DropTarget::GroupTabs {
+        group: target_group,
+        index: 1,
+    };
+    let strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == target_group)
+        .expect("the Main target must have a tab strip");
+    let zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::TabInsertion && zone.target == expected_target
+        })
+        .expect("a one-group Floating Column must expose the Main tab strip");
+    assert_eq!(zone.rect, strip.rect);
+
+    let point = Point::new(
+        strip.rect.origin.x + strip.rect.size.width * 0.5,
+        strip.rect.origin.y + strip.rect.size.height * 0.5,
+    );
+    assert_eq!(
+        layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
+        Some(expected_target)
+    );
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_float,
+                target: expected_target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let Some(crate::Node::Tabs(tabs)) = layout.node(target_group) else {
+        panic!("the Main destination must remain a Tabs group");
+    };
+    assert_eq!(
+        tabs.children,
+        vec![target_node, source_first_node, source_second_node]
+    );
+    assert!(layout.floating_group(source_float).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
