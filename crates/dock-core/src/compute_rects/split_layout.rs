@@ -34,6 +34,31 @@ pub(super) fn layout_floating_root(
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
+    // A floating root Tabs group shares the CompositionHeader as its top row.
+    // Put the one-row Group tab strip directly below it instead of creating
+    // another standalone Group header above the tabs.
+    if let Some(Node::Tabs(tabs)) = layout.node(id) {
+        let header_height = metrics.column_header_height.min(rect.size.height);
+        let group_area = Rect::new(
+            Point::new(rect.origin.x, rect.origin.y + header_height),
+            Size::new(
+                rect.size.width,
+                (rect.size.height - header_height).max(0.0),
+            ),
+        );
+        return super::node_layout::layout_tabs(
+            layout,
+            id,
+            tabs,
+            group_area,
+            metrics,
+            minimum_sizes,
+            output,
+            false,
+            true,
+        );
+    }
+
     layout_node(layout, id, rect, metrics, minimum_sizes, output)
 }
 

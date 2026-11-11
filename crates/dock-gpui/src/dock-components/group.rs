@@ -117,6 +117,11 @@ impl DockGroupView {
             .min(group.rect.size.width / 3.0)
             .max(1.0);
 
+        // Column Groups and root Floating Groups use one compact tab/control
+        // row. Standalone Groups outside Columns keep a separate Group header.
+        let compact_header =
+            column.is_some() || strip.rect.origin.y == group.rect.origin.y;
+
         let mut root = div()
             .id(format!("dock-group-{:?}", group.group))
             .absolute()
@@ -127,7 +132,7 @@ impl DockGroupView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
-        if column.is_none() && header_height > 0.0 {
+        if !compact_header && header_height > 0.0 {
             let grip_width =
                 (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0);
             let grip = div()
@@ -194,12 +199,12 @@ impl DockGroupView {
 
         // Collapsed groups have no header rect, so their controls overlay the
         // trailing edge of the remaining tab strip to keep Expand/Menu reachable.
-        let controls_top = if column.is_some() || presentation.collapsed {
+        let controls_top = if compact_header || presentation.collapsed {
             strip.rect.origin.y - group.rect.origin.y
         } else {
             0.0
         };
-        let controls_height = if column.is_some() || presentation.collapsed {
+        let controls_height = if compact_header || presentation.collapsed {
             strip.rect.size.height
         } else {
             header_height
@@ -220,9 +225,9 @@ impl DockGroupView {
                 if column.is_some() { "☰" } else { "⋮" },
                 toggle_menu.clone(),
             ));
-        if column.is_some() {
-            // Column Groups use one compact toolbar: tabs on the left, a
-            // flexible drag lane in the middle, a fixed Group grip, and Menu.
+        if compact_header {
+            // Compact Groups use one toolbar: tabs on the left, a flexible
+            // drag lane in the middle, a fixed Group grip, and Menu.
             let group_grip = div()
                 .absolute()
                 .left(px((group.rect.size.width - 2.0 * control_width).max(0.0)))

@@ -54,11 +54,19 @@ pub(super) fn floating_window_rect_with_cache(
         .validate_non_empty()
         .map_err(ComputeRectsError::Geometry)?;
     let minimum = minimum_floating_size(layout, root, metrics, minimum_sizes)?;
+    // Root Tabs geometry reserves the shared CompositionHeader above its Group.
+    // Root Columns already account for their own header in their minimum size.
+    let composition_header_height = if matches!(layout.node(root), Some(Node::Tabs(_))) {
+        metrics.column_header_height
+    } else {
+        0.0
+    };
+    let minimum_height = minimum.height + composition_header_height;
     let result = Rect::new(
         Point::ZERO,
         Size::new(
             bounds.size.width.max(minimum.width),
-            bounds.size.height.max(minimum.height),
+            bounds.size.height.max(minimum_height),
         ),
     );
     result
