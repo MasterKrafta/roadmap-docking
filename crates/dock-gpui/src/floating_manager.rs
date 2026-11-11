@@ -555,6 +555,13 @@ impl FloatingWindowManager {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        // Native Floating-window moves are tracked independently of GPUI focus.
+        // Moving over another managed host can transfer foreground activation;
+        // the native move loop must keep running until mouse-up or Escape.
+        if self.native_move_active() {
+            return true;
+        }
+
         // DockHost can lose focus while the pointer crosses between managed
         // native windows. During a content drag, do not cancel synchronously:
         // DragHost's polling loop debounces transient empty/foreign foreground
