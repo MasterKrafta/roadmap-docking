@@ -504,31 +504,35 @@ fn main_dock_edge_guide_rect(rect: Rect, side: DockSide) -> Rect {
     )
 }
 
-fn highlight_rect(rect: Rect, theme: Theme, opacity: f32, border: bool) -> impl IntoElement {
+const DROP_ZONE_FILL: u32 = 0x168BFF;
+const DROP_ZONE_BORDER: u32 = 0x65D5FF;
+const DROP_ZONE_GUIDE: u32 = 0x35C8FF;
+
+fn highlight_rect(rect: Rect, _theme: Theme, opacity: f32, border: bool) -> impl IntoElement {
     let mut element = div()
         .absolute()
         .left(px(rect.origin.x))
         .top(px(rect.origin.y))
         .w(px(rect.size.width))
         .h(px(rect.size.height))
-        .bg(rgb(theme.colors.drop_zone))
-        .opacity(opacity);
+        .bg(rgb(DROP_ZONE_FILL))
+        .opacity(opacity.max(0.18));
     if border {
         element = element
             .border_1()
-            .border_color(rgb(theme.colors.drop_zone_border));
+            .border_color(rgb(DROP_ZONE_BORDER));
     }
     element
 }
 
-fn guide_rect(rect: Rect, theme: Theme) -> impl IntoElement {
+fn guide_rect(rect: Rect, _theme: Theme) -> impl IntoElement {
     div()
         .absolute()
         .left(px(rect.origin.x))
         .top(px(rect.origin.y))
         .w(px(rect.size.width))
         .h(px(rect.size.height))
-        .bg(rgb(theme.colors.drop_zone))
+        .bg(rgb(DROP_ZONE_GUIDE))
 }
 
 #[cfg(test)]
