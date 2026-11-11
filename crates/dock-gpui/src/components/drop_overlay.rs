@@ -419,18 +419,12 @@ fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
 
 fn main_group_edge_highlight_rect(rect: Rect, zone: DropZone) -> Rect {
     match zone {
-        // Keep the hit zone in the header, but paint a centered, half-width
-        // translucent highlight downward into the first Group.
-        DropZone::Top => {
-            let width = rect.size.width * 0.5;
-            Rect::new(
-                Point::new(
-                    rect.origin.x + (rect.size.width - width) * 0.5,
-                    rect.origin.y + rect.size.height,
-                ),
-                dock_core::Size::new(width, rect.size.height),
-            )
-        }
+        // Keep the full width, but reduce the translucent highlight to half
+        // the hit zone height below the composition header.
+        DropZone::Top => Rect::new(
+            Point::new(rect.origin.x, rect.origin.y + rect.size.height),
+            dock_core::Size::new(rect.size.width, rect.size.height * 0.5),
+        ),
         _ => rect,
     }
 }
@@ -689,7 +683,7 @@ mod tests {
         let top_zone = Rect::new(Point::new(10.0, 40.0), Size::new(200.0, 20.0));
         assert_eq!(
             super::main_group_edge_highlight_rect(top_zone, DropZone::Top),
-            Rect::new(Point::new(60.0, 60.0), Size::new(100.0, 20.0))
+            Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 10.0))
         );
 
         let bottom_zone = Rect::new(Point::new(10.0, 340.0), Size::new(200.0, 20.0));
