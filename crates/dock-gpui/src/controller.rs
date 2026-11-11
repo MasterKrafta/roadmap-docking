@@ -484,25 +484,32 @@ impl DockController {
     }
 
     pub(crate) fn active_dock_area_panel_ids(&self, side: DockSide) -> Option<Vec<PanelId>> {
-        fn collect_columns(layout: &Layout, node: NodeId, columns: &mut Vec<NodeId>) {
+        fn collect_active_panels(layout: &Layout, node: NodeId, panels: &mut Vec<PanelId>) {
             match layout.node(node) {
                 Some(Node::Split(split)) => {
                     for child in &split.children {
-                        collect_columns(layout, *child, columns);
+                        collect_active_panels(layout, *child, panels);
                     }
                 }
-                Some(Node::Column(_)) => columns.push(node),
+                Some(Node::Column(column)) => {
+                    for group in &column.groups {
+                        collect_active_panels(layout, *group, panels);
+                    }
+                }
+                Some(Node::Tabs(tabs)) => {
+                    if let Some(child) = tabs.active_child()
+                        && let Some(Node::Panel(panel)) = layout.node(child)
+                    {
+                        panels.push(panel.panel_id);
+                    }
+                }
                 _ => {}
             }
         }
 
         let area = self.layout.main_area(side)?;
-        let mut columns = Vec::new();
-        collect_columns(&self.layout, area.root, &mut columns);
         let mut panels = Vec::new();
-        for column in columns {
-            panels.extend(self.active_column_panel_ids(column)?);
-        }
+        collect_active_panels(&self.layout, area.root, &mut panels);
         Some(panels)
     }
 

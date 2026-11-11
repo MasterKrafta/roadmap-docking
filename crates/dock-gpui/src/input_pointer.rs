@@ -19,8 +19,7 @@ use crate::{
 use super::{
     interaction::DockInteractionCoordinator,
     drag::{
-        begin_column_drag_host, begin_dock_area_drag_host, begin_drag_at, begin_group_drag_host,
-        begin_panel_drag_host,
+        begin_dock_area_drag_host, begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
         finish_drag_at, update_drag_at,
     },
     resize::{begin_resize_hit, finish_resize, update_resize},
@@ -46,7 +45,6 @@ enum PointerPressTarget {
 enum PointerDownIntent {
     TabHeaderCandidate { group: NodeId, panel: PanelId },
     GroupCandidate { group: NodeId },
-    ColumnCandidate { column: NodeId },
     FlyoutPanelCandidate { panel: PanelId },
     Resize,
     OverflowButton { group: NodeId },
@@ -84,12 +82,12 @@ fn pointer_down_intent_for_hit(hit: HitResult) -> PointerDownIntent {
             PointerDownIntent::GroupCandidate { group }
         }
         HitResult::TabOverflowButton { group } => PointerDownIntent::OverflowButton { group },
-        HitResult::Column { column } => PointerDownIntent::ColumnCandidate { column },
         HitResult::Splitter { .. }
         | HitResult::FlyoutResizeEdge { .. } => PointerDownIntent::Resize,
         HitResult::FlyoutPanel { panel, .. } => PointerDownIntent::FlyoutPanelCandidate { panel },
         HitResult::Canvas => PointerDownIntent::DismissFlyout,
-        HitResult::FloatingGroup { .. }
+        HitResult::Column { .. }
+        | HitResult::FloatingGroup { .. }
         | HitResult::Panel { .. }
         | HitResult::Miss
         | HitResult::DropZone { .. } => {
@@ -212,23 +210,6 @@ pub(crate) fn register_pointer_events(
                 return;
             }
 
-            // Column grips are narrow strips rendered inside the shared Main
-            // DockArea header. Resolve them from the same geometry directly:
-            // after a Floating -> Main drop, Core hit-test may classify that
-            // point as a different overlapping node instead of HitResult::Column.
-            if let Some(column) = main_column_drag_handle_at_point(&controller, core_point, app) {
-                begin_drag_at(
-                    &controller,
-                    DragPayload::Column { column },
-                    DragHandle::ColumnHeader,
-                    core_point,
-                    DragSourceHost::Main,
-                    source_window_id,
-                    app,
-                );
-                return;
-            }
-
             let Some(hit) = hit else {
                 return;
             };
@@ -288,19 +269,6 @@ pub(crate) fn register_pointer_events(
                             &controller,
                             DragPayload::Group { group },
                             DragHandle::GroupGrip,
-                            core_point,
-                            DragSourceHost::Main,
-                            source_window_id,
-                            app,
-                        );
-                    }
-                }
-                PointerDownIntent::ColumnCandidate { column } => {
-                    if column_header_drag_handle_contains(&controller, column, core_point, app) {
-                        begin_drag_at(
-                            &controller,
-                            DragPayload::Column { column },
-                            DragHandle::ColumnHeader,
                             core_point,
                             DragSourceHost::Main,
                             source_window_id,
@@ -712,7 +680,6 @@ pub(crate) fn register_pointer_events(
 /// Column and DockArea start immediately after the threshold.
 fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPayload) -> bool {
     match (handle, payload) {
-        (Some(DragHandle::ColumnHeader), DragPayload::Column { .. }) => true,
         (Some(DragHandle::DockAreaHeader), DragPayload::DockArea { .. }) => true,
         (Some(DragHandle::PanelTab | DragHandle::FlyoutPanel), DragPayload::Panel { .. }) => true,
         (Some(DragHandle::GroupGrip), DragPayload::Group { .. }) => true,
@@ -721,12 +688,11 @@ fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPay
 }
 
 /// Checks whether the active drag has reached the point where content must move to DragHost.
-/// PanelTab and GroupGrip leave their source zones; FlyoutPanel/Column/DockArea start at threshold.
+/// PanelTab and GroupGrip leave their source zones; FlyoutPanel and DockArea start at threshold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MainDragHostKind {
     Panel,
     Group,
-    Column,
     DockArea,
 }
 
@@ -764,13 +730,6 @@ fn try_start_main_drag_host(
             ) => Some(MainDragHostKind::Group),
             (
                 DragState::Dragging {
-                    payload: DragPayload::Column { .. },
-                    ..
-                },
-                Some(DragHandle::ColumnHeader),
-            ) => Some(MainDragHostKind::Column),
-            (
-                DragState::Dragging {
                     payload: DragPayload::DockArea { .. },
                     ..
                 },
@@ -797,7 +756,6 @@ fn try_start_main_drag_host(
     let started = match kind {
         MainDragHostKind::Panel => begin_panel_drag_host(controller, drag_host_manager, app),
         MainDragHostKind::Group => begin_group_drag_host(controller, drag_host_manager, app),
-        MainDragHostKind::Column => begin_column_drag_host(controller, drag_host_manager, app),
         MainDragHostKind::DockArea => begin_dock_area_drag_host(controller, drag_host_manager, app),
     };
     if !started {
@@ -1109,33 +1067,6 @@ fn tab_header_drag_handle_contains(
     })
 }
 
-fn column_header_drag_handle_contains(
-    controller: &Entity<DockController>,
-    column: NodeId,
-    point: Point,
-    app: &mut App,
-) -> bool {
-    controller
-        .update(app, |controller, _| {
-            let Some(column_rect) = controller
-                .geometry()
-                .ok()?
-                .columns
-                .iter()
-                .find(|rect| rect.column == column)
-                .copied()
-            else {
-                return Some(false);
-            };
-            Some(CompositionDragArea::column_drag_handle_contains(
-                column_rect,
-                point,
-                controller.metrics().column_header_height,
-            ))
-        })
-        .unwrap_or(false)
-}
-
 fn dock_area_drag_handle_side(
     controller: &Entity<DockController>,
     point: Point,
@@ -1159,56 +1090,14 @@ fn dock_area_drag_handle_side(
             let Some(area_rect) = dock_area_bounds(&area_columns) else {
                 continue;
             };
-            let column_grip_columns = area_columns.clone();
             if CompositionDragArea::contains(
                 area_rect,
                 &area_columns,
-                &column_grip_columns,
                 point,
                 metrics.column_header_height,
                 metrics.column_control_button_width,
             ) {
                 return Some(side);
-            }
-        }
-
-        None
-    })
-}
-
-fn main_column_drag_handle_at_point(
-    controller: &Entity<DockController>,
-    point: Point,
-    app: &mut App,
-) -> Option<NodeId> {
-    controller.update(app, |controller, _| {
-        let metrics = controller.metrics();
-        let rects = controller.geometry().cloned().ok()?;
-        let layout = controller.layout();
-
-        for side in [DockSide::Left, DockSide::Right] {
-            let Some(area) = layout.main_area(side) else {
-                continue;
-            };
-            let mut area_column_ids = Vec::new();
-            collect_dock_area_columns(layout, area.root, &mut area_column_ids);
-            let area_columns = area_column_ids
-                .iter()
-                .filter_map(|id| rects.columns.iter().find(|rect| rect.column == *id).copied())
-                .collect::<Vec<_>>();
-            let Some(area_rect) = dock_area_bounds(&area_columns) else {
-                continue;
-            };
-
-            if let Some(column) = area_columns.iter().find(|column| {
-                CompositionDragArea::column_drag_handle_contains_in_area(
-                    area_rect,
-                    **column,
-                    point,
-                    metrics.column_header_height,
-                )
-            }) {
-                return Some(column.column);
             }
         }
 
@@ -1407,20 +1296,15 @@ mod hit_dispatch_tests {
         );
         assert_eq!(
             pointer_down_intent_for_hit(HitResult::Column { column: group }),
-            PointerDownIntent::ColumnCandidate { column: group }
+            PointerDownIntent::None
         );
     }
 
     #[test]
-    fn host_transition_routing_enables_dock_areas_columns_groups_and_tabs() {
-        let column = NodeId::null();
+    fn host_transition_routing_enables_dock_areas_groups_and_tabs() {
         let group = NodeId::null();
         let panel = PanelId::null();
 
-        assert!(drag_host_transition_enabled_for(
-            Some(DragHandle::ColumnHeader),
-            DragPayload::Column { column },
-        ));
         assert!(drag_host_transition_enabled_for(
             Some(DragHandle::DockAreaHeader),
             DragPayload::DockArea { side: DockSide::Right },
@@ -1432,66 +1316,6 @@ mod hit_dispatch_tests {
         assert!(drag_host_transition_enabled_for(
             Some(DragHandle::GroupGrip),
             DragPayload::Group { group },
-        ));
-        assert!(!drag_host_transition_enabled_for(
-            Some(DragHandle::ColumnHeader),
-            DragPayload::Group { group },
-        ));
-    }
-
-    #[test]
-    fn column_header_grip_occupies_only_the_left_header_strip() {
-        let rect = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(240.0, 500.0));
-        let column = dock_core::ColumnRect::new(NodeId::null(), rect);
-
-        assert!(crate::dock_components::CompositionDragArea::column_drag_handle_contains(
-            column,
-            Point::new(12.0, 30.0),
-            32.0,
-        ));
-        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains(
-            column,
-            Point::new(35.0, 30.0),
-            32.0,
-        ));
-        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains(
-            column,
-            Point::new(12.0, 52.0),
-            32.0,
-        ));
-    }
-
-    #[test]
-    fn column_grip_uses_the_shared_header_top_after_reparenting() {
-        let area = Rect::new(
-            Point::new(10.0, 20.0),
-            dock_core::Size::new(500.0, 500.0),
-        );
-        let column_rect = Rect::new(
-            Point::new(250.0, 90.0),
-            dock_core::Size::new(260.0, 300.0),
-        );
-        let column = dock_core::ColumnRect::new(NodeId::null(), column_rect);
-
-        assert!(crate::dock_components::CompositionDragArea::column_drag_handle_contains_in_area(
-            area,
-            column,
-            Point::new(252.0, 30.0),
-            32.0,
-        ));
-        assert!(!crate::dock_components::CompositionDragArea::column_drag_handle_contains_in_area(
-            area,
-            column,
-            Point::new(252.0, 100.0),
-            32.0,
-        ));
-        assert!(!crate::dock_components::CompositionDragArea::contains(
-            area,
-            &[column],
-            &[column],
-            Point::new(252.0, 30.0),
-            32.0,
-            28.0,
         ));
     }
 
@@ -1507,7 +1331,6 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
-            &[],
             Point::new(100.0, 30.0),
             32.0,
             28.0,
@@ -1515,7 +1338,6 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
-            &[],
             Point::new(200.0, 30.0),
             32.0,
             28.0,
@@ -1523,7 +1345,6 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
-            &[],
             Point::new(240.0, 30.0),
             32.0,
             28.0,
@@ -1531,7 +1352,6 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
-            &[],
             Point::new(100.0, 52.0),
             32.0,
             28.0,

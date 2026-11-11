@@ -505,18 +505,15 @@ impl DragHostManager {
 
         let host_state_ready = self.controller.update(cx, |controller, controller_cx| {
             let attached = controller.drag_mut().attach_transport_host(id);
-            let transferred = match (group, column, dock_area, panels.as_slice()) {
-                (Some(group), None, None, [panel]) => {
+            let transferred = match (group, dock_area, panels.as_slice()) {
+                (Some(group), None, [panel]) => {
                     controller.begin_group_view_transfer(group, *panel)
                 }
-                (None, Some(column), None, panels) => {
-                    controller.begin_column_view_transfer(column, panels)
-                }
-                (None, None, Some(side), panels) => {
+                (None, Some(side), panels) => {
                     controller.begin_dock_area_view_transfer(side, panels)
                 }
-                (None, None, None, [panel]) => controller.begin_panel_view_transfer(*panel),
-                (None, None, None, []) => true,
+                (None, None, [panel]) => controller.begin_panel_view_transfer(*panel),
+                (None, None, []) => true,
                 _ => false,
             };
             if transferred {
@@ -1837,7 +1834,6 @@ impl Render for DragHostSurface {
                 &snapshot.columns,
                 &snapshot.groups,
                 snapshot.panels,
-                None,
                 None,
                 None,
                 &snapshot.tab_strips,
