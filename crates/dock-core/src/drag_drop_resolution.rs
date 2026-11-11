@@ -2202,7 +2202,7 @@ fn main_single_group_dock_area_can_split_into_a_floating_group() {
     assert_eq!(column.groups, vec![first_group, source_group, second_group]);
     assert!(matches!(
         layout.node(source_group),
-        Some(Node::Tabs(tabs)) if tabs.children.len() == 1 && tabs.active_index == 0 && tabs.collapsed == false
+        Some(Node::Tabs(tabs)) if tabs.children.len() == 1 && tabs.active_index == 0 && !tabs.collapsed
     ));
     assert_eq!(layout.panel_instances().count(), 3);
     assert_eq!(layout.validate(&metrics), Ok(()));
