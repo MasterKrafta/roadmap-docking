@@ -13,7 +13,7 @@ pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 
 use dock_core::{
-    DockCommand, DockMetrics, GroupRect, NodeId, Point, Rect, TabHeaderRect, TabOverflowRect, TabStripRect,
+    DockCommand, DockMetrics, GroupRect, NodeId, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,

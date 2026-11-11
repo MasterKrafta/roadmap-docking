@@ -486,6 +486,17 @@ impl Render for DockHost {
                 .then_some(*group)
             })
             .collect::<HashSet<_>>();
+        let main_groups = rects
+            .as_ref()
+            .map(|rects| {
+                rects
+                    .groups
+                    .iter()
+                    .filter(|group| !groups_without_visible_tabs.contains(&group.group))
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let main_tab_strips = rects
             .as_ref()
             .map(|rects| {
@@ -878,7 +889,7 @@ impl Render for DockHost {
                 .collect::<Vec<_>>();
             workspace = workspace.child(MainDockView::render(
                 &main_columns,
-                &rects.groups,
+                &main_groups,
                 main_panel_views,
                 dragged_group,
                 dragged_column,

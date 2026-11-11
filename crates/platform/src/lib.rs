@@ -139,6 +139,18 @@ pub trait NativeWindowOps {
         size: PhysicalSize,
     ) -> Result<(), NativeError>;
 
+    /// Atomically sets the outer window origin and requested client-content size.
+    /// Platforms should update both in one native call to avoid visible intermediate movement.
+    fn set_window_bounds(
+        &self,
+        window: NativeWindowId,
+        position: PhysicalPoint,
+        size: PhysicalSize,
+    ) -> Result<(), NativeError> {
+        self.move_window(window, position)?;
+        self.resize_window(window, size)
+    }
+
     fn show(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn show_no_activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn activate(&self, window: NativeWindowId) -> Result<(), NativeError>;
@@ -625,6 +637,59 @@ mod windows_impl {
                 )
             }
             .map_err(|error| platform_error("SetWindowPos(resize)", error))
+        }
+
+        fn set_window_bounds(
+            &self,
+            window: NativeWindowId,
+            position: PhysicalPoint,
+            size: PhysicalSize,
+        ) -> Result<(), NativeError> {
+            if !size.is_valid() {
+                return Err(NativeError::InvalidSize);
+            }
+
+            let native = hwnd(window);
+            let mut window_rect = RECT::default();
+            let mut client_rect = RECT::default();
+            // SAFETY: Both RECT values are writable outputs for this live HWND.
+            unsafe {
+                GetWindowRect(native, &mut window_rect)
+                    .map_err(|error| platform_error("GetWindowRect(bounds)", error))?;
+                GetClientRect(native, &mut client_rect)
+                    .map_err(|error| platform_error("GetClientRect(bounds)", error))?;
+            }
+
+            let window_width = window_rect.right.checked_sub(window_rect.left)
+                .ok_or(NativeError::InvalidSize)?;
+            let window_height = window_rect.bottom.checked_sub(window_rect.top)
+                .ok_or(NativeError::InvalidSize)?;
+            let client_width = client_rect.right.checked_sub(client_rect.left)
+                .ok_or(NativeError::InvalidSize)?;
+            let client_height = client_rect.bottom.checked_sub(client_rect.top)
+                .ok_or(NativeError::InvalidSize)?;
+            let frame_width = window_width.saturating_sub(client_width).max(0);
+            let frame_height = window_height.saturating_sub(client_height).max(0);
+            let outer_width = size.width.checked_add(frame_width)
+                .ok_or(NativeError::InvalidSize)?;
+            let outer_height = size.height.checked_add(frame_height)
+                .ok_or(NativeError::InvalidSize)?;
+
+            // Set position and full outer size together. The requested size is
+            // client-content size; preserve the existing non-client frame.
+            // SAFETY: One SetWindowPos updates both edges while preserving Z-order and activation.
+            unsafe {
+                SetWindowPos(
+                    native,
+                    None,
+                    position.x,
+                    position.y,
+                    outer_width,
+                    outer_height,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(bounds)", error))
         }
 
         fn show(&self, window: NativeWindowId) -> Result<(), NativeError> {

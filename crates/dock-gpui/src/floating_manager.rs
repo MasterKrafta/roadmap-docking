@@ -2087,35 +2087,41 @@ impl FloatingWindowManager {
             return;
         }
 
-        // Do not advance the cached bounds/scale until every requested native
-        // operation succeeds. Otherwise one transient SetWindowPos failure
-        // makes the next reconcile believe that the HWND is already in sync.
-        let mut synchronized = true;
-        if entry.bounds.origin != group.bounds.origin {
-            match self.physical_origin_for_bounds(group.bounds) {
-                Some(position) => {
-                    if let Err(error) = self.native_ops.move_window(native_window, position) {
-                        tracing::warn!(
-                            ?group.id,
-                            %error,
-                            "could not move a floating native window"
-                        );
-                        synchronized = false;
-                    }
-                }
-                None => {
-                    tracing::warn!(
-                        ?group.id,
-                        "could not convert floating-window origin to physical coordinates"
-                    );
-                    synchronized = false;
-                }
-            }
+        // Apply position and client size in one native operation. For a
+        // DockTab tear-off, Core moves the top edge upward and increases the
+        // height by the same amount; one SetWindowPos keeps the bottom edge
+        // anchored without visibly moving the whole window first.
+        let Some(position) = self.physical_origin_for_bounds(group.bounds) else {
+            tracing::warn!(
+                ?group.id,
+                "could not convert floating-window origin to physical coordinates"
+            );
+            return;
+        };
+        let Some(initial_size) = DockGeometry::physical_size_from_logical(
+            group.bounds.size,
+            scale.unwrap_or(1.0),
+        ) else {
+            tracing::warn!(
+                ?group.id,
+                "could not convert floating-window size to physical coordinates"
+            );
+            return;
+        };
+        if let Err(error) =
+            self.native_ops
+                .set_window_bounds(native_window, position, initial_size)
+        {
+            tracing::warn!(
+                ?group.id,
+                %error,
+                "could not synchronize floating native-window bounds"
+            );
+            return;
         }
 
         // Moving to another monitor can synchronously update the HWND DPI.
-        // Query again after SetWindowPos rather than sizing with the source
-        // monitor's cached scale.
+        // Correct the client size after the atomic bounds update if necessary.
         let effective_scale = self
             .native_ops
             .scale_factor(native_window)
@@ -2125,41 +2131,33 @@ impl FloatingWindowManager {
             // Keep the old cache so a later reconciliation retries the sync.
             return;
         };
-        let effective_scale_changed = entry.native_scale_factor.is_none_or(|previous| {
+        let effective_scale_changed = scale.is_none_or(|previous| {
             (previous - effective_scale).abs() > 0.001
         });
 
-        if entry.bounds.size != group.bounds.size || effective_scale_changed {
-            let desired_size = DockGeometry::physical_size_from_logical(
+        if effective_scale_changed {
+            let Some(desired_size) = DockGeometry::physical_size_from_logical(
                 group.bounds.size,
                 effective_scale,
-            );
-            match desired_size {
-                Some(desired_size) => {
-                    if let Err(error) = self.native_ops.resize_window(native_window, desired_size)
-                    {
-                        tracing::warn!(
-                            ?group.id,
-                            %error,
-                            "could not resize a floating native window"
-                        );
-                        synchronized = false;
-                    }
-                }
-                _ => {
-                    tracing::warn!(
-                        ?group.id,
-                        "could not convert floating-window size to physical coordinates"
-                    );
-                    synchronized = false;
-                }
+            ) else {
+                tracing::warn!(
+                    ?group.id,
+                    "could not convert floating-window size for the destination monitor"
+                );
+                return;
+            };
+            if let Err(error) = self.native_ops.resize_window(native_window, desired_size) {
+                tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not correct floating-window size after a DPI change"
+                );
+                return;
             }
         }
 
-        if synchronized {
-            entry.native_scale_factor = Some(effective_scale);
-            entry.bounds = group.bounds;
-        }
+        entry.native_scale_factor = Some(effective_scale);
+        entry.bounds = group.bounds;
     }
 }
 
