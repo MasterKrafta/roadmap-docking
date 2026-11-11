@@ -310,6 +310,107 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
 }
 
 #[test]
+fn photoshop_group_side_drop_zones_cover_the_entire_target_column_height() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, first_node) = builder.panel(key("full-height-first"), constraints());
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let (_, second_node) = builder.panel(key("full-height-second"), constraints());
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let (_, third_node) = builder.panel(key("full-height-third"), constraints());
+    let third_group = builder.tabs(vec![third_node], 0, false);
+    let target_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![first_group, second_group, third_group],
+        vec![0.34, 0.33, 0.33],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let (_, source_node) = builder.panel(key("full-height-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, source_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let target_column_rect = rects
+        .columns
+        .iter()
+        .find(|column| column.column == target_column)
+        .unwrap()
+        .rect;
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    for target_group in [first_group, second_group, third_group] {
+        for side_zone in [DropZone::ColumnLeft, DropZone::ColumnRight] {
+            let zone = zones
+                .iter()
+                .find(|zone| {
+                    zone.zone == side_zone
+                        && zone.target
+                            == (DropTarget::GroupEdge {
+                                group: target_group,
+                                zone: if side_zone == DropZone::ColumnLeft {
+                                    DropZone::Left
+                                } else {
+                                    DropZone::Right
+                                },
+                            })
+                })
+                .unwrap_or_else(|| panic!("missing {side_zone:?} zone for {target_group:?}"));
+
+            assert_eq!(zone.rect.origin.y, target_column_rect.origin.y);
+            assert_eq!(zone.rect.size.height, target_column_rect.size.height);
+        }
+    }
+
+    let left_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::ColumnLeft
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Left,
+                    }
+        })
+        .unwrap();
+    let point = Point::new(
+        left_zone.rect.origin.x + left_zone.rect.size.width * 0.5,
+        target_column_rect.origin.y + target_column_rect.size.height * 0.5,
+    );
+    let resolver = layout
+        .prepare_drop_resolver(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    let resolved = resolver.resolve_zone(point).unwrap().unwrap();
+    assert_eq!(resolved.zone, DropZone::ColumnLeft);
+    assert!(matches!(
+        resolved.target,
+        DropTarget::GroupEdge {
+            zone: DropZone::Left,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn main_column_drag_exposes_only_whole_column_destinations() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);

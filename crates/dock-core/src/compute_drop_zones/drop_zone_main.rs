@@ -251,7 +251,7 @@ impl Layout {
                 group_edge_rect(group_rect.rect, DropZone::Left, metrics.edge_drop_width)?;
             let right_edge =
                 group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
-            if let Some((side, column_index, _column_rect)) = group_main_column(
+            if let Some((side, column_index, column_rect)) = group_main_column(
                 self,
                 tree_index,
                 group_rect.group,
@@ -263,16 +263,43 @@ impl Layout {
                         DockSide::Left => left_columns,
                         DockSide::Right => right_columns,
                     };
-                    let left_zone_rect = main_column_boundary_drop_rect(
-                        self, rects, side, columns, column_index, metrics,
-                    )?
-                    .map(|boundary| preserve_vertical_span(boundary, left_edge))
-                    .unwrap_or(left_edge);
-                    let right_zone_rect = main_column_boundary_drop_rect(
-                        self, rects, side, columns, column_index + 1, metrics,
-                    )?
-                    .map(|boundary| preserve_vertical_span(boundary, right_edge))
-                    .unwrap_or(right_edge);
+                    let column_level_side_drop = self.profile() == Profile::Photoshop;
+                    let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
+                    let left_fallback = Rect::new(
+                        column_rect.origin,
+                        Size::new(edge_width, column_rect.size.height),
+                    );
+                    let right_fallback = Rect::new(
+                        Point::new(
+                            column_rect.origin.x + column_rect.size.width - edge_width,
+                            column_rect.origin.y,
+                        ),
+                        Size::new(edge_width, column_rect.size.height),
+                    );
+                    let left_zone_rect = if column_level_side_drop {
+                        main_column_boundary_drop_rect(
+                            self, rects, side, columns, column_index, metrics,
+                        )?
+                        .unwrap_or(left_fallback)
+                    } else {
+                        main_column_boundary_drop_rect(
+                            self, rects, side, columns, column_index, metrics,
+                        )?
+                        .map(|boundary| preserve_vertical_span(boundary, left_edge))
+                        .unwrap_or(left_edge)
+                    };
+                    let right_zone_rect = if column_level_side_drop {
+                        main_column_boundary_drop_rect(
+                            self, rects, side, columns, column_index + 1, metrics,
+                        )?
+                        .unwrap_or(right_fallback)
+                    } else {
+                        main_column_boundary_drop_rect(
+                            self, rects, side, columns, column_index + 1, metrics,
+                        )?
+                        .map(|boundary| preserve_vertical_span(boundary, right_edge))
+                        .unwrap_or(right_edge)
+                    };
                     let left_target = match source {
                         DropSource::Panel { .. } => DropTarget::MainColumn {
                             side,
