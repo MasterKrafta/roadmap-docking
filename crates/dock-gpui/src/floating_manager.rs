@@ -555,6 +555,17 @@ impl FloatingWindowManager {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        // DockHost can lose focus while the pointer crosses between managed
+        // native windows. During a content drag, do not cancel synchronously:
+        // DragHost's polling loop debounces transient empty/foreign foreground
+        // readings and cancels only after focus stays outside managed hosts.
+        let drag_host_active = self.drag_host_manager().is_some_and(|manager| {
+            manager.update(cx, |manager, _| manager.active_drag_host_id().is_some())
+        });
+        if drag_host_active {
+            return true;
+        }
+
         let interaction_active = self.controller.update(cx, |controller, _| {
             controller.has_active_pointer_interaction()
         });
@@ -570,12 +581,7 @@ impl FloatingWindowManager {
                     %error,
                     "could not determine the foreground window while handling focus loss"
                 );
-                let drag_host_active = self.drag_host_manager().is_some_and(|manager| {
-                    manager.update(cx, |manager, _| manager.active_drag_host_id().is_some())
-                });
-                // Let DragHost's own foreground poll distinguish a managed
-                // window handoff from a real application focus loss.
-                return self.native_move_active() || drag_host_active;
+                return self.native_move_active();
             }
         };
 
