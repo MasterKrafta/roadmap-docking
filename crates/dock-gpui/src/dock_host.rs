@@ -486,6 +486,11 @@ impl Render for DockHost {
                 .then_some(*group)
             })
             .collect::<HashSet<_>>();
+        let panels_in_hidden_groups = group_presentations
+            .iter()
+            .filter(|(group, _)| groups_without_visible_tabs.contains(group))
+            .flat_map(|(_, presentation)| presentation.tabs.iter().map(|tab| tab.panel))
+            .collect::<HashSet<_>>();
         let main_groups = rects
             .as_ref()
             .map(|rects| {
@@ -549,6 +554,7 @@ impl Render for DockHost {
             .filter(|(panel, _)| {
                 main_active_panels.contains(&panel.panel)
                     && !active_flyout.is_some_and(|flyout| flyout.panel == panel.panel)
+                    && !panels_in_hidden_groups.contains(&panel.panel)
                     && mounted_panel_ids.insert(panel.panel)
             })
             .cloned()

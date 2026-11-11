@@ -24,20 +24,17 @@ impl PanelHost {
         let mut layer = div().absolute().top_0().left_0().size_full();
 
         for (panel_rect, view) in panels {
-            // A transferred PanelView is temporarily mounted by DragHost.
-            // Do not paint a text/bordered placeholder over its old location:
-            // the Group's own header and content surfaces remain responsible
-            // for the source composition's appearance.
-            let Some(view) = view else {
-                continue;
-            };
-
+            // The body fill belongs to this exact Core PanelRect. During a
+            // host transfer the AnyView may be absent for one or more frames;
+            // keep only the normal surface, without placeholder text or border.
             let panel = panel_rect.panel;
             let rect = panel_rect.rect;
-            let content = div()
+            let mut content = div()
                 .size_full()
-                .bg(rgb(theme.colors.panel_surface_background))
-                .child(view);
+                .bg(rgb(theme.colors.panel_surface_background));
+            if let Some(view) = view {
+                content = content.child(view);
+            }
 
             layer = layer.child(
                 div()

@@ -127,23 +127,6 @@ impl DockGroupView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
-        // The panel body owns its fill independently from the Group frame and
-        // tab strip. Keep it visible even while DragHost temporarily owns the
-        // active AnyView and PanelHost has nothing to mount in this window.
-        let content_top = (strip.rect.origin.y + strip.rect.size.height - group.rect.origin.y)
-            .clamp(0.0, group.rect.size.height);
-        let content_height = (group.rect.size.height - content_top).max(0.0);
-        root = root.child(
-            div()
-                .id(format!("group-content-surface-{:?}", group.group))
-                .absolute()
-                .left_0()
-                .top(px(content_top))
-                .w_full()
-                .h(px(content_height))
-                .bg(rgb(theme.colors.panel_surface_background)),
-        );
-
         if column.is_none() && header_height > 0.0 {
             let grip_width =
                 (group.rect.size.width - reserved_grip_left - 2.0 * control_width).max(0.0);

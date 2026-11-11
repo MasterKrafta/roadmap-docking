@@ -1972,7 +1972,8 @@ impl Render for FloatingHost {
                 &floating_rects,
                 self.theme,
             ));
-            if snapshot.drag_handle != Some(DragHandle::FloatingCapture)
+            if snapshot.drag_handle != Some(DragHandle::PanelTab)
+                && snapshot.drag_handle != Some(DragHandle::FloatingCapture)
                 && snapshot.drag_handle != Some(DragHandle::FloatingTitle)
             {
                 root = root.child(DragGhost::render(
