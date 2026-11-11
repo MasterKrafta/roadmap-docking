@@ -242,15 +242,19 @@ impl DockColumnView {
             ));
         }
 
+        let viewport_top =
+            viewport.origin.y - column.rect.origin.y - hidden_header_offset;
+        let viewport_left = viewport.origin.x - column.rect.origin.x;
+        let viewport_width = viewport.size.width;
+        let viewport_height = viewport.size.height + hidden_header_offset;
+
         let mut scroll_viewport = div()
             .id(format!("dock-column-scroll-{:?}", column.column))
             .absolute()
-            .top(px(
-                viewport.origin.y - column.rect.origin.y - hidden_header_offset,
-            ))
-            .left(px(viewport.origin.x - column.rect.origin.x))
-            .w(px(viewport.size.width))
-            .h(px(viewport.size.height + hidden_header_offset))
+            .top(px(viewport_top))
+            .left(px(viewport_left))
+            .w(px(viewport_width))
+            .h(px(viewport_height))
             .bg(rgb(theme.colors.dock_background));
 
         if let Some(handle) = scroll_handle.as_ref() {
@@ -262,6 +266,8 @@ impl DockColumnView {
             scroll_viewport = scroll_viewport.child(content);
         }
 
+        // TEMP: Separate outlines for the scroll viewport and its outer Column.
+        // These are overlays and do not participate in the layout.
         div()
             .id(format!("dock-column-{:?}", column.column))
             .absolute()
@@ -272,6 +278,28 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .child(scroll_viewport)
+            .child(
+                div()
+                    .id(format!("dock-column-scroll-debug-{:?}", column.column))
+                    .absolute()
+                    .top(px(viewport_top))
+                    .left(px(viewport_left))
+                    .w(px(viewport_width))
+                    .h(px(viewport_height))
+                    .border_2()
+                    .border_color(rgb(0xFFFF00)),
+            )
+            .child(
+                div()
+                    .id(format!("dock-column-bounds-debug-{:?}", column.column))
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .w_full()
+                    .h_full()
+                    .border_2()
+                    .border_color(rgb(0x4488FF)),
+            )
     }
 
     fn render_groups(
