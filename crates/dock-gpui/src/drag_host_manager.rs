@@ -1741,8 +1741,10 @@ impl Render for DragHostSurface {
         let mut root = div()
             .relative()
             .size_full()
-            .overflow_hidden()
-            .bg(rgb(self.theme.colors.window_background));
+            .overflow_hidden();
+        if !self.reserve_composition_header {
+            root = root.bg(rgb(self.theme.colors.window_background));
+        }
 
         if self.floating_group_active
             && let Some(host) = self.floating_host.as_ref()
