@@ -4,7 +4,7 @@
 //! FloatingWindowManager. It hosts the existing source presentation and routes
 //! drop feedback to the persistent Main/Floating window under the cursor.
 
-use std::{collections::{HashMap, HashSet}, rc::Rc, time::{Duration, Instant}};
+use std::{collections::{HashMap, HashSet}, rc::Rc, time::Duration};
 
 use gpui::{
     AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled,
@@ -46,7 +46,6 @@ struct ActiveDragHost {
     promote_on_float: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
-    focus_loss_since: Option<Instant>,
     source_detach_subscription: Option<Subscription>,
     handoff: Option<DragHostHandoff>,
 }
@@ -599,7 +598,6 @@ impl DragHostManager {
             free_area_bounds: None,
             promote_on_float,
             pending_release_cursor: None,
-            focus_loss_since: None,
             source_detach_subscription: None,
             handoff: None,
         });
@@ -727,61 +725,10 @@ impl DragHostManager {
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
 
-        // DragHost is shown without activation, so the foreground HWND can lag
-        // behind the window currently under the cursor. Treat a registered dock
-        // target under the pointer as an active in-app drag even before Windows
-        // transfers foreground activation to that target.
-        let cursor_at_tick = self.native_ops.cursor_position().ok();
-        let cursor_over_managed_host = cursor_at_tick.as_ref().is_some_and(|cursor| {
-            floating_manager.as_ref().is_some_and(|manager| {
-                manager.update(cx, |manager, _| {
-                    matches!(
-                        manager.docking_window_at_point(*cursor, native_drag_host, None),
-                        Some(
-                            DockingWindowAtPoint::Main { .. }
-                                | DockingWindowAtPoint::Floating { .. }
-                        )
-                    )
-                })
-            })
-        });
-        let foreground = self.native_ops.foreground_window().ok().flatten();
-        let managed_foreground = cursor_over_managed_host || foreground.is_some_and(|window| {
-            window == native_drag_host
-                || floating_manager.as_ref().is_some_and(|manager| {
-                    manager.update(cx, |manager, _| {
-                        manager.is_managed_native_window(window)
-                    })
-                })
-        });
-        let now = Instant::now();
-        let button_is_down = self.native_ops.left_button_down().unwrap_or(true);
-        let focus_loss_expired = if let Some(active) =
-            self.active.as_mut().filter(|active| active.id == id)
-        {
-            if managed_foreground {
-                active.focus_loss_since = None;
-                false
-            } else if !button_is_down {
-                // A released gesture must still finish at its captured pointer
-                // position, even if Windows has already changed foreground.
-                false
-            } else {
-                let since = *active.focus_loss_since.get_or_insert(now);
-                now.duration_since(since) >= Duration::from_millis(150)
-            }
-        } else {
-            true
-        };
-        if focus_loss_expired {
-            tracing::debug!(
-                ?id,
-                ?foreground,
-                "foreground stayed outside managed docking windows; cancelling DragHost"
-            );
-            self.cancel_active_drag_on_focus_loss(id, cx);
-            return false;
-        }
+        // DragHost tracks the global pointer independently from GPUI focus.
+        // Foreground activation is not a reliable drag boundary: moving over a
+        // different DockHost can change the active HWND while the left button
+        // is still held. Keep the composition moving until mouse-up or Escape.
 
         let tracking_state = self
             .controller
@@ -846,16 +793,13 @@ impl DragHostManager {
             .and_then(|active| active.pending_release_cursor);
         let cursor = match pending_release_cursor {
             Some(cursor) => cursor,
-            None => match cursor_at_tick {
-                Some(cursor) => cursor,
-                None => match self.native_ops.cursor_position() {
-                    Ok(cursor) => cursor,
-                    Err(error) => {
-                        tracing::warn!(?id, %error, "could not read cursor position during DragHost tracking");
-                        self.cancel_active_drag(id, cx);
-                        return false;
-                    }
-                },
+            None => match self.native_ops.cursor_position() {
+                Ok(cursor) => cursor,
+                Err(error) => {
+                    tracing::warn!(?id, %error, "could not read cursor position during DragHost tracking");
+                    self.cancel_active_drag(id, cx);
+                    return false;
+                }
             },
         };
         if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
