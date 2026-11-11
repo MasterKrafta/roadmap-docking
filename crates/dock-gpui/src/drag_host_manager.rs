@@ -14,7 +14,7 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockCommand, DockMetrics, DockSide, DragDropAction,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragDropAction,
     DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
     VerticalOverflow,
@@ -23,7 +23,7 @@ use dock_core::{
 use crate::{
     components::{context_menu::GroupMenuToggle, FloatingHost, MainDockView, PanelHost},
     dock_components::{
-        collect_group_presentations, DockAreaView, DockCompositionView, DockGroupView,
+        collect_group_presentations, DockCompositionView, DockGroupView,
         GroupPresentation,
     },
     floating_manager::DockingWindowAtPoint,
@@ -2049,7 +2049,7 @@ impl Render for DragHostSurface {
                 None,
                 None,
             ));
-            root = root.child(DockAreaView::render_header(
+            root = root.child(DockCompositionView::render_header(
                 format!("drag-host-column-header-{:?}", snapshot.column.column),
                 snapshot.column.rect,
                 &[snapshot.column],
