@@ -31,7 +31,8 @@ impl PanelHost {
             let rect = panel_rect.rect;
             let mut content = div()
                 .size_full()
-                .bg(rgb(theme.colors.panel_surface_background));
+                .bg(rgb(theme.colors.panel_surface_background))
+                .text_color(rgb(theme.colors.primary_text));
             if let Some(view) = view {
                 content = content.child(view);
             }
