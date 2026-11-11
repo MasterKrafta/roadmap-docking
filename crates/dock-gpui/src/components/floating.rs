@@ -1970,6 +1970,7 @@ impl Render for FloatingHost {
                 &snapshot.rects.tab_headers,
                 &snapshot.rects.tab_strips,
                 &floating_rects,
+                None,
                 self.theme,
             ));
             if snapshot.drag_handle != Some(DragHandle::PanelTab)

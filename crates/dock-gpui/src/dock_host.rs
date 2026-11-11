@@ -423,6 +423,27 @@ impl Render for DockHost {
             }
         };
 
+        let main_area_bounds = rects
+            .as_ref()
+            .map(|rects| {
+                [DockSide::Left, DockSide::Right]
+                    .into_iter()
+                    .filter_map(|side| {
+                        let area_columns = rects
+                            .columns
+                            .iter()
+                            .filter(|column| {
+                                main_column_sides.get(&column.column) == Some(&side)
+                            })
+                            .copied()
+                            .collect::<Vec<_>>();
+                        crate::components::main_dock::dock_area_bounds(&area_columns)
+                            .map(|bounds| (side, bounds))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
         // Main-column panels are mounted by DockColumnView. Floating panels are mounted
         // only by their matching FloatingHost native window.
         let main_active_panels = main_column_groups
@@ -957,6 +978,7 @@ impl Render for DockHost {
                 &rects.tab_headers,
                 &rects.tab_strips,
                 &[],
+                Some((&main_area_bounds, &main_node_sides)),
                 theme,
             ));
         }

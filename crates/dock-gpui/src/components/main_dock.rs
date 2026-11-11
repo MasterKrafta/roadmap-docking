@@ -173,7 +173,7 @@ impl MainDockView {
     }
 }
 
-fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
+pub(crate) fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
     let first = columns.first()?.rect;
     let mut left = first.origin.x;
     let mut top = first.origin.y;

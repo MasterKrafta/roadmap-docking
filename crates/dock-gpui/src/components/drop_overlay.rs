@@ -44,6 +44,7 @@ impl DropOverlay {
         tab_headers: &[TabHeaderRect],
         tab_strips: &[TabStripRect],
         floating_groups: &[FloatingGroupRect],
+        main_dock_bounds: Option<(&HashMap<DockSide, Rect>, &HashMap<NodeId, DockSide>)>,
         theme: Theme,
     ) -> impl IntoElement {
         let mut layer = div().absolute().top_0().left_0().size_full();
@@ -96,12 +97,16 @@ impl DropOverlay {
                     }
                 }
                 DropZone::ColumnLeft | DropZone::ColumnRight => {
-                    let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
+                    // Keep Core's group-sized hit zone for precise target selection,
+                    // but paint the side affordance across its complete Main DockArea.
+                    let visual_rect =
+                        composition_edge_highlight_rect(zone, target, main_dock_bounds);
+                    let x = visual_rect.origin.x + visual_rect.size.width * 0.5;
                     let line = Rect::new(
-                        Point::new(x - 2.0, zone.rect.origin.y),
-                        dock_core::Size::new(4.0, zone.rect.size.height),
+                        Point::new(x - 2.0, visual_rect.origin.y),
+                        dock_core::Size::new(4.0, visual_rect.size.height),
                     );
-                    layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
+                    layer = layer.child(highlight_rect(visual_rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
                 }
                 DropZone::DockEdge => {
@@ -309,6 +314,34 @@ fn zone_matches_preview(
     target == Some(zone.target) && zone.rect.contains(point).unwrap_or(false)
 }
 
+fn composition_edge_highlight_rect(
+    zone: DropZoneRect,
+    target: DropTarget,
+    main_dock_bounds: Option<(&HashMap<DockSide, Rect>, &HashMap<NodeId, DockSide>)>,
+) -> Rect {
+    let Some((area_bounds, node_sides)) = main_dock_bounds else {
+        return zone.rect;
+    };
+    let side = match target {
+        DropTarget::MainColumn { side, .. } => side,
+        DropTarget::GroupEdge { group, .. } => {
+            let Some(side) = node_sides.get(&group).copied() else {
+                return zone.rect;
+            };
+            side
+        }
+        _ => return zone.rect,
+    };
+    let Some(area) = area_bounds.get(&side) else {
+        return zone.rect;
+    };
+
+    Rect::new(
+        Point::new(zone.rect.origin.x, area.origin.y),
+        dock_core::Size::new(zone.rect.size.width, area.size.height),
+    )
+}
+
 fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
     match target {
         DropTarget::Tabs { group, .. }
@@ -504,9 +537,53 @@ mod tests {
     use slotmap::Key;
 
     use super::{
-        group_edge_half, main_dock_edge_guide_rect, same_group_panel_tab_insertion_rect,
-        zone_matches_preview,
+        composition_edge_highlight_rect, group_edge_half, main_dock_edge_guide_rect,
+        same_group_panel_tab_insertion_rect, zone_matches_preview,
     };
+
+    #[test]
+    fn main_column_edge_highlight_spans_the_full_composition_for_group_and_panel_targets() {
+        use std::collections::HashMap;
+
+        let area = Rect::new(Point::new(20.0, 30.0), Size::new(420.0, 640.0));
+        let area_bounds = HashMap::from([(DockSide::Left, area), (DockSide::Right, area)]);
+        let group = NodeId::null();
+        let node_sides = HashMap::from([(group, DockSide::Left)]);
+
+        let group_zone = DropZoneRect::new(
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Left,
+            },
+            DropZone::ColumnLeft,
+            Rect::new(Point::new(80.0, 210.0), Size::new(12.0, 90.0)),
+        );
+        assert_eq!(
+            composition_edge_highlight_rect(
+                group_zone,
+                group_zone.target,
+                Some((&area_bounds, &node_sides)),
+            ),
+            Rect::new(Point::new(80.0, 30.0), Size::new(12.0, 640.0)),
+        );
+
+        let panel_zone = DropZoneRect::new(
+            DropTarget::MainColumn {
+                side: DockSide::Right,
+                index: 1,
+            },
+            DropZone::ColumnRight,
+            Rect::new(Point::new(400.0, 210.0), Size::new(12.0, 90.0)),
+        );
+        assert_eq!(
+            composition_edge_highlight_rect(
+                panel_zone,
+                panel_zone.target,
+                Some((&area_bounds, &node_sides)),
+            ),
+            Rect::new(Point::new(400.0, 30.0), Size::new(12.0, 640.0)),
+        );
+    }
 
     #[test]
     fn group_edge_preview_covers_half_of_the_target_group() {
