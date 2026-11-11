@@ -22,6 +22,15 @@ impl NativeWindowId {
     }
 }
 
+/// The exact native frame styles captured before a temporary DragHost is made borderless.
+///
+/// Fields stay private so callers can only remove and restore the complete frame state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NativeWindowFrameState {
+    style: u32,
+    extended_style: u32,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PhysicalPoint {
     pub x: i32,
@@ -167,6 +176,18 @@ pub trait NativeWindowOps {
         &self,
         window: NativeWindowId,
         owner: NativeWindowId,
+    ) -> Result<(), NativeError>;
+
+    /// Removes native caption and frame styles while preserving the current client rectangle.
+    fn remove_window_frame(
+        &self,
+        window: NativeWindowId,
+    ) -> Result<NativeWindowFrameState, NativeError>;
+    /// Restores a previously captured native frame while preserving the current client rectangle.
+    fn restore_window_frame(
+        &self,
+        window: NativeWindowId,
+        state: NativeWindowFrameState,
     ) -> Result<(), NativeError>;
 
     fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
@@ -322,6 +343,141 @@ mod windows_impl {
                     | SWP_FRAMECHANGED,
             );
         }
+    }
+
+    fn client_geometry_for_frame_change(
+        native: HWND,
+    ) -> Result<(PhysicalRect, PhysicalPoint, PhysicalSize), NativeError> {
+        let mut window_rect = RECT::default();
+        let mut client_rect = RECT::default();
+        // SAFETY: Both RECT values are writable outputs for this live GPUI HWND.
+        unsafe {
+            GetWindowRect(native, &mut window_rect)
+                .map_err(|error| platform_error("GetWindowRect(frame)", error))?;
+            GetClientRect(native, &mut client_rect)
+                .map_err(|error| platform_error("GetClientRect(frame)", error))?;
+        }
+
+        let mut client_origin = POINT::default();
+        // SAFETY: client_origin is a valid writable POINT in client coordinates.
+        unsafe { ClientToScreen(native, &mut client_origin) }
+            .map_err(|error| platform_error("ClientToScreen(frame)", error))?;
+
+        let client_size = PhysicalSize {
+            width: client_rect.right.checked_sub(client_rect.left)
+                .ok_or(NativeError::InvalidSize)?,
+            height: client_rect.bottom.checked_sub(client_rect.top)
+                .ok_or(NativeError::InvalidSize)?,
+        };
+        if !client_size.is_valid() {
+            return Err(NativeError::InvalidSize);
+        }
+
+        Ok((
+            rect_from_native(window_rect),
+            PhysicalPoint { x: client_origin.x, y: client_origin.y },
+            client_size,
+        ))
+    }
+
+    /// Corrects the outer HWND rectangle after a frame-style change so the client
+    /// origin and dimensions remain exactly where they were before that change.
+    fn preserve_client_geometry_after_frame_change(
+        native: HWND,
+        expected_origin: PhysicalPoint,
+        expected_size: PhysicalSize,
+    ) -> Result<(), NativeError> {
+        let (window_rect, current_origin, current_size) =
+            client_geometry_for_frame_change(native)?;
+        let position = PhysicalPoint {
+            x: window_rect.left.checked_add(
+                expected_origin.x.checked_sub(current_origin.x)
+                    .ok_or(NativeError::InvalidSize)?,
+            ).ok_or(NativeError::InvalidSize)?,
+            y: window_rect.top.checked_add(
+                expected_origin.y.checked_sub(current_origin.y)
+                    .ok_or(NativeError::InvalidSize)?,
+            ).ok_or(NativeError::InvalidSize)?,
+        };
+        let outer_width = window_rect.width().checked_add(
+            expected_size.width.checked_sub(current_size.width)
+                .ok_or(NativeError::InvalidSize)?,
+        ).ok_or(NativeError::InvalidSize)?;
+        let outer_height = window_rect.height().checked_add(
+            expected_size.height.checked_sub(current_size.height)
+                .ok_or(NativeError::InvalidSize)?,
+        ).ok_or(NativeError::InvalidSize)?;
+        if outer_width <= 0 || outer_height <= 0 {
+            return Err(NativeError::InvalidSize);
+        }
+
+        // SAFETY: Keep Z-order and activation unchanged while restoring the saved client rectangle.
+        unsafe {
+            SetWindowPos(
+                native,
+                None,
+                position.x,
+                position.y,
+                outer_width,
+                outer_height,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        }
+        .map_err(|error| platform_error("SetWindowPos(preserve client geometry)", error))
+    }
+
+    fn write_window_frame_styles(
+        native: HWND,
+        style: u32,
+        extended_style: u32,
+    ) -> Result<(), NativeError> {
+        // SAFETY: The HWND is owned by GPUI; GWL_STYLE accepts the supplied style bitmask.
+        unsafe { SetLastError(WIN32_ERROR(0)); }
+        let previous_style = unsafe { SetWindowLongPtrW(native, GWL_STYLE, style as isize) };
+        if previous_style == 0 {
+            let code = unsafe { GetLastError().0 };
+            if code != 0 {
+                return Err(NativeError::Platform {
+                    operation: "SetWindowLongPtrW(style)",
+                    code,
+                });
+            }
+        }
+
+        // SAFETY: The HWND is owned by GPUI; GWL_EXSTYLE accepts the supplied extended-style bitmask.
+        unsafe { SetLastError(WIN32_ERROR(0)); }
+        let previous_extended_style =
+            unsafe { SetWindowLongPtrW(native, GWL_EXSTYLE, extended_style as isize) };
+        if previous_extended_style == 0 {
+            let code = unsafe { GetLastError().0 };
+            if code != 0 {
+                return Err(NativeError::Platform {
+                    operation: "SetWindowLongPtrW(exstyle)",
+                    code,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn notify_native_frame_change(native: HWND) -> Result<(), NativeError> {
+        // SAFETY: Recalculate only non-client metrics; preserve position, size, Z-order and activation.
+        unsafe {
+            SetWindowPos(
+                native,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE
+                    | SWP_NOSIZE
+                    | SWP_NOZORDER
+                    | SWP_NOACTIVATE
+                    | SWP_FRAMECHANGED,
+            )
+        }
+        .map_err(|error| platform_error("SetWindowPos(frame changed)", error))
     }
 
     fn rect_from_native(rect: RECT) -> PhysicalRect {
@@ -752,6 +908,62 @@ mod windows_impl {
                 }
             }
             Ok(())
+        }
+
+        fn remove_window_frame(
+            &self,
+            window: NativeWindowId,
+        ) -> Result<NativeWindowFrameState, NativeError> {
+            let native = hwnd(window);
+            let (_, client_origin, client_size) = client_geometry_for_frame_change(native)?;
+            // SAFETY: Read the current styles of this live GPUI-owned HWND.
+            let style = unsafe { GetWindowLongPtrW(native, GWL_STYLE) as u32 };
+            let extended_style = unsafe { GetWindowLongPtrW(native, GWL_EXSTYLE) as u32 };
+            let original = NativeWindowFrameState { style, extended_style };
+
+            let borderless_style = style
+                & !(WS_CAPTION.0 | WS_BORDER.0 | WS_DLGFRAME.0 | WS_THICKFRAME.0);
+            let borderless_extended_style = extended_style
+                & !(WS_EX_WINDOWEDGE.0
+                    | WS_EX_CLIENTEDGE.0
+                    | WS_EX_STATICEDGE.0
+                    | WS_EX_DLGMODALFRAME.0);
+            if let Err(error) = write_window_frame_styles(
+                native,
+                borderless_style,
+                borderless_extended_style,
+            ) {
+                let _ = write_window_frame_styles(native, original.style, original.extended_style);
+                return Err(error);
+            }
+            if let Err(error) = notify_native_frame_change(native) {
+                let _ = write_window_frame_styles(native, original.style, original.extended_style);
+                let _ = notify_native_frame_change(native);
+                return Err(error);
+            }
+            if let Err(error) = preserve_client_geometry_after_frame_change(
+                native,
+                client_origin,
+                client_size,
+            ) {
+                let _ = write_window_frame_styles(native, original.style, original.extended_style);
+                let _ = notify_native_frame_change(native);
+                return Err(error);
+            }
+
+            Ok(original)
+        }
+
+        fn restore_window_frame(
+            &self,
+            window: NativeWindowId,
+            state: NativeWindowFrameState,
+        ) -> Result<(), NativeError> {
+            let native = hwnd(window);
+            let (_, client_origin, client_size) = client_geometry_for_frame_change(native)?;
+            write_window_frame_styles(native, state.style, state.extended_style)?;
+            notify_native_frame_change(native)?;
+            preserve_client_geometry_after_frame_change(native, client_origin, client_size)
         }
 
         fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
@@ -1202,6 +1414,19 @@ mod stub_impl {
             &self,
             _: NativeWindowId,
             _: NativeWindowId,
+        ) -> Result<(), NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn remove_window_frame(
+            &self,
+            _: NativeWindowId,
+        ) -> Result<NativeWindowFrameState, NativeError> {
+            Err(NativeError::Unsupported)
+        }
+        fn restore_window_frame(
+            &self,
+            _: NativeWindowId,
+            _: NativeWindowFrameState,
         ) -> Result<(), NativeError> {
             Err(NativeError::Unsupported)
         }

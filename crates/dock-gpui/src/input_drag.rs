@@ -253,9 +253,15 @@ pub(crate) fn begin_panel_drag_host(
                 .clamp(0.0, source_rect.size.height)
                 .min(preferred_size.height),
         );
-        Some((panel, grab_offset, preferred_size, promote_on_float))
+        Some((
+            panel,
+            grab_offset,
+            preferred_size,
+            promote_on_float,
+            handle == DragHandle::PanelTab,
+        ))
     });
-    let Some((panel, grab_offset, preferred_size, promote_on_float)) = candidate else {
+    let Some((panel, grab_offset, preferred_size, promote_on_float, reserve_composition_header)) = candidate else {
         tracing::debug!("Panel drag has no valid source geometry for DragHost");
         controller.update(app, |controller, cx| {
             if let Err(error) = controller.cancel_pointer_interaction() {
@@ -267,8 +273,14 @@ pub(crate) fn begin_panel_drag_host(
     };
 
     match drag_host_manager.update(app, |manager, manager_cx| {
-        if promote_on_float {
-            manager.open_panel_tab_at_cursor(panel, grab_offset, preferred_size, manager_cx)
+        if reserve_composition_header {
+            manager.open_panel_tab_at_cursor(
+                panel,
+                grab_offset,
+                preferred_size,
+                promote_on_float,
+                manager_cx,
+            )
         } else {
             manager.open_panel_at_cursor(panel, grab_offset, preferred_size, manager_cx)
         }

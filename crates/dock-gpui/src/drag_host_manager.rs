@@ -11,7 +11,7 @@ use gpui::{
     Subscription, Window,
     WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
 };
-use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
+use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragDropAction,
@@ -38,6 +38,7 @@ struct ActiveDragHost {
     native_window: NativeWindowId,
     panels: Vec<PanelId>,
     grab_offset: Point,
+    frame_state: Option<NativeWindowFrameState>,
     visible: bool,
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
@@ -143,6 +144,7 @@ impl DragHostManager {
             None,
             None,
             false,
+            false,
             cx,
         )
     }
@@ -172,6 +174,7 @@ impl DragHostManager {
             None,
             None,
             false,
+            false,
             cx,
         )
     }
@@ -183,6 +186,7 @@ impl DragHostManager {
         panel: PanelId,
         grab_offset: Point,
         logical_size: Size,
+        promote_on_float: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         let can_transfer = self.controller.update(cx, |controller, _| {
@@ -198,6 +202,7 @@ impl DragHostManager {
             None,
             None,
             None,
+            promote_on_float,
             true,
             cx,
         )
@@ -230,6 +235,7 @@ impl DragHostManager {
             None,
             None,
             promote_on_float,
+            false,
             cx,
         )
     }
@@ -259,6 +265,7 @@ impl DragHostManager {
             None,
             Some(column),
             None,
+            false,
             false,
             cx,
         )
@@ -290,6 +297,7 @@ impl DragHostManager {
             None,
             Some(side),
             true,
+            false,
             cx,
         )
     }
@@ -303,6 +311,7 @@ impl DragHostManager {
         column: Option<NodeId>,
         dock_area: Option<DockSide>,
         promote_on_float: bool,
+        reserve_composition_header: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         if self.active.is_some() {
@@ -311,10 +320,25 @@ impl DragHostManager {
         let owner = self
             .main_native_window
             .ok_or(DragHostError::MainWindowUnavailable)?;
-        grab_offset
+        let reserved_header_height = if reserve_composition_header {
+            self.controller.update(cx, |controller, _| {
+                controller.metrics().column_header_height
+            })
+        } else {
+            0.0
+        };
+        let drag_grab_offset = Point::new(
+            grab_offset.x,
+            grab_offset.y + reserved_header_height,
+        );
+        let drag_logical_size = Size::new(
+            logical_size.width,
+            logical_size.height + reserved_header_height,
+        );
+        drag_grab_offset
             .validate()
             .map_err(|_| DragHostError::InvalidGrabOffset)?;
-        logical_size
+        drag_logical_size
             .validate_positive()
             .map_err(|_| DragHostError::InvalidLogicalSize)?;
 
@@ -329,7 +353,7 @@ impl DragHostManager {
         let owner_scale = valid_scale(self.native_ops.scale_factor(owner)?)
             .ok_or(DragHostError::InvalidScaleFactor)?;
         let physical_grab_offset =
-            DockGeometry::physical_offset_from_logical(grab_offset, owner_scale)
+            DockGeometry::physical_offset_from_logical(drag_grab_offset, owner_scale)
                 .ok_or(DragHostError::InvalidGrabOffset)?;
         let physical_origin =
             DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
@@ -342,7 +366,7 @@ impl DragHostManager {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(logical_origin.x), px(logical_origin.y)),
-                size(px(logical_size.width), px(logical_size.height)),
+                size(px(drag_logical_size.width), px(drag_logical_size.height)),
             ))),
             titlebar: None,
             focus: false,
@@ -382,6 +406,7 @@ impl DragHostManager {
                         group,
                         column,
                         dock_area,
+                        reserve_composition_header,
                         handoff_placeholder: false,
                         floating_host,
                         floating_group_active: false,
@@ -420,6 +445,26 @@ impl DragHostManager {
         if !platform::hide_from_taskbar(native_window) {
             tracing::warn!("could not hide the new DragHost from the taskbar");
         }
+        let frame_state = if reserve_composition_header {
+            match self.native_ops.remove_window_frame(native_window) {
+                Ok(state) => {
+                    if let Err(error) = window.update(cx, |_, window, app| {
+                        window.bounds_changed(app);
+                    }) {
+                        self.discard_unregistered_window(&window, native_window, cx);
+                        return Err(DragHostError::WindowUpdate(error.to_string()));
+                    }
+                    Some(state)
+                }
+                Err(NativeError::Unsupported) => None,
+                Err(error) => {
+                    self.discard_unregistered_window(&window, native_window, cx);
+                    return Err(DragHostError::Native(error));
+                }
+            }
+        } else {
+            None
+        };
         // The destination monitor may use a different DPI from MainHost. Read
         // the new HWND's scale and recompute the grab offset before its first show.
         let mut destination_scale = match self.native_ops.scale_factor(native_window) {
@@ -436,7 +481,7 @@ impl DragHostManager {
             }
         };
         let Some(destination_grab_offset) =
-            DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
+            DockGeometry::physical_offset_from_logical(drag_grab_offset, destination_scale)
         else {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::InvalidGrabOffset);
@@ -466,7 +511,7 @@ impl DragHostManager {
         if (final_scale - destination_scale).abs() > 0.001 {
             destination_scale = final_scale;
             let Some(final_grab_offset) =
-                DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
+                DockGeometry::physical_offset_from_logical(drag_grab_offset, destination_scale)
             else {
                 self.discard_unregistered_window(&window, native_window, cx);
                 return Err(DragHostError::InvalidGrabOffset);
@@ -482,7 +527,7 @@ impl DragHostManager {
         }
 
         let Some(physical_size) =
-            DockGeometry::physical_size_from_logical(logical_size, destination_scale)
+            DockGeometry::physical_size_from_logical(drag_logical_size, destination_scale)
         else {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::InvalidLogicalSize);
@@ -541,7 +586,8 @@ impl DragHostManager {
             window_id,
             native_window,
             panels: panels.clone(),
-            grab_offset,
+            grab_offset: drag_grab_offset,
+            frame_state,
             visible,
             drop_target: None,
             target_role: None,
@@ -973,6 +1019,21 @@ impl DragHostManager {
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
         let promote_on_float = active.promote_on_float;
+        let restored_free_area_bounds = if promote_on_float
+            && target == Some(DropTarget::FreeArea)
+        {
+            match self.restore_active_window_frame(id, cx) {
+                Ok(bounds) => Some(bounds),
+                Err(error) => {
+                    tracing::warn!(?id, %error, "could not restore DragHost frame before Floating promotion");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
+        let can_promote_existing_window = restored_free_area_bounds.is_some();
 
         let finished = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -1054,6 +1115,7 @@ impl DragHostManager {
 
         if let Some(target_group) = floating_target {
             if promote_on_float
+                && can_promote_existing_window
                 && target == Some(DropTarget::FreeArea)
                 && self.promote_active_drag_host_to_floating(id, target_group, cx)
             {
@@ -1082,6 +1144,42 @@ impl DragHostManager {
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
         }
+    }
+
+    /// Restores the native frame before a tab DragHost becomes a persistent FloatingHost.
+    /// The same client rectangle stays on screen; only the outer frame changes.
+    fn restore_active_window_frame(
+        &mut self,
+        id: DragHostId,
+        cx: &mut Context<Self>,
+    ) -> Result<Rect, String> {
+        let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
+            return Err("DragHost is no longer active".into());
+        };
+        let native_window = active.native_window;
+        let window = active.window;
+        let frame_state = active.frame_state;
+
+        if let Some(frame_state) = frame_state {
+            self.native_ops
+                .restore_window_frame(native_window, frame_state)
+                .map_err(|error| error.to_string())?;
+            if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+                active.frame_state = None;
+            }
+            window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string())?;
+        }
+
+        let window_rect = self.native_ops.window_rect(native_window)
+            .map_err(|error| error.to_string())?;
+        let client_size = self.native_ops.client_size(native_window)
+            .map_err(|error| error.to_string())?;
+        let scale = self.native_ops.scale_factor(native_window)
+            .map_err(|error| error.to_string())?;
+        DockGeometry::core_bounds_from_native(window_rect, client_size, scale)
+            .ok_or_else(|| "could not convert restored DragHost bounds to DockCore coordinates".into())
     }
 
     /// Transfers the already-visible DockArea DragHost into the persistent
@@ -1534,6 +1632,7 @@ pub(crate) struct DragHostSurface {
     group: Option<NodeId>,
     column: Option<NodeId>,
     dock_area: Option<DockSide>,
+    reserve_composition_header: bool,
     handoff_placeholder: bool,
     floating_host: Option<Entity<FloatingHost>>,
     floating_group_active: bool,
@@ -2173,23 +2272,30 @@ impl Render for DragHostSurface {
             })
         {
             // A detached tab is presented as a temporary one-tab Group.
-            // The composition header remains hidden until the DragHost is
-            // promoted into its persistent FloatingHost after a FreeArea drop.
-            root = root.child(
-                div()
-                    .size_full()
-                    .min_w_0()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .child(DockGroupView::render_active(
-                        format!("drag-tab-group-{panel:?}"),
-                        title,
-                        view,
-                        metrics,
-                        self.theme,
-                    )),
-            );
+            // The shared composition-header band is reserved for the entire drag,
+            // even though the actual header is only rendered after a FreeArea drop.
+            let mut tab_surface = div()
+                .size_full()
+                .min_w_0()
+                .min_h_0()
+                .flex()
+                .flex_col();
+            if self.reserve_composition_header {
+                tab_surface = tab_surface.child(
+                    div()
+                        .w_full()
+                        .h(px(metrics.column_header_height))
+                        .flex_none()
+                        .bg(rgb(self.theme.colors.dock_background)),
+                );
+            }
+            root = root.child(tab_surface.child(DockGroupView::render_active(
+                format!("drag-tab-group-{panel:?}"),
+                title,
+                view,
+                metrics,
+                self.theme,
+            )));
         }
 
         root
