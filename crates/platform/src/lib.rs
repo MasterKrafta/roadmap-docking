@@ -361,6 +361,7 @@ mod windows_impl {
         let mut client_origin = POINT::default();
         // SAFETY: client_origin is a valid writable POINT in client coordinates.
         unsafe { ClientToScreen(native, &mut client_origin) }
+            .ok()
             .map_err(|error| platform_error("ClientToScreen(frame)", error))?;
 
         let client_size = PhysicalSize {
