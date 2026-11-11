@@ -204,12 +204,16 @@ impl DragHostManager {
     }
 
     /// Opens DragHost with the source Group's original tabs and active cached PanelView.
+    ///
+    /// For a Main-host tear-off, the same native window is adopted as the
+    /// resulting Floating composition when released over free space.
     pub fn open_group_at_cursor(
         &mut self,
         group: NodeId,
         panel: PanelId,
         grab_offset: Point,
         logical_size: Size,
+        promote_on_float: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         let can_transfer = self.controller.update(cx, |controller, _| {
@@ -225,7 +229,7 @@ impl DragHostManager {
             Some(group),
             None,
             None,
-            false,
+            promote_on_float,
             cx,
         )
     }
