@@ -235,7 +235,7 @@ impl DragHostManager {
             None,
             None,
             promote_on_float,
-            false,
+            true,
             cx,
         )
     }
@@ -2243,6 +2243,45 @@ impl Render for DragHostSurface {
                 })
             })
         {
+            let group_content_origin = if self.reserve_composition_header {
+                root = root.child(DockCompositionView::render_header(
+                    format!("drag-group-composition-header-{:?}", snapshot.group.group),
+                    Rect::new(
+                        Point::ZERO,
+                        Size::new(
+                            self.composition_header_width,
+                            snapshot.metrics.column_header_height,
+                        ),
+                    ),
+                    &[],
+                    None,
+                    snapshot.metrics,
+                    self.theme,
+                ));
+                let control_width = snapshot.metrics.column_control_button_width;
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(
+                            (self.composition_header_width - 2.0 * control_width).max(0.0),
+                        ))
+                        .top_0()
+                        .w(px(control_width))
+                        .h(px(snapshot.metrics.column_header_height))
+                        .child(CollapseColumnButton::render_with_metrics(
+                            format!("drag-group-collapse-column-{:?}", snapshot.group.group),
+                            self.theme,
+                            control_width,
+                            snapshot.metrics.control_icon_size,
+                        )),
+                );
+                Point::new(
+                    snapshot.group.rect.origin.x,
+                    snapshot.group.rect.origin.y - snapshot.metrics.column_header_height,
+                )
+            } else {
+                snapshot.group.rect.origin
+            };
             let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
             root = root.child(DockGroupView::render_core(
                 snapshot.column,
@@ -2251,7 +2290,7 @@ impl Render for DragHostSurface {
                 &snapshot.headers,
                 snapshot.overflow,
                 &snapshot.presentation,
-                snapshot.group.rect.origin,
+                group_content_origin,
                 snapshot.metrics,
                 0.0,
                 self.controller.clone(),
@@ -2261,7 +2300,7 @@ impl Render for DragHostSurface {
             if let Some(panel) = snapshot.panel {
                 root = root.child(PanelHost::render(
                     vec![(panel.0, Some(panel.1))],
-                    snapshot.group.rect.origin,
+                    group_content_origin,
                     self.theme,
                 ));
             }
