@@ -302,12 +302,6 @@ fn ghost_presentation(
                 true,
             )
         }
-        DragPayload::Column { .. } => (
-            SharedString::from("Column"),
-            None,
-            Some(SharedString::from("Dock column")),
-            true,
-        ),
         DragPayload::DockArea { .. } => (
             SharedString::from("Dock area"),
             None,

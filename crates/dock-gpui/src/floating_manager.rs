@@ -930,10 +930,7 @@ impl FloatingWindowManager {
                     .layout()
                     .floating_group(group)
                     .and_then(|floating| controller.layout().dock_area(floating.area))
-                    .map(|area| match controller.layout().node(area.root) {
-                        Some(Node::Column(_)) => DropSource::Column { column: area.root },
-                        _ => DropSource::Group { group: area.root },
-                    }),
+                    .map(|area| DropSource::Composition { root: area.root }),
                 _ => None,
             }
         });

@@ -71,9 +71,7 @@ pub enum DragHandle {
     FlyoutPanel,
     /// A group's grip/header; moves the whole Tabs node.
     GroupGrip,
-    /// A Column header; moves the complete Column composition.
-    ColumnHeader,
-    /// The shared header of a main DockArea; detaches its complete Column composition.
+    /// The shared header of a Main DockArea; detaches its complete composition.
     DockAreaHeader,
     /// A floating window title bar; moves window bounds, never docks it.
     FloatingTitle,
@@ -88,7 +86,6 @@ impl DragHandle {
         match payload {
             DragPayload::Panel { .. } => Self::PanelTab,
             DragPayload::Group { .. } => Self::GroupGrip,
-            DragPayload::Column { .. } => Self::ColumnHeader,
             DragPayload::DockArea { .. } => Self::DockAreaHeader,
             DragPayload::FloatingGroup { .. } => Self::FloatingTitle,
         }
@@ -100,7 +97,6 @@ impl DragHandle {
             (Self::PanelTab, DragPayload::Panel { .. })
                 | (Self::FlyoutPanel, DragPayload::Panel { .. })
                 | (Self::GroupGrip, DragPayload::Group { .. })
-                | (Self::ColumnHeader, DragPayload::Column { .. })
                 | (Self::DockAreaHeader, DragPayload::DockArea { .. })
                 | (Self::FloatingTitle, DragPayload::FloatingGroup { .. })
                 | (Self::FloatingCapture, DragPayload::FloatingGroup { .. })
@@ -123,20 +119,15 @@ pub enum DragPayload {
     /// and the existing Tabs node retains active_index and collapsed state when
     /// it is moved, split, or floated as a group.
     Group { group: NodeId },
-    /// A complete Column composition dragged from its own header.
+    /// A complete still-docked Main DockArea composition, identified by its side.
     ///
-    /// Unlike Group, this carries every group in the Column together and preserves
-    /// the Column node and all of its descendants when moved or floated.
-    Column { column: NodeId },
-    /// Every Column in one still-docked main DockArea, identified by its side.
-    ///
-    /// Unlike Column, this keeps a multi-column DockArea together when it is floated.
+    /// Its internal layout containers and every descendant Group move together.
     DockArea { side: DockSide },
     /// An already-floating window moved/captured by its shared window surface.
     ///
     /// This is distinct from a Main-originated tear-off: those gestures retain
-    /// their original Panel, Group, Column, or DockArea payload. The temporary
-    /// Floating host for such a tear-off is tracked separately by the adapter.
+    /// their original Panel, Group, or DockArea payload. The temporary Floating
+    /// host for such a tear-off is tracked separately by the adapter.
     FloatingGroup { group: FloatingGroupId },
 }
 

@@ -27,7 +27,7 @@ use crate::{
     },
     input::{
         drag::{
-            begin_column_drag_host, begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
+            begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
             finish_floating_tab_drag,
             update_drag_at, update_floating_tab_drag, FloatingTabDrag,
         },
@@ -60,7 +60,6 @@ impl FloatingWindowContent {
         groups: &[GroupRect],
         panels: Vec<(PanelRect, Option<AnyView>)>,
         dragged_group: Option<NodeId>,
-        dragged_column: Option<NodeId>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
         tab_overflows: &[TabOverflowRect],
@@ -146,7 +145,6 @@ impl FloatingWindowContent {
                 Some(floating.group),
                 !hide_header,
                 dragged_group,
-                dragged_column,
             ));
         }
 
@@ -236,7 +234,6 @@ impl FloatingWindowContent {
                 format!("floating-composition-{:?}", floating.group),
                 floating.rect,
                 columns,
-                dragged_column,
                 metrics,
                 theme,
             ));
@@ -258,12 +255,6 @@ struct FloatingTabPress {
 #[derive(Clone, Copy)]
 struct FloatingGroupPress {
     group: NodeId,
-    layout_version: u64,
-}
-
-#[derive(Clone, Copy)]
-struct FloatingColumnPress {
-    column: NodeId,
     layout_version: u64,
 }
 
@@ -295,8 +286,8 @@ fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool)
     leaves_source || over_other_window
 }
 
-/// A Floating containing exactly one Column, one Group and one Panel can move
-/// as a whole. Detaching its only tab/group would only create a replacement window.
+/// A Floating containing exactly one Group and one Panel can move as a whole.
+/// Detaching its only tab/group would only create a replacement window.
 fn floating_has_single_tab_dock(
     layout: &dock_core::Layout,
     floating_group: FloatingGroupId,
@@ -308,10 +299,21 @@ fn floating_has_single_tab_dock(
     let Some(area) = layout.dock_area(floating.area) else {
         return false;
     };
-    let Some(Node::Column(column)) = layout.node(area.root) else {
-        return false;
-    };
-    let [group] = column.groups.as_slice() else {
+    fn collect_groups(layout: &dock_core::Layout, node: NodeId, groups: &mut Vec<NodeId>) {
+        match layout.node(node) {
+            Some(Node::Split(split)) => {
+                for child in &split.children {
+                    collect_groups(layout, *child, groups);
+                }
+            }
+            Some(Node::Column(column)) => groups.extend(column.groups.iter().copied()),
+            Some(Node::Tabs(_)) => groups.push(node),
+            Some(Node::Panel(_)) | None => {}
+        }
+    }
+    let mut groups = Vec::new();
+    collect_groups(layout, area.root, &mut groups);
+    let [group] = groups.as_slice() else {
         return false;
     };
     if *group != expected_group {
@@ -327,8 +329,8 @@ fn floating_has_single_tab_dock(
     matches!(layout.node(*panel), Some(Node::Panel(_)))
 }
 
-/// Gives the shared CompositionHeader input priority over every Column below it.
-/// Returns Some(false) for controls and all separate Column drag grips.
+/// Gives the shared CompositionHeader input priority over its content.
+/// Returns Some(false) for controls.
 fn floating_dock_area_title_pointer_region(
     area_rect: Rect,
     columns: &[ColumnRect],
@@ -348,7 +350,6 @@ fn floating_dock_area_title_pointer_region(
 
     Some(CompositionDragArea::contains(
         area_rect,
-        columns,
         columns,
         point,
         header_height,
@@ -479,7 +480,6 @@ pub struct FloatingHost {
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
-    column_press: Rc<Cell<Option<FloatingColumnPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
     controller_observed: bool,
     manager_observed: bool,
@@ -531,7 +531,6 @@ impl FloatingHost {
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
-            column_press: Rc::new(Cell::new(None)),
             pointer_capture: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
@@ -561,7 +560,6 @@ impl FloatingHost {
         self.open_context_menu = None;
         self.tab_press.set(None);
         self.group_press.set(None);
-        self.column_press.set(None);
         DockInteractionCoordinator::release(window, &self.pointer_capture);
     }
 
@@ -607,7 +605,6 @@ impl Render for FloatingHost {
             let manager = self.manager.clone();
             let tab_press = self.tab_press.clone();
             let group_press = self.group_press.clone();
-            let column_press = self.column_press.clone();
             let pointer_capture = self.pointer_capture.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let preserve_interaction = manager.upgrade().is_some_and(|manager| {
@@ -626,7 +623,6 @@ impl Render for FloatingHost {
                 );
                 tab_press.set(None);
                 group_press.set(None);
-                column_press.set(None);
             })
             .detach();
             self.focus_observed = true;
@@ -680,7 +676,6 @@ impl Render for FloatingHost {
         let controller = self.controller.clone();
         let tab_press = self.tab_press.clone();
         let group_press = self.group_press.clone();
-        let column_press = self.column_press.clone();
         let pointer_capture = self.pointer_capture.clone();
         let pointer_capture_for_escape = pointer_capture.clone();
         let input_window_id = window_id;
@@ -708,7 +703,6 @@ impl Render for FloatingHost {
                     let controller_for_down = controller.clone();
                     let tab_press_for_down = tab_press.clone();
                     let group_press_for_down = group_press.clone();
-                    let column_press_for_down = column_press.clone();
                     let pointer_capture_for_down = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture
@@ -718,7 +712,6 @@ impl Render for FloatingHost {
                             || DockInteractionCoordinator::window_has_capture(window)
                             || tab_press_for_down.get().is_some()
                             || group_press_for_down.get().is_some()
-                            || column_press_for_down.get().is_some()
                             || controller_for_down.update(app, |controller, _| {
                                 controller.has_active_pointer_interaction()
                             })
@@ -767,57 +760,6 @@ impl Render for FloatingHost {
                                 })
                             });
                         let hit = dock_component_tab_hit.or(core_hit);
-
-                        // The shared header has no separate Core hit result. Check the narrow
-                        // Column grip before allowing the remaining header area to move the window.
-                        let column_candidate = if !hide_header {
-                            dock_area_drag_area.as_ref().and_then(
-                                |(_, columns, metrics)| {
-                                    columns.iter().find_map(|column| {
-                                        CompositionDragArea::column_drag_handle_contains(
-                                            *column,
-                                            point,
-                                            metrics.column_header_height,
-                                        )
-                                        .then_some(column.column)
-                                    })
-                                },
-                            )
-                        } else {
-                            None
-                        };
-                        if let Some(column) = column_candidate {
-                            let layout_version = controller_for_down
-                                .update(app, |controller, _| controller.layout().version());
-                            begin_drag_at(
-                                &controller_for_down,
-                                dock_core::DragPayload::Column { column },
-                                dock_core::DragHandle::ColumnHeader,
-                                point,
-                                DragSourceHost::Floating { group },
-                                input_window_id,
-                                app,
-                            );
-                            column_press_for_down.set(Some(FloatingColumnPress {
-                                column,
-                                layout_version,
-                            }));
-                            if !DockInteractionCoordinator::capture(
-                                window,
-                                hitbox,
-                                &pointer_capture_for_down,
-                            ) {
-                                column_press_for_down.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_down,
-                                    window,
-                                    &pointer_capture_for_down,
-                                    app,
-                                );
-                            }
-                            app.stop_propagation();
-                            return;
-                        }
 
                         // The remaining CompositionHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
@@ -989,82 +931,9 @@ impl Render for FloatingHost {
                     let controller_for_move = controller.clone();
                     let tab_press_for_move = tab_press.clone();
                     let group_press_for_move = group_press.clone();
-                    let column_press_for_move = column_press.clone();
                     let pointer_capture_for_move = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || !event.dragging() {
-                            return;
-                        }
-                        if let Some(column_press) = column_press_for_move.get() {
-                            let layout_is_current =
-                                controller_for_move.update(app, |controller, _| {
-                                    controller.layout().version() == column_press.layout_version
-                                });
-                            if !layout_is_current {
-                                column_press_for_move.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_move,
-                                    window,
-                                    &pointer_capture_for_move,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            if DockInteractionCoordinator::capture_was_lost(
-                                window,
-                                &pointer_capture_for_move,
-                            ) {
-                                column_press_for_move.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_move,
-                                    window,
-                                    &pointer_capture_for_move,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
-                                app.stop_propagation();
-                                return;
-                            };
-                            let dragging = update_drag_at(&controller_for_move, point, app)
-                                || controller_for_move.update(app, |controller, _| {
-                                    matches!(
-                                        controller.drag().session().state(),
-                                        dock_core::DragState::Dragging {
-                                            payload: dock_core::DragPayload::Column { column },
-                                            ..
-                                        } if column == column_press.column
-                                    ) && controller.drag().session().handle()
-                                        == Some(dock_core::DragHandle::ColumnHeader)
-                                });
-                            if dragging {
-                                let drag_host_manager = manager_for_move.upgrade().and_then(|manager| {
-                                    manager.update(app, |manager, _| manager.drag_host_manager())
-                                });
-                                if let Some(drag_host_manager) = drag_host_manager {
-                                    if !begin_column_drag_host(
-                                        &controller_for_move,
-                                        &drag_host_manager,
-                                        app,
-                                    ) {
-                                        tracing::debug!("Floating Column drag could not start DragHost");
-                                    }
-                                } else {
-                                    controller_for_move.update(app, |controller, cx| {
-                                        let _ = controller.cancel_pointer_interaction();
-                                        cx.notify();
-                                    });
-                                }
-                                column_press_for_move.set(None);
-                                DockInteractionCoordinator::release(
-                                    window,
-                                    &pointer_capture_for_move,
-                                );
-                            }
-                            app.stop_propagation();
                             return;
                         }
                         if let Some(group_press) = group_press_for_move.get() {
@@ -1360,7 +1229,6 @@ impl Render for FloatingHost {
                     let controller_for_up = controller.clone();
                     let tab_press_for_up = tab_press.clone();
                     let group_press_for_up = group_press.clone();
-                    let column_press_for_up = column_press.clone();
                     let pointer_capture_for_up = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
@@ -1377,7 +1245,6 @@ impl Render for FloatingHost {
                             if drag_host_active {
                                 tab_press_for_up.set(None);
                                 group_press_for_up.set(None);
-                                column_press_for_up.set(None);
                                 if DockInteractionCoordinator::has_capture(
                                     &pointer_capture_for_up,
                                 ) {
@@ -1398,74 +1265,12 @@ impl Render for FloatingHost {
                         ) {
                             tab_press_for_up.set(None);
                             group_press_for_up.set(None);
-                            column_press_for_up.set(None);
                             DockInteractionCoordinator::cancel(
                                 &controller_for_up,
                                 window,
                                 &pointer_capture_for_up,
                                 app,
                             );
-                            return;
-                        }
-                        if let Some(column_press) = column_press_for_up.get() {
-                            column_press_for_up.set(None);
-                            let layout_is_current = controller_for_up.update(app, |controller, _| {
-                                controller.layout().version() == column_press.layout_version
-                            });
-                            if !layout_is_current {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_up,
-                                    window,
-                                    &pointer_capture_for_up,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
-                                DockInteractionCoordinator::release(window, &pointer_capture_for_up);
-                                app.stop_propagation();
-                                return;
-                            };
-                            let dragging = update_drag_at(&controller_for_up, point, app)
-                                || controller_for_up.update(app, |controller, _| {
-                                    matches!(
-                                        controller.drag().session().state(),
-                                        dock_core::DragState::Dragging {
-                                            payload: dock_core::DragPayload::Column { column },
-                                            ..
-                                        } if column == column_press.column
-                                    ) && controller.drag().session().handle()
-                                        == Some(dock_core::DragHandle::ColumnHeader)
-                                });
-                            if dragging {
-                                let drag_host_manager = manager_for_up.upgrade().and_then(|manager| {
-                                    manager.update(app, |manager, _| manager.drag_host_manager())
-                                });
-                                if let Some(drag_host_manager) = drag_host_manager {
-                                    if !begin_column_drag_host(
-                                        &controller_for_up,
-                                        &drag_host_manager,
-                                        app,
-                                    ) {
-                                        tracing::debug!(
-                                            "Floating Column drag could not start DragHost on release"
-                                        );
-                                    }
-                                } else {
-                                    controller_for_up.update(app, |controller, cx| {
-                                        let _ = controller.cancel_pointer_interaction();
-                                        cx.notify();
-                                    });
-                                }
-                            } else {
-                                controller_for_up.update(app, |controller, cx| {
-                                    let _ = controller.cancel_pointer_interaction();
-                                    cx.notify();
-                                });
-                            }
-                            DockInteractionCoordinator::release(window, &pointer_capture_for_up);
-                            app.stop_propagation();
                             return;
                         }
                         if let Some(group_press) = group_press_for_up.get() {
@@ -1820,9 +1625,6 @@ impl Render for FloatingHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window_id)
         });
-        let dragged_column = self.controller.update(cx, |controller, _| {
-            controller.dragged_column_from(window_id)
-        });
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(window_id)
         });
@@ -1938,7 +1740,6 @@ impl Render for FloatingHost {
             &snapshot.rects.groups,
             panel_views,
             dragged_group,
-            dragged_column,
             &snapshot.rects.tab_strips,
             &snapshot.rects.tab_headers,
             &snapshot.rects.tab_overflows,
@@ -2017,7 +1818,6 @@ impl Render for FloatingHost {
         let controller_for_escape = self.controller.clone();
         let tab_press_for_escape = self.tab_press.clone();
         let group_press_for_escape = self.group_press.clone();
-        let column_press_for_escape = self.column_press.clone();
         let context_menu_is_open = self.open_context_menu.is_some();
         root = root.capture_key_down(move |event, window, app| {
             if context_menu_is_open
@@ -2038,7 +1838,6 @@ impl Render for FloatingHost {
                 }) {
                     tab_press_for_escape.set(None);
                     group_press_for_escape.set(None);
-                    column_press_for_escape.set(None);
                     if DockInteractionCoordinator::has_capture(&pointer_capture_for_escape) {
                         DockInteractionCoordinator::release(window, &pointer_capture_for_escape);
                     }
@@ -2048,13 +1847,11 @@ impl Render for FloatingHost {
             }
             if tab_press_for_escape.get().is_none()
                 && group_press_for_escape.get().is_none()
-                && column_press_for_escape.get().is_none()
             {
                 return;
             }
             tab_press_for_escape.set(None);
             group_press_for_escape.set(None);
-            column_press_for_escape.set(None);
             DockInteractionCoordinator::cancel_on_escape(
                 &controller_for_escape,
                 window,

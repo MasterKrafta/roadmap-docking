@@ -1,159 +1,6 @@
 use super::*;
 
 impl Layout {
-    /// A Column can only move as a complete composition: to another Main Dock
-    /// insertion slot or into free Canvas space as a floating root. It cannot
-    /// merge into an individual Tabs group or become a child of another Column.
-    pub(in crate::compute_drop_zones) fn append_column_drag_zones(
-        &self,
-        context: &DropZoneBuildContext<'_>,
-        zones: &mut Vec<DropZoneRect>,
-    ) -> Result<(), ComputeRectsError> {
-        let DropZoneBuildContext {
-            source,
-            source_panels,
-            rects,
-            metrics,
-            viewport,
-            left_columns,
-            right_columns,
-            may_add_left_column,
-            may_add_right_column,
-            ..
-        } = *context;
-        let DropSource::Column { column: source_column } = source else {
-            return Ok(());
-        };
-
-        let source_position = left_columns
-            .iter()
-            .position(|(id, _)| *id == source_column)
-            .map(|index| (DockSide::Left, index))
-            .or_else(|| {
-                right_columns
-                    .iter()
-                    .position(|(id, _)| *id == source_column)
-                    .map(|index| (DockSide::Right, index))
-            });
-        // A Floating target supplies a window-local geometry snapshot, so its
-        // columns do not include a Main source column. The source is still valid
-        // when it belongs to a Main DockArea; there are simply no Main insertion
-        // zones to emit from this Floating snapshot.
-        let source_has_layout_owner = self.main_column_position(source_column).is_some()
-            || self.find_floating_root_containing(source_column).is_some();
-        if source_position.is_none() && !source_has_layout_owner {
-            return Err(ComputeRectsError::InvalidLayoutState);
-        }
-
-        let can_insert = |side| match side {
-            DockSide::Left => may_add_left_column,
-            DockSide::Right => may_add_right_column,
-        };
-        let is_same_position = |side, index| {
-            source_position.is_some_and(|(source_side, source_index)| {
-                source_side == side && (index == source_index || index == source_index + 1)
-            })
-        };
-
-        if source_allows(self, source_panels, AllowedArea::MAIN_DOCK) {
-            for (side, columns) in [
-                (DockSide::Left, left_columns),
-                (DockSide::Right, right_columns),
-            ] {
-                if !can_insert(side) {
-                    continue;
-                }
-                for (index, (_, column_rect)) in columns.iter().enumerate() {
-                    let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
-                    let left_fallback = Rect::new(
-                        column_rect.origin,
-                        Size::new(edge_width, column_rect.size.height),
-                    );
-                    let right_fallback = Rect::new(
-                        Point::new(
-                            column_rect.origin.x + column_rect.size.width - edge_width,
-                            column_rect.origin.y,
-                        ),
-                        Size::new(edge_width, column_rect.size.height),
-                    );
-                    let left_rect = main_column_boundary_drop_rect(
-                        self, rects, side, columns, index, metrics,
-                    )?
-                    .unwrap_or(left_fallback);
-                    let right_rect = main_column_boundary_drop_rect(
-                        self, rects, side, columns, index + 1, metrics,
-                    )?
-                    .unwrap_or(right_fallback);
-
-                    if !is_same_position(side, index) {
-                        push_zone(
-                            zones,
-                            DropTarget::MainColumn { side, index },
-                            DropZone::ColumnLeft,
-                            left_rect,
-                        )?;
-                    }
-                    if !is_same_position(side, index + 1) {
-                        push_zone(
-                            zones,
-                            DropTarget::MainColumn {
-                                side,
-                                index: index + 1,
-                            },
-                            DropZone::ColumnRight,
-                            right_rect,
-                        )?;
-                    }
-                }
-            }
-
-            // The outer window edges also accept a whole Column, including when
-            // the destination Main Dock is currently empty.
-            if rects.canvas.is_some() {
-                let edge_width = metrics.edge_drop_width.min(viewport.size.width / 3.0);
-                for (side, columns, is_left) in [
-                    (DockSide::Left, left_columns, true),
-                    (DockSide::Right, right_columns, false),
-                ] {
-                    if !can_insert(side) {
-                        continue;
-                    }
-                    let index = if is_left { 0 } else { columns.len() };
-                    if is_same_position(side, index) {
-                        continue;
-                    }
-                    let edge_rect = if is_left {
-                        Rect::new(
-                            viewport.origin,
-                            Size::new(edge_width, viewport.size.height),
-                        )
-                    } else {
-                        Rect::new(
-                            Point::new(
-                                viewport.origin.x + viewport.size.width - edge_width,
-                                viewport.origin.y,
-                            ),
-                            Size::new(edge_width, viewport.size.height),
-                        )
-                    };
-                    push_zone(
-                        zones,
-                        DropTarget::MainColumn { side, index },
-                        DropZone::DockEdge,
-                        edge_rect,
-                    )?;
-                }
-            }
-        }
-
-        if source_allows(self, source_panels, AllowedArea::FLOATING)
-            && let Some(canvas) = rects.canvas
-        {
-            push_zone(zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
-        }
-        Ok(())
-    }
-
     pub(in crate::compute_drop_zones) fn append_main_group_zones(
         &self,
         context: &DropZoneBuildContext<'_>,
@@ -176,8 +23,7 @@ impl Layout {
             DockSide::Left => may_add_left_column,
             DockSide::Right => may_add_right_column,
         };
-        // Main-dock groups: center/tab insertion, vertical group splitting,
-        // and profile-correct horizontal/column splitting.
+        // Main-dock groups expose semantic center, vertical and horizontal targets.
         for group_rect in &rects.groups {
             if !matches!(self.node(group_rect.group), Some(Node::Tabs(_))) {
                 continue;
@@ -196,19 +42,18 @@ impl Layout {
                 Some(Node::Tabs(tabs)) => tabs,
                 _ => continue,
             };
-            let source_contains_target = matches!(source, DropSource::Group { .. })
+            let source_contains_target = matches!(source, DropSource::Group { .. } | DropSource::Composition { .. })
                 && contains_node(tree_index, source_root, group_rect.group);
             let source_panel_is_here = match source {
                 DropSource::Panel { panel } => {
                     panel_node(tree_index, panel).and_then(|node| direct_parent(tree_index, node))
                         == Some(group_rect.group)
                 }
-                DropSource::Group { .. } => false,
-                DropSource::Column { .. } => false,
+                DropSource::Group { .. } | DropSource::Composition { .. } => false,
             };
             if !source_contains_target
                 && !source_panel_is_here
-                && !matches!(source, DropSource::Column { .. })
+                && !matches!(source, DropSource::Composition { .. })
                 && source_allows(self, source_panels, area)
             {
                 let center_rect = group_center_rect(group_rect.rect, metrics)?;
@@ -221,7 +66,7 @@ impl Layout {
                         group: group_rect.group,
                         index: tabs.children.len(),
                     },
-                    DropSource::Column { .. } => continue,
+                    DropSource::Composition { .. } => continue,
                 };
                 push_zone(zones, target, DropZone::Center, center_rect)?;
             }
@@ -307,7 +152,10 @@ impl Layout {
                                 group: group_rect.group,
                                 zone: DropZone::Left,
                             },
-                            DropSource::Column { .. } => continue,
+                            DropSource::Composition { .. } => DropTarget::MainColumn {
+                                side,
+                                index: column_index,
+                            },
                         };
                         let right_target = match source {
                             DropSource::Panel { .. } => DropTarget::MainColumn {
@@ -318,7 +166,10 @@ impl Layout {
                                 group: group_rect.group,
                                 zone: DropZone::Right,
                             },
-                            DropSource::Column { .. } => continue,
+                            DropSource::Composition { .. } => DropTarget::MainColumn {
+                                side,
+                                index: column_index + 1,
+                            },
                         };
                         if !group_edge_is_noop(
                             self,
@@ -401,42 +252,8 @@ impl Layout {
             }
         }
 
-        // A Floating composition whose root is a single-group Column may be
-        // merged into a Main or Floating tab strip as one complete Group.
-        let floating_single_group_column = matches!(source, DropSource::Column { .. })
-            && source_is_floating_root(self, source_root_id)
-            && matches!(
-                self.node(source_root_id),
-                Some(Node::Column(column)) if column.groups.len() == 1
-            );
-        if floating_single_group_column {
-            for strip in &rects.tab_strips {
-                let Some(area) = target_area(self, tree_index, strip.group) else {
-                    continue;
-                };
-                if !matches!(area, AllowedArea::MAIN_DOCK | AllowedArea::FLOATING)
-                    || !source_allows(self, source_panels, area)
-                {
-                    continue;
-                }
-                let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
-                    continue;
-                };
-                push_zone(
-                    zones,
-                    DropTarget::GroupTabs {
-                        group: strip.group,
-                        index: tabs.children.len(),
-                    },
-                    DropZone::TabInsertion,
-                    strip.rect,
-                )?;
-            }
-        }
-
-        // Whole Tabs Group drags keep exact insertion positions in both Main
-        // and Floating. A Floating root that is a Split/Column is not a Group
-        // payload and must use its composition-level targets instead.
+        // A single-group composition is normalized to Group before this method.
+        // Multi-group compositions retain composition-level drop targets.
         if !matches!(source, DropSource::Group { .. })
             || !matches!(self.node(source_root_id), Some(Node::Tabs(_)))
         {
@@ -729,7 +546,7 @@ impl Layout {
                     ),
                 );
                 let end_index = column.groups.len();
-                if !matches!(source, DropSource::Column { .. })
+                if !matches!(source, DropSource::Composition { .. })
                     && !matches!(
                         source,
                         DropSource::Group { group }
@@ -792,7 +609,7 @@ impl Layout {
                                     },
                                 )
                             }),
-                        DropSource::Column { .. } => Some((
+                        DropSource::Composition { .. } => Some((
                             DropTarget::MainColumn { side, index },
                             DropTarget::MainColumn {
                                 side,
@@ -842,7 +659,7 @@ impl Layout {
             right_columns,
             ..
         } = *context;
-        if matches!(source, DropSource::Column { .. }) {
+        if matches!(source, DropSource::Composition { .. }) {
             return Ok(());
         }
         // Exact insertion points in icon rails follow each rail's flattened group order.

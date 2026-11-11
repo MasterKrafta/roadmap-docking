@@ -4,39 +4,13 @@ use ui::Theme;
 
 /// Flexible drag surface for one complete composition.
 ///
-/// Its hit region spans the shared header and excludes the narrow per-Column
-/// drag strips, every Column collapse control, and the single composition close control.
+/// Its hit region spans the shared header and excludes only composition controls.
 pub struct CompositionDragArea;
 
 impl CompositionDragArea {
-    pub(crate) const COLUMN_GRIP_WIDTH: f32 = 24.0;
-
-    pub(crate) fn column_drag_handle_contains(
-        column: dock_core::ColumnRect,
-        point: Point,
-        header_height: f32,
-    ) -> bool {
-        Self::column_drag_handle_contains_in_area(column.rect, column, point, header_height)
-    }
-
-    pub(crate) fn column_drag_handle_contains_in_area(
-        area_rect: Rect,
-        column: dock_core::ColumnRect,
-        point: Point,
-        header_height: f32,
-    ) -> bool {
-        let width = Self::COLUMN_GRIP_WIDTH.min(column.rect.size.width);
-        let height = header_height.min(area_rect.size.height);
-        point.x >= column.rect.origin.x
-            && point.x < column.rect.origin.x + width
-            && point.y >= area_rect.origin.y
-            && point.y < area_rect.origin.y + height
-    }
-
     pub(crate) fn contains(
         area_rect: Rect,
         columns: &[dock_core::ColumnRect],
-        column_grip_columns: &[dock_core::ColumnRect],
         point: Point,
         header_height: f32,
         button_width: f32,
@@ -52,16 +26,7 @@ impl CompositionDragArea {
         }
 
         let close_left = area_right - button_width;
-        if point.x >= close_left
-            || column_grip_columns.iter().any(|column| {
-                Self::column_drag_handle_contains_in_area(
-                    area_rect,
-                    *column,
-                    point,
-                    header_height,
-                )
-            })
-        {
+        if point.x >= close_left {
             return false;
         }
 
@@ -85,20 +50,6 @@ impl CompositionDragArea {
             } else {
                 button_width
             }
-    }
-
-    pub(crate) fn render_column_drag_strip(
-        id: String,
-        left: f32,
-    ) -> impl IntoElement {
-        div()
-            .id(id)
-            .absolute()
-            .left(gpui::px(left))
-            .top_0()
-            .w(gpui::px(Self::COLUMN_GRIP_WIDTH))
-            .h_full()
-            .cursor_move()
     }
 
     pub fn render(id: String, theme: Theme) -> impl IntoElement {

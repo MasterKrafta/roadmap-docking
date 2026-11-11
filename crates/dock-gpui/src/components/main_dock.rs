@@ -26,7 +26,6 @@ impl MainDockView {
         groups: &[GroupRect],
         panels: Vec<(PanelRect, Option<AnyView>)>,
         dragged_group: Option<NodeId>,
-        dragged_column: Option<NodeId>,
         dragged_dock_area: Option<DockSide>,
         tab_strips: &[TabStripRect],
         tab_headers: &[TabHeaderRect],
@@ -96,7 +95,6 @@ impl MainDockView {
                 None,
                 true,
                 dragged_group,
-                dragged_column,
             ));
         }
 
@@ -142,7 +140,6 @@ impl MainDockView {
                         format!("main-dock-area-{side_name}"),
                         area_rect,
                         &area_columns,
-                        dragged_column,
                         metrics,
                         theme,
                     ));

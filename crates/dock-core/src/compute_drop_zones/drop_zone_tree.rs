@@ -53,23 +53,13 @@ pub(crate) fn source_root(
             panel_node(tree_index, panel).ok_or(ComputeRectsError::InvalidLayoutState)
         }
         DropSource::Group { group } => {
-            // A floating-window capture carries the root node of the complete
-            // composition through the same resolver as a Tabs group. After
-            // edge docking that root may be a Split or Column, not a Tabs node.
-            if matches!(layout.node(group), Some(Node::Tabs(_)))
-                || source_is_floating_root(layout, group)
-            {
-                Ok(group)
-            } else {
-                Err(ComputeRectsError::InvalidLayoutState)
-            }
+            matches!(layout.node(group), Some(Node::Tabs(_)))
+                .then_some(group)
+                .ok_or(ComputeRectsError::InvalidLayoutState)
         }
-        DropSource::Column { column } => {
-            if matches!(layout.node(column), Some(Node::Column(_)))
-                && (layout.main_column_position(column).is_some()
-                    || layout.find_floating_root_containing(column).is_some())
-            {
-                Ok(column)
+        DropSource::Composition { root } => {
+            if source_is_main_root(layout, root) || source_is_floating_root(layout, root) {
+                Ok(root)
             } else {
                 Err(ComputeRectsError::InvalidLayoutState)
             }
@@ -175,6 +165,31 @@ pub(crate) fn source_is_floating_root(layout: &Layout, source_root: NodeId) -> b
     })
 }
 
+pub(crate) fn source_is_main_root(layout: &Layout, source_root: NodeId) -> bool {
+    [DockSide::Left, DockSide::Right]
+        .into_iter()
+        .any(|side| layout.main_area(side).is_some_and(|area| area.root == source_root))
+}
+
+/// Returns the sole Tabs group below a composition root, if there is exactly one.
+pub(crate) fn single_group_in_subtree(layout: &Layout, root: NodeId) -> Option<NodeId> {
+    let mut stack = vec![root];
+    let mut group = None;
+
+    while let Some(node_id) = stack.pop() {
+        match layout.node(node_id)? {
+            Node::Tabs(_) => {
+                if group.replace(node_id).is_some() {
+                    return None;
+                }
+            }
+            node => stack.extend(node.children().iter().copied()),
+        }
+    }
+
+    group
+}
+
 pub(super) fn main_side_for_node(
     layout: &Layout,
     tree_index: &DropZoneTreeIndex,
@@ -273,10 +288,8 @@ pub(crate) fn can_add_column(
     if layout.profile() != Profile::Photoshop || current_column_count < metrics.max_columns {
         return true;
     }
-    if let DropSource::Column { column } = source {
-        return layout
-            .main_column_position(column)
-            .is_some_and(|(source_side, _)| source_side == side);
+    if let DropSource::Composition { root } = source {
+        return main_side_for_node(layout, tree_index, root) == Some(side);
     }
     let Some(column_id) = owner_column(layout, tree_index, source_root) else {
         return false;
@@ -300,10 +313,8 @@ pub(crate) fn can_add_column(
                 && column.groups[0] == group
                 && matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.children.len() == 1)
         }
-        DropSource::Column { column } => {
-            layout
-                .main_column_position(column)
-                .is_some_and(|(source_side, _)| source_side == side)
+        DropSource::Composition { root } => {
+            main_side_for_node(layout, tree_index, root) == Some(side)
         }
     }
 }
@@ -315,13 +326,12 @@ pub(crate) fn group_edge_is_noop(
     target_group: NodeId,
     zone: DropZone,
 ) -> bool {
-    let DropSource::Group {
-        group: source_group,
-    } = source
-    else {
-        return false;
+    let source_root = match source {
+        DropSource::Group { group } => group,
+        DropSource::Composition { root } => root,
+        DropSource::Panel { .. } => return false,
     };
-    if source_group == target_group || contains_node(tree_index, source_group, target_group) {
+    if source_root == target_group || contains_node(tree_index, source_root, target_group) {
         return true;
     }
     let source_parent = direct_parent(tree_index, source_group);

@@ -141,7 +141,6 @@ impl DragHostManager {
             Vec::new(),
             None,
             None,
-            None,
             false,
             false,
             cx,
@@ -171,7 +170,6 @@ impl DragHostManager {
             vec![panel],
             None,
             None,
-            None,
             false,
             false,
             cx,
@@ -198,7 +196,6 @@ impl DragHostManager {
             grab_offset,
             logical_size,
             vec![panel],
-            None,
             None,
             None,
             promote_on_float,
@@ -232,40 +229,8 @@ impl DragHostManager {
             vec![panel],
             Some(group),
             None,
-            None,
             promote_on_float,
             true,
-            cx,
-        )
-    }
-
-    /// Opens DragHost with every active Group and PanelView in one Column.
-    pub fn open_column_at_cursor(
-        &mut self,
-        column: NodeId,
-        panels: Vec<PanelId>,
-        grab_offset: Point,
-        logical_size: Size,
-        cx: &mut Context<Self>,
-    ) -> Result<DragHostId, DragHostError> {
-        let can_transfer = self.controller.update(cx, |controller, _| {
-            controller.can_begin_column_view_transfer(column, &panels)
-        });
-        if !can_transfer {
-            return Err(panels.first().copied().map_or(
-                DragHostError::ContentTransferUnavailable,
-                DragHostError::PanelTransferUnavailable,
-            ));
-        }
-        self.open_at_cursor_with_content(
-            grab_offset,
-            logical_size,
-            panels,
-            None,
-            Some(column),
-            None,
-            false,
-            false,
             cx,
         )
     }
@@ -293,7 +258,6 @@ impl DragHostManager {
             logical_size,
             panels,
             None,
-            None,
             Some(side),
             true,
             false,
@@ -307,7 +271,6 @@ impl DragHostManager {
         logical_size: Size,
         panels: Vec<PanelId>,
         group: Option<NodeId>,
-        column: Option<NodeId>,
         dock_area: Option<DockSide>,
         promote_on_float: bool,
         reserve_composition_header: bool,
@@ -403,7 +366,6 @@ impl DragHostManager {
                         controller_observed: false,
                         panel: surface_panel,
                         group,
-                        column,
                         dock_area,
                         reserve_composition_header,
                         composition_header_width: if reserve_composition_header {
@@ -840,13 +802,11 @@ impl DragHostManager {
             self.cancel_active_drag(id, cx);
             return false;
         };
-        // A DockArea made of one Column can reuse Core's existing whole-Column
-        // resolver. Multi-Column DockAreas retain their existing FreeArea-only path.
+        // Main DockArea drags always use the complete composition root as source.
         let source = match payload {
             DragPayload::DockArea { side } => self.controller.update(cx, |controller, _| {
                 let root = controller.layout().main_area(side)?.root;
-                matches!(controller.layout().node(root), Some(Node::Column(_)))
-                    .then_some(dock_core::DropSource::Column { column: root })
+                Some(dock_core::DropSource::Composition { root })
             }),
             _ => crate::input::drag::drop_source(payload),
         };
@@ -1573,7 +1533,6 @@ pub(crate) struct DragHostSurface {
     controller_observed: bool,
     panel: Option<PanelId>,
     group: Option<NodeId>,
-    column: Option<NodeId>,
     dock_area: Option<DockSide>,
     reserve_composition_header: bool,
     composition_header_width: f32,
@@ -1608,22 +1567,6 @@ struct DragGroupPresentation {
     presentation: GroupPresentation,
     column: Option<NodeId>,
     panel: Option<(PanelRect, AnyView)>,
-    metrics: DockMetrics,
-}
-
-struct DragColumnPresentation {
-    column: ColumnRect,
-    groups: Vec<GroupRect>,
-    panels: Vec<(PanelRect, Option<AnyView>)>,
-    tab_strips: Vec<TabStripRect>,
-    tab_headers: Vec<TabHeaderRect>,
-    tab_overflows: Vec<TabOverflowRect>,
-    presentations: std::collections::HashMap<NodeId, GroupPresentation>,
-    group_ids: Vec<NodeId>,
-    mode: ColumnMode,
-    rail_items: Vec<ColumnDisplayItem>,
-    splitters: Vec<SplitterRect>,
-    vertical_overflow: Vec<VerticalOverflow>,
     metrics: DockMetrics,
 }
 
@@ -1921,189 +1864,6 @@ impl Render for DragHostSurface {
                 self.theme,
                 true,
             ));
-        } else if let Some(column) = self.column
-            && let Some(snapshot) = self.controller.update(cx, |controller, _| {
-                let (source_host, source_window_id, panels) = {
-                    let session = controller.drag().host_session()?;
-                    if !matches!(
-                        session.payload(),
-                        DragPayload::Column { column: active } if active == column
-                    ) || !session.all_panel_views_source_detached()
-                    {
-                        return None;
-                    }
-                    (
-                        session.source_host(),
-                        session.source_window_id()?,
-                        session.transferred_panels().to_vec(),
-                    )
-                };
-                let rects = match source_host {
-                    DragSourceHost::Main => controller.geometry().ok()?.clone(),
-                    DragSourceHost::Floating { group } => controller
-                        .floating_geometry(source_window_id, group)
-                        .ok()?
-                        .clone(),
-                };
-                let source_column = rects
-                    .columns
-                    .iter()
-                    .find(|rect| rect.column == column)
-                    .copied()?;
-                let Some(Node::Column(column_model)) = controller.layout().node(column) else {
-                    return None;
-                };
-                let group_ids = column_model.groups.clone();
-                let group_id_set = group_ids.iter().copied().collect::<HashSet<_>>();
-                let group_rects = rects
-                    .groups
-                    .iter()
-                    .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| {
-                        GroupRect::new(
-                            rect.group,
-                            translate_rect(rect.rect, source_column.rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let strip_rects = rects
-                    .tab_strips
-                    .iter()
-                    .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| {
-                        TabStripRect::new(
-                            rect.group,
-                            translate_rect(rect.rect, source_column.rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let header_rects = rects
-                    .tab_headers
-                    .iter()
-                    .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| {
-                        TabHeaderRect::new(
-                            rect.group,
-                            rect.panel,
-                            rect.index,
-                            translate_rect(rect.rect, source_column.rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let overflow_rects = rects
-                    .tab_overflows
-                    .iter()
-                    .filter(|rect| group_id_set.contains(&rect.group))
-                    .map(|rect| {
-                        TabOverflowRect::new(
-                            rect.group,
-                            translate_rect(rect.button_rect, source_column.rect.origin),
-                            rect.hidden_tabs.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let presentations = collect_group_presentations(
-                    controller.layout(),
-                    controller.registry(),
-                    &group_id_set,
-                    Some(&rects),
-                );
-                let panel_rects = rects
-                    .panels
-                    .iter()
-                    .filter(|rect| panels.contains(&rect.panel))
-                    .filter_map(|rect| {
-                        let view = controller.panel_view_for_drag(rect.panel)?;
-                        Some((
-                            PanelRect::new(
-                                rect.panel,
-                                translate_rect(rect.rect, source_column.rect.origin),
-                            ),
-                            Some(view),
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                let local_column = ColumnRect::new(
-                    column,
-                    translate_rect(source_column.rect, source_column.rect.origin),
-                );
-                let splitters = rects
-                    .splitters
-                    .iter()
-                    .filter(|splitter| {
-                        splitter.owner == column && splitter.axis == dock_core::Axis::Y
-                    })
-                    .map(|splitter| {
-                        SplitterRect::new(
-                            splitter.owner,
-                            splitter.boundary_index,
-                            splitter.axis,
-                            translate_rect(splitter.rect, source_column.rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let vertical_overflow = rects.vertical_overflow.iter()
-                    .filter(|overflow| overflow.owner == column)
-                    .map(|overflow| VerticalOverflow::new(
-                        overflow.owner,
-                        translate_rect(overflow.viewport, source_column.rect.origin),
-                        translate_rect(overflow.content_extent, source_column.rect.origin),
-                    ))
-                    .collect::<Vec<_>>();
-                Some(DragColumnPresentation {
-                    column: local_column,
-                    groups: group_rects,
-                    panels: panel_rects,
-                    tab_strips: strip_rects,
-                    tab_headers: header_rects,
-                    tab_overflows: overflow_rects,
-                    presentations,
-                    group_ids,
-                    mode: column_model.mode,
-                    rail_items: controller.layout().column_display_order(column).unwrap_or_default(),
-                    splitters,
-                    vertical_overflow,
-                    metrics: controller.metrics(),
-                })
-            })
-        {
-            let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
-            root = root.child(DockCompositionView::render_column(
-                snapshot.column,
-                &snapshot.groups,
-                &snapshot.panels,
-                &snapshot.tab_strips,
-                &snapshot.tab_headers,
-                &snapshot.tab_overflows,
-                &snapshot.presentations,
-                &snapshot.group_ids,
-                snapshot.mode,
-                &snapshot.rail_items,
-                None,
-                None,
-                &[],
-                snapshot.metrics,
-                None,
-                toggle_menu,
-                true,
-                &snapshot.splitters,
-                &snapshot.vertical_overflow,
-                None,
-                self.controller.clone(),
-                self.theme,
-                None,
-                true,
-                None,
-                None,
-            ));
-            root = root.child(DockCompositionView::render_header(
-                format!("drag-host-column-header-{:?}", snapshot.column.column),
-                snapshot.column.rect,
-                &[snapshot.column],
-                None,
-                snapshot.metrics,
-                self.theme,
-            ));
         } else if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let (source_host, source_window_id, panel) = {
@@ -2192,7 +1952,6 @@ impl Render for DragHostSurface {
                         ),
                     ),
                     &[],
-                    None,
                     snapshot.metrics,
                     self.theme,
                 ));
@@ -2274,7 +2033,6 @@ impl Render for DragHostSurface {
                         ),
                     ),
                     &[],
-                    None,
                     metrics,
                     self.theme,
                 ));

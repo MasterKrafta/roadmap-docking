@@ -1548,7 +1548,6 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
-            &[],
             Point::new(350.0, 30.0),
             32.0,
             28.0,
@@ -1556,7 +1555,6 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
-            &[],
             Point::new(490.0, 30.0),
             32.0,
             28.0,

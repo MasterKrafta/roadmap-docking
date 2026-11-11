@@ -483,64 +483,6 @@ impl DockController {
                 .is_some_and(|session| session.begin_group_view_transfer(group, panel))
     }
 
-    pub(crate) fn active_column_panel_ids(&self, column: NodeId) -> Option<Vec<PanelId>> {
-        let Some(Node::Column(value)) = self.layout.node(column) else {
-            return None;
-        };
-        Some(
-            value
-                .groups
-                .iter()
-                .filter_map(|group| match self.layout.node(*group) {
-                    Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
-                        match self.layout.node(child) {
-                            Some(Node::Panel(panel)) => Some(panel.panel_id),
-                            _ => None,
-                        }
-                    }),
-                    _ => None,
-                })
-                .collect(),
-        )
-    }
-
-    pub(crate) fn can_begin_column_view_transfer(
-        &self,
-        column: NodeId,
-        panels: &[PanelId],
-    ) -> bool {
-        if !matches!(self.layout.node(column), Some(Node::Column(_)))
-            || self
-                .layout
-                .flyout()
-                .is_some_and(|flyout| flyout.column == column)
-        {
-            return false;
-        }
-        let Some(active_panels) = self.active_column_panel_ids(column) else {
-            return false;
-        };
-        active_panels == panels
-            && panels.iter().all(|panel| self.panel_views.get(*panel).is_some())
-            && self
-                .drag
-                .host_session()
-                .is_some_and(|session| session.can_begin_column_view_transfer(column, panels))
-    }
-
-    pub(crate) fn begin_column_view_transfer(
-        &mut self,
-        column: NodeId,
-        panels: &[PanelId],
-    ) -> bool {
-        self.can_begin_column_view_transfer(column, panels)
-            && self
-                .drag
-                .host_session
-                .as_mut()
-                .is_some_and(|session| session.begin_column_view_transfer(column, panels))
-    }
-
     pub(crate) fn active_dock_area_panel_ids(&self, side: DockSide) -> Option<Vec<PanelId>> {
         fn collect_columns(layout: &Layout, node: NodeId, columns: &mut Vec<NodeId>) {
             match layout.node(node) {
@@ -630,20 +572,6 @@ impl DockController {
         }
         match session.payload() {
             DragPayload::Group { group } => Some(group),
-            _ => None,
-        }
-    }
-
-    /// Returns the Column replaced by a DragHost placeholder in this persistent source window.
-    pub(crate) fn dragged_column_from(&self, source_window_id: WindowId) -> Option<NodeId> {
-        let session = self.drag.host_session()?;
-        if session.source_window_id() != Some(source_window_id)
-            || session.transport_host().is_none()
-        {
-            return None;
-        }
-        match session.payload() {
-            DragPayload::Column { column } => Some(column),
             _ => None,
         }
     }
@@ -832,9 +760,6 @@ impl DockController {
             }
             DragPayload::Group { group } => {
                 matches!(self.layout.node(group), Some(Node::Tabs(_)))
-            }
-            DragPayload::Column { column } => {
-                matches!(self.layout.node(column), Some(Node::Column(_)))
             }
             // A Main DockArea remains in its original Layout until DragHost
             // releases and applies the one final drop command.

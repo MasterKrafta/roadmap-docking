@@ -46,9 +46,6 @@ impl Layout {
             (DragHandle::GroupGrip, DragPayload::Group { group }) => {
                 self.resolve_group_grip_drag(request, group, metrics)
             }
-            (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
-                self.resolve_column_header_drag(request, column, metrics)
-            }
             (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
                 self.resolve_dock_area_header_drag(request, side, metrics)
             }
@@ -292,9 +289,9 @@ impl Layout {
         None
     }
 
-    /// Resolves a whole Main DockArea drag. A single-Column DockArea can use
-    /// the existing Column transfer semantics; a multi-Column DockArea can still
-    /// be floated as one composition, but is not split apart for a dock-side drop.
+    /// Resolves a whole Main DockArea drag. A single-Group composition reuses
+    /// Group docking semantics; a multi-Group DockArea can be floated as one
+    /// composition, but is not split apart for a dock-side drop.
     fn resolve_dock_area_header_drag(
         &self,
         request: &DragDropRequest,
@@ -330,153 +327,13 @@ impl Layout {
             }));
         }
 
-        if !matches!(self.node(root), Some(Node::Column(_))) {
-            return Err(CommandError::InvalidTarget {
-                reason: "a multi-Column DockArea can only be detached as one floating composition",
-            });
+        if let Some(group) = single_group_in_subtree(self, root) {
+            return self.resolve_group_grip_drag(request, group, metrics);
         }
 
-        let column_request = DragDropRequest {
-            payload: DragPayload::Column { column: root },
-            handle: DragHandle::ColumnHeader,
-            origin: request.origin,
-            point: request.point,
-            target: request.target,
-            floating_bounds: request.floating_bounds,
-        };
-        self.resolve_column_header_drag(&column_request, root, metrics)
-    }
-
-    pub(super) fn resolve_column_header_drag(
-        &self,
-        request: &DragDropRequest,
-        column: NodeId,
-        metrics: &DockMetrics,
-    ) -> Result<DragDropAction, CommandError> {
-        if !matches!(self.node(column), Some(Node::Column(_))) {
-            return Err(if self.node(column).is_some() {
-                CommandError::InvalidTarget {
-                    reason: "Column header drag source must be a Column node",
-                }
-            } else {
-                CommandError::MissingNode { node: column }
-            });
-        }
-        let target = request.target.ok_or(CommandError::InvalidTarget {
-            reason: "Column header drag requires a resolved drop target",
-        })?;
-        let source_position = self.main_column_position(column);
-        let source_is_floating = self.find_floating_root_containing(column).is_some();
-        if source_position.is_none() && !source_is_floating {
-            return Err(CommandError::InvalidTarget {
-                reason: "Column header drag source must belong to a Main or Floating dock area",
-            });
-        }
-
-        if matches!(target, DropTarget::FreeArea) {
-            // A ColumnHeader drag detaches this Column from its current owner,
-            // including an existing Floating composition, only on mouse-up.
-            let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
-                reason: "FreeArea Float requests require explicit window bounds",
-            })?;
-            bounds
-                .validate_non_empty()
-                .map_err(|_| CommandError::InvalidValue {
-                    field: "bounds",
-                    reason: "floating bounds must be finite and positive",
-                })?;
-            self.validate_panel_ids_allowed_for_area(
-                &self.panel_ids_in_subtree(column),
-                AllowedArea::FLOATING,
-            )?;
-            return Ok(DragDropAction::Command(DockCommand::Float {
-                node: column,
-                bounds,
-            }));
-        }
-
-        self.validate_drop_target(target, metrics)?;
-        self.validate_panel_ids_allowed_for_target(
-            &self.panel_ids_in_subtree(column),
-            target,
-        )?;
-
-        if target
-            .referenced_node_id()
-            .is_some_and(|node| self.is_descendant_or_same(column, node))
-        {
-            return Ok(DragDropAction::NoOp);
-        }
-
-        match target {
-            DropTarget::MainColumn { side, index } => {
-                let target_columns = self.main_columns(side)?;
-                if source_position.is_some_and(|(source_side, source_index)| {
-                    source_side == side && (index == source_index || index == source_index + 1)
-                }) {
-                    return Ok(DragDropAction::NoOp);
-                }
-                let source_is_already_on_target_side =
-                    source_position.is_some_and(|(source_side, _)| source_side == side);
-                if self.profile == Profile::Photoshop
-                    && !source_is_already_on_target_side
-                    && target_columns.len() >= metrics.max_columns
-                {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "destination Main Dock has reached max_columns",
-                    });
-                }
-            }
-            DropTarget::GroupEdge {
-                group,
-                zone: DropZone::Left | DropZone::Right,
-            } => {
-                let target_column = self.find_owner_column(group).ok_or(
-                    CommandError::InvalidTarget {
-                        reason: "Column edge target must belong to a Column",
-                    },
-                )?;
-                if target_column == column {
-                    return Ok(DragDropAction::NoOp);
-                }
-            }
-            DropTarget::GroupEdge {
-                group: target_group,
-                zone: zone @ (DropZone::Top | DropZone::Bottom),
-            } => {
-                let source_group = match self.node(column) {
-                    Some(Node::Column(source)) if source.groups.len() == 1 => source.groups[0],
-                    _ => {
-                        return Err(CommandError::InvalidTarget {
-                            reason: "vertical Column drops into Floating require a single-group Main Column",
-                        });
-                    }
-                };
-                if source_position.is_none()
-                    || self.find_floating_root_containing(target_group).is_none()
-                {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "vertical Column drops are supported from Main into Floating",
-                    });
-                }
-                return Ok(DragDropAction::Command(DockCommand::SplitGroup {
-                    group: source_group,
-                    target_group,
-                    zone,
-                    ratio: 0.5,
-                }));
-            }
-            _ => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "a Column can only dock into a MainColumn or a GroupEdge",
-                });
-            }
-        }
-
-        Ok(DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column,
-            target,
-        }))
+        Err(CommandError::InvalidTarget {
+            reason: "a DockArea with multiple groups can only be detached as one floating composition",
+        })
     }
 
     pub(super) fn resolve_group_grip_drag(
@@ -1092,4 +949,23 @@ pub(super) fn allowed_area_rejection_reason(area: AllowedArea) -> &'static str {
     } else {
         "panel constraints disallow the requested dock area"
     }
+}
+
+
+fn single_group_in_subtree(layout: &Layout, root: NodeId) -> Option<NodeId> {
+    let mut stack = vec![root];
+    let mut group = None;
+
+    while let Some(node_id) = stack.pop() {
+        match layout.node(node_id)? {
+            Node::Tabs(_) => {
+                if group.replace(node_id).is_some() {
+                    return None;
+                }
+            }
+            node => stack.extend(node.children().iter().copied()),
+        }
+    }
+
+    group
 }

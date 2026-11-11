@@ -5,7 +5,7 @@ mod drop_zone_tree;
 pub(super) use drop_zone_tree::{
     DropZoneTreeIndex, can_add_column, collect_panels, contains_node, direct_parent,
     edge_group_for_column, group_edge_is_noop, group_main_column, is_rail_group, main_columns,
-    owner_column, panel_node,
+    owner_column, panel_node, single_group_in_subtree,
     source_allows, source_is_floating_root, source_root, target_area,
 };
 
@@ -109,6 +109,13 @@ impl Layout {
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
+        let initial_root = source_root(self, source, tree_index)?;
+        let source = match source {
+            DropSource::Composition { .. } => single_group_in_subtree(self, initial_root)
+                .map(|group| DropSource::Group { group })
+                .unwrap_or(source),
+            _ => source,
+        };
         let source_root = source_root(self, source, tree_index)?;
         let source_panels = collect_panels(self, source_root);
         if source_panels.is_empty()
@@ -173,17 +180,14 @@ impl Layout {
             may_add_left_column,
             may_add_right_column,
         };
-        if matches!(source, DropSource::Column { .. }) {
-            self.append_column_drag_zones(&context, &mut zones)?;
-            // A Floating-root Column is a complete composition. It can also
-            // split above/below Main Groups; Main ColumnHeader drags cannot.
-            if source_is_floating_root(self, source_root) {
-                self.append_main_group_zones(&context, &mut zones)?;
-                self.append_tab_insertion_zones(&context, &mut zones)?;
+        if matches!(source, DropSource::Composition { .. })
+            && !source_is_floating_root(self, source_root)
+        {
+            if source_allows(self, &source_panels, AllowedArea::FLOATING)
+                && let Some(canvas) = rects.canvas
+            {
+                push_zone(&mut zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
             }
-            // Both Main Columns and Columns inside Floating compositions can
-            // target compatible Floating Column compositions directly.
-            self.append_floating_window_zones(&context, &mut zones)?;
             return Ok(zones);
         }
         self.append_main_group_zones(&context, &mut zones)?;

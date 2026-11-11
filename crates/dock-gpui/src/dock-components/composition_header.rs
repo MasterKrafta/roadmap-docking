@@ -5,7 +5,7 @@ mod collapse_column_button;
 #[path = "close_composition_button.rs"]
 mod close_composition_button;
 
-use dock_core::{ColumnRect, DockMetrics, NodeId, Rect};
+use dock_core::{ColumnRect, DockMetrics, Rect};
 
 use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
@@ -25,7 +25,6 @@ impl CompositionHeader {
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
-        dragged_column: Option<NodeId>,
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
@@ -47,16 +46,6 @@ impl CompositionHeader {
             ));
 
         for (index, column) in columns.iter().enumerate() {
-            if dragged_column != Some(column.column) {
-                header = header.child(CompositionDragArea::render_column_drag_strip(
-                    format!("{id}-column-drag-strip-{index}"),
-                    column.rect.origin.x - area_rect.origin.x,
-                ));
-            }
-
-            if dragged_column == Some(column.column) {
-                continue;
-            }
             let button_x =
                 CompositionDragArea::collapse_button_left(area_rect, *column, button_width);
 

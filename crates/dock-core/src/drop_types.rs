@@ -2,18 +2,16 @@ use crate::{DockSide, NodeId, Rect};
 
 /// The logical item currently being dragged, independent of its Main/Floating host.
 ///
-/// A whole Tabs group keeps its identity during reorder/split. A Column source carries
-/// the Column node itself. When an already-floating window is moved as a whole, its
-/// composition root is represented by its structural kind: a Column root as Column,
-/// and another root shape as Group. Individual panels carry their PanelId so Core can
-/// apply area restrictions.
+/// Groups and Panels are movable semantic items. A complete Main or Floating
+/// composition is carried by its DockArea root; layout containers remain internal
+/// implementation details and are never independent drag sources.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropSource {
     Panel { panel: crate::PanelId },
     Group { group: crate::NodeId },
-    /// A whole Column node dragged from its current dock-area host.
-    Column { column: NodeId },
+    /// A complete Main or Floating DockArea composition.
+    Composition { root: NodeId },
 }
 
 /// Semantic kind of a drop affordance. Cardinal directions are also used by
@@ -276,12 +274,12 @@ mod drop_source_tests {
         let group = DropSource::Group {
             group: NodeId::null(),
         };
-        let column = DropSource::Column {
-            column: NodeId::null(),
+        let composition = DropSource::Composition {
+            root: NodeId::null(),
         };
 
         assert_ne!(panel, group);
-        assert_ne!(panel, column);
-        assert_ne!(group, column);
+        assert_ne!(panel, composition);
+        assert_ne!(group, composition);
     }
 }

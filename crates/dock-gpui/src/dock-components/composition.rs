@@ -418,11 +418,10 @@ impl DockCompositionView {
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
-        dragged_column: Option<NodeId>,
         metrics: DockMetrics,
         theme: Theme,
     ) -> impl IntoElement {
-        CompositionHeader::render(id, area_rect, columns, dragged_column, metrics, theme)
+        CompositionHeader::render(id, area_rect, columns, metrics, theme)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -452,22 +451,7 @@ impl DockCompositionView {
         raise_floating: Option<FloatingGroupId>,
         show_area_header: bool,
         dragged_group: Option<NodeId>,
-        dragged_column: Option<NodeId>,
     ) -> impl IntoElement {
-        if dragged_column == Some(column.column) {
-            return div()
-                .id(format!("dock-composition-column-placeholder-{:?}", column.column))
-                .absolute()
-                .left(px(column.rect.origin.x))
-                .top(px(column.rect.origin.y))
-                .w(px(column.rect.size.width))
-                .h(px(column.rect.size.height))
-                .overflow_hidden()
-                .bg(rgb(theme.colors.dock_background))
-                .border_1()
-                .border_color(rgb(theme.colors.group_frame_border));
-        }
-
         let group_rects = groups
             .iter()
             .filter(|group| column_group_ids.contains(&group.group))

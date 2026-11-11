@@ -483,9 +483,6 @@ impl Render for DockHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(source_window_id)
         });
-        let dragged_column = self.controller.update(cx, |controller, _| {
-            controller.dragged_column_from(source_window_id)
-        });
         let dragged_dock_area = self.controller.update(cx, |controller, _| {
             controller.dragged_dock_area_from(source_window_id)
         });
@@ -919,7 +916,6 @@ impl Render for DockHost {
                 &main_groups,
                 main_panel_views,
                 dragged_group,
-                dragged_column,
                 dragged_dock_area,
                 &main_tab_strips,
                 &main_tab_headers,

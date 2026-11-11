@@ -173,37 +173,6 @@ impl DragHostSession {
         true
     }
 
-    pub(crate) fn can_begin_column_view_transfer(
-        &self,
-        column: NodeId,
-        panels: &[PanelId],
-    ) -> bool {
-        self.handle == dock_core::DragHandle::ColumnHeader
-            && matches!(
-                self.payload,
-                dock_core::DragPayload::Column { column: active } if active == column
-            )
-            && self.transferred_panels.is_empty()
-            && panels
-                .iter()
-                .enumerate()
-                .all(|(index, panel)| !panels[..index].contains(panel))
-    }
-
-    pub(crate) fn begin_column_view_transfer(
-        &mut self,
-        column: NodeId,
-        panels: &[PanelId],
-    ) -> bool {
-        if self.transport_host.is_none()
-            || !self.can_begin_column_view_transfer(column, panels)
-        {
-            return false;
-        }
-        self.transferred_panels.extend_from_slice(panels);
-        true
-    }
-
     pub(crate) fn can_begin_dock_area_view_transfer(
         &self,
         side: dock_core::DockSide,
@@ -404,36 +373,6 @@ mod tests {
         assert!(!session.can_begin_group_view_transfer(group, panel));
         assert!(!session.begin_group_view_transfer(group, panel));
         assert_eq!(session.payload(), DragPayload::Group { group });
-    }
-
-    #[test]
-    fn column_drag_transfers_all_active_panel_views_as_one_session() {
-        use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
-        use slotmap::SlotMap;
-
-        let mut column_ids = SlotMap::<NodeId, ()>::with_key();
-        let column = column_ids.insert(());
-        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
-        let first_panel = panel_ids.insert(());
-        let second_panel = panel_ids.insert(());
-        let panels = [first_panel, second_panel];
-        let mut session = super::DragHostSession::new(
-            DragPayload::Column { column },
-            DragHandle::ColumnHeader,
-            super::DragSourceHost::Main,
-            None,
-        );
-        let drag_host = DragHostId::from_raw(31);
-
-        assert!(session.can_begin_column_view_transfer(column, &panels));
-        assert!(!session.begin_column_view_transfer(column, &panels));
-        assert!(session.attach_transport_host(drag_host));
-        assert!(session.begin_column_view_transfer(column, &panels));
-        assert_eq!(session.transferred_panels(), &panels);
-        assert!(!session.all_panel_views_source_detached());
-        assert!(!session.can_begin_column_view_transfer(column, &panels));
-        assert!(!session.begin_column_view_transfer(column, &panels));
-        assert_eq!(session.payload(), DragPayload::Column { column });
     }
 
     #[test]

@@ -349,7 +349,6 @@ impl DragSession {
             DragHandle::PanelTab
             | DragHandle::FlyoutPanel
             | DragHandle::GroupGrip
-            | DragHandle::ColumnHeader
             | DragHandle::DockAreaHeader => {
                 let Some(target) = target else {
                     *state = DragState::Cancelled {

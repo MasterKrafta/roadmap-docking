@@ -564,86 +564,6 @@ fn photoshop_side_drop_targets_are_column_scoped_and_cover_full_height() {
 }
 
 #[test]
-fn main_column_drag_exposes_only_whole_column_destinations() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, left_first_panel) = builder.panel(key("column-drag-left-first"), constraints());
-    let left_first_group = builder.tabs(vec![left_first_panel], 0, false);
-    let left_first_column = builder.column(
-        280.0,
-        ColumnMode::Expanded,
-        vec![left_first_group],
-        vec![1.0],
-    );
-
-    let (_, source_panel) = builder.panel(key("column-drag-source"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
-    let source_column = builder.column(
-        280.0,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
-    let left_root = builder.split(
-        Axis::X,
-        vec![left_first_column, source_column],
-        vec![0.5, 0.5],
-    );
-    builder.main_area(DockSide::Left, left_root);
-
-    let (_, right_panel) = builder.panel(key("column-drag-right"), constraints());
-    let right_group = builder.tabs(vec![right_panel], 0, false);
-    let right_column = builder.column(
-        280.0,
-        ColumnMode::Expanded,
-        vec![right_group],
-        vec![1.0],
-    );
-    builder.main_area(DockSide::Right, right_column);
-
-    let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let zones = layout
-        .compute_drop_zones(
-            DropSource::Column {
-                column: source_column,
-            },
-            &rects,
-            &metrics,
-        )
-        .unwrap();
-
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::MainColumn {
-                side: DockSide::Right,
-                index: 0,
-            }
-            && zone.zone == DropZone::ColumnLeft
-    }));
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::MainColumn {
-                side: DockSide::Right,
-                index: 1,
-            }
-            && zone.zone == DropZone::ColumnRight
-    }));
-    assert!(
-        zones.iter().any(|zone| zone.target == DropTarget::FreeArea),
-        "a Main Column may be detached into a new Floating area"
-    );
-    assert!(
-        zones.iter().all(|zone| matches!(
-            zone.target,
-            DropTarget::MainColumn { .. } | DropTarget::FreeArea
-        )),
-        "a Column drag must not expose group, tab, or inner-column targets"
-    );
-}
-
-#[test]
 fn a_group_cannot_drop_onto_itself_or_a_noop_neighbor_slot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -2371,7 +2291,7 @@ fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
     let mut layout = builder.build();
     assert!(layout.floating_group(source_float).is_some());
     let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
-    let source = DropSource::Column { column: source_column };
+    let source = DropSource::Composition { root: source_column };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
     let expected_target = DropTarget::GroupTabs {
         group: target_group,
@@ -2380,7 +2300,7 @@ fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
     let strip = rects.tab_strips.iter().find(|strip| strip.group == target_group).unwrap();
     let zone = zones.iter().find(|zone| {
         zone.zone == DropZone::TabInsertion && zone.target == expected_target
-    }).expect("a one-group Floating Column must expose the target tab strip");
+    }).expect("a one-group Floating composition must expose the target tab strip");
 
     assert_eq!(zone.rect, strip.rect);
     let point = Point::new(
@@ -2407,7 +2327,7 @@ fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
 }
 
 #[test]
-fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_composition() {
+fn photoshop_single_group_composition_uses_group_edges_in_floating_horizontal_composition() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -2466,13 +2386,20 @@ fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_compo
         .unwrap();
     let zones = layout
         .compute_drop_zones(
-            DropSource::Column {
-                column: source_column,
+            DropSource::Composition {
+                root: source_column,
             },
             &target_rects,
             &metrics,
         )
         .unwrap();
+    let group_zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_group }, &target_rects, &metrics)
+        .unwrap();
+    assert_eq!(
+        zones, group_zones,
+        "a single-group composition must generate exactly the same zones as its Group"
+    );
 
     let has_edge = |group, edge| {
         zones.iter().any(|zone| {
@@ -2481,8 +2408,8 @@ fn photoshop_floating_column_targets_only_outer_edges_of_a_floating_column_compo
     };
 
     assert!(has_edge(left_group, DropZone::Left));
-    assert!(!has_edge(left_group, DropZone::Right));
-    assert!(!has_edge(right_group, DropZone::Left));
+    assert!(has_edge(left_group, DropZone::Right));
+    assert!(has_edge(right_group, DropZone::Left));
     assert!(has_edge(right_group, DropZone::Right));
 }
 
@@ -2727,7 +2654,7 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
 
     let mut layout = builder.build();
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let source = DropSource::Column { column: source_column };
+    let source = DropSource::Composition { root: source_column };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
     let expected_target = DropTarget::GroupTabs {
         group: target_group,
@@ -2743,7 +2670,7 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
         .find(|zone| {
             zone.zone == DropZone::TabInsertion && zone.target == expected_target
         })
-        .expect("a one-group Floating Column must expose the Main tab strip");
+        .expect("a one-group Floating composition must expose the Main tab strip");
     assert_eq!(zone.rect, strip.rect);
 
     let point = Point::new(
@@ -2815,8 +2742,8 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
 
     let layout = builder.build();
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
-    let source = DropSource::Column {
-        column: source_column,
+    let source = DropSource::Composition {
+        root: source_column,
     };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
     let target_column_rect = rects
@@ -2842,7 +2769,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
                         zone: DropZone::Top,
                     }
         })
-        .expect("a Floating Column composition must expose the top of the Main stack");
+        .expect("a Floating composition must expose the top of the Main stack");
     assert_eq!(
         first_top.rect.origin.y + first_top.rect.size.height,
         first_rect.origin.y
@@ -2862,7 +2789,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Floating Column composition must expose the shared inter-group strip");
+        .expect("a Floating composition must expose the shared inter-group strip");
     let splitter = rects
         .splitters
         .iter()
@@ -2879,14 +2806,14 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
     assert_eq!(shared_bottom.rect.origin.x, target_column_rect.origin.x);
     assert_eq!(shared_bottom.rect.size.width, target_column_rect.size.width);
     assert!(shared_bottom.rect.contains(splitter_center).unwrap());
-    assert!(!zones.iter().any(|zone| {
+    assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Top
             && zone.target
                 == DropTarget::GroupEdge {
                     group: second_group,
                     zone: DropZone::Top,
                 }
-    }));
+    }), "the normalized Group source must use the same top edge as any other Group drag");
 
     let third_rect = rects
         .groups
@@ -2904,7 +2831,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Floating Column composition must expose the bottom of the Main stack");
+        .expect("a Floating composition must expose the bottom of the Main stack");
     assert_eq!(
         last_bottom.rect.origin.y + last_bottom.rect.size.height,
         third_rect.origin.y + third_rect.size.height
@@ -2991,8 +2918,8 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
     let rects = layout
         .compute_floating_rects(target_float, &metrics)
         .unwrap();
-    let source = DropSource::Column {
-        column: source_column,
+    let source = DropSource::Composition {
+        root: source_column,
     };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
     let target_column_rect = rects
@@ -3012,7 +2939,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                         zone: DropZone::Top,
                     }
         })
-        .expect("a Floating Column source must expose the top edge of another Floating window");
+        .expect("a Floating composition must expose the top edge of another Floating window");
     let shared_bottom = zones
         .iter()
         .find(|zone| {
@@ -3023,7 +2950,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Floating Column source must expose the boundary between Floating groups");
+        .expect("a Floating composition must expose the boundary between Floating groups");
     let splitter = rects
         .splitters
         .iter()
@@ -3040,14 +2967,14 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
     assert_eq!(shared_bottom.rect.origin.x, target_column_rect.origin.x);
     assert_eq!(shared_bottom.rect.size.width, target_column_rect.size.width);
     assert!(shared_bottom.rect.contains(splitter_center).unwrap());
-    assert!(!zones.iter().any(|zone| {
+    assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Top
             && zone.target
                 == DropTarget::GroupEdge {
                     group: second_group,
                     zone: DropZone::Top,
                 }
-    }));
+    }), "the single-group composition must expose the same per-Group top edge as a Group drag");
 
     let last_bottom = zones
         .iter()
@@ -3059,7 +2986,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Floating Column source must expose the bottom edge of another Floating window");
+        .expect("a Floating composition must expose the bottom edge of another Floating window");
 
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Left
@@ -3068,7 +2995,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                     group: first_group,
                     zone: DropZone::Left,
                 }
-    }), "a Main Column composition must expose the Floating left side");
+    }), "a Main composition must expose the Floating left side");
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Right
             && zone.target
@@ -3076,7 +3003,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                     group: third_group,
                     zone: DropZone::Right,
                 }
-    }), "a Main Column composition must expose the Floating right side");
+    }), "a Main composition must expose the Floating right side");
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)
@@ -3116,20 +3043,17 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
 
 
 #[test]
-fn main_column_composition_exposes_all_edge_targets_in_floating() {
+fn main_single_group_composition_uses_group_drop_zones_in_floating() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_panel) = builder.panel(key("main-floating-column-source"), constraints());
+    let (_, source_panel) = builder.panel(key("main-floating-group-source"), constraints());
     let source_group = builder.tabs(vec![source_panel], 0, false);
-    let (_, source_second_panel) =
-        builder.panel(key("main-floating-column-source-second"), constraints());
-    let source_second_group = builder.tabs(vec![source_second_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
-        vec![source_group, source_second_group],
-        vec![0.5, 0.5],
+        vec![source_group],
+        vec![1.0],
     );
     builder.main_area(DockSide::Left, source_column);
 
@@ -3153,10 +3077,17 @@ fn main_column_composition_exposes_all_edge_targets_in_floating() {
 
     let layout = builder.build();
     let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
-    let source = DropSource::Column {
-        column: source_column,
+    let source = DropSource::Composition {
+        root: source_column,
     };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let group_zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
+        .unwrap();
+    assert_eq!(
+        zones, group_zones,
+        "Main→Floating composition zones must match an ordinary Group drag"
+    );
     let target_column_rect = rects
         .columns
         .iter()
@@ -3174,7 +3105,7 @@ fn main_column_composition_exposes_all_edge_targets_in_floating() {
                         zone: DropZone::Top,
                     }
         })
-        .expect("a Main Column composition must expose the Floating top edge");
+        .expect("a single-group Main composition must expose the Floating top edge");
 
     let between_groups = zones
         .iter()
@@ -3186,7 +3117,7 @@ fn main_column_composition_exposes_all_edge_targets_in_floating() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Main Column composition must expose the boundary between Floating groups");
+        .expect("a single-group Main composition must expose the boundary between Floating groups");
 
     let splitter = rects
         .splitters
@@ -3204,14 +3135,14 @@ fn main_column_composition_exposes_all_edge_targets_in_floating() {
     assert_eq!(between_groups.rect.origin.x, target_column_rect.origin.x);
     assert_eq!(between_groups.rect.size.width, target_column_rect.size.width);
     assert!(between_groups.rect.contains(splitter_center).unwrap());
-    assert!(!zones.iter().any(|zone| {
+    assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Top
             && zone.target
                 == DropTarget::GroupEdge {
                     group: second_group,
                     zone: DropZone::Top,
                 }
-    }));
+    }), "the second Group must expose the same top edge as it would for a Group drag");
 
     let bottom = zones
         .iter()
@@ -3223,7 +3154,7 @@ fn main_column_composition_exposes_all_edge_targets_in_floating() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Main Column composition must expose the Floating bottom edge");
+        .expect("a single-group Main composition must expose the Floating bottom edge");
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)

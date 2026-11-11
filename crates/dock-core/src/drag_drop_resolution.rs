@@ -1021,270 +1021,6 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
 
 
 #[test]
-fn column_header_drag_moves_a_complete_column_between_main_docks() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, first_panel) = builder.panel(key("column-drag-first"), constraints());
-    let first_group = builder.tabs(vec![first_panel], 0, false);
-    let (_, second_panel) = builder.panel(key("column-drag-second"), constraints());
-    let second_group = builder.tabs(vec![second_panel], 0, true);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![first_group, second_group],
-        vec![0.4, 0.6],
-    );
-    builder.main_area(DockSide::Left, source_column);
-
-    let (_, target_panel) = builder.panel(key("column-drag-target"), constraints());
-    let target_group = builder.tabs(vec![target_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
-    );
-    builder.main_area(DockSide::Right, target_column);
-
-    let mut layout = builder.build();
-    let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
-            &metrics,
-        )
-        .unwrap();
-    let zones = layout
-        .compute_drop_zones(DropSource::Column { column: source_column }, &rects, &metrics)
-        .unwrap();
-
-    assert!(zones.iter().all(|zone| matches!(
-        zone.target,
-        DropTarget::MainColumn { .. } | DropTarget::FreeArea
-    )));
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::MainColumn {
-                side: DockSide::Right,
-                index: 0,
-            }
-    }));
-    assert!(zones.iter().any(|zone| zone.target == DropTarget::FreeArea));
-
-    let floating_bounds = bounds(520.0, 140.0);
-    let free_area_request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point: Point::new(600.0, 400.0),
-        target: Some(DropTarget::FreeArea),
-        floating_bounds: Some(floating_bounds),
-    };
-    assert_eq!(
-        layout.resolve_drag_drop(&free_area_request, &metrics).unwrap(),
-        DragDropAction::Command(DockCommand::Float {
-            node: source_column,
-            bounds: floating_bounds,
-        })
-    );
-
-    let request = DragDropRequest {
-        target: Some(DropTarget::MainColumn {
-            side: DockSide::Right,
-            index: 0,
-        }),
-        floating_bounds: None,
-        ..free_area_request
-    };
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target: DropTarget::MainColumn {
-                side: DockSide::Right,
-                index: 0,
-            },
-        })
-    );
-    let DragDropAction::Command(command) = action else {
-        panic!("dropping on a Main Dock column edge must move the whole Column");
-    };
-    let outcome = layout.apply(command, &metrics).unwrap();
-
-    assert!(layout.main_area(DockSide::Left).is_none());
-    assert_eq!(
-        layout.main_columns(DockSide::Right).unwrap(),
-        vec![source_column, target_column]
-    );
-    assert!(matches!(
-        layout.node(source_column),
-        Some(Node::Column(column))
-            if column.groups == vec![first_group, second_group]
-    ));
-    assert_eq!(
-        outcome.inverse,
-        Some(DockCommand::MoveColumnToMainColumn {
-            column: source_column,
-            side: DockSide::Left,
-            index: 0,
-        })
-    );
-
-    layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
-    assert_eq!(
-        layout.main_columns(DockSide::Left).unwrap(),
-        vec![source_column]
-    );
-    assert_eq!(
-        layout.main_columns(DockSide::Right).unwrap(),
-        vec![target_column]
-    );
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-#[test]
-fn column_header_can_reorder_within_a_main_dock_at_max_column_capacity() {
-    let metrics = DockMetrics {
-        max_columns: 2,
-        ..DockMetrics::default()
-    };
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, first_panel) = builder.panel(key("column-capacity-first"), constraints());
-    let first_group = builder.tabs(vec![first_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![first_group],
-        vec![1.0],
-    );
-
-    let (_, second_panel) = builder.panel(key("column-capacity-second"), constraints());
-    let second_group = builder.tabs(vec![second_panel], 0, false);
-    let second_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![second_group],
-        vec![1.0],
-    );
-
-    let root = builder.split(
-        Axis::X,
-        vec![source_column, second_column],
-        vec![0.5, 0.5],
-    );
-    builder.main_area(DockSide::Left, root);
-
-    let layout = builder.build();
-    let rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
-            &metrics,
-        )
-        .unwrap();
-    let zones = layout
-        .compute_drop_zones(DropSource::Column { column: source_column }, &rects, &metrics)
-        .unwrap();
-
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::MainColumn {
-                side: DockSide::Left,
-                index: 2,
-            }
-            && zone.zone == crate::DropZone::ColumnRight
-    }));
-}
-
-#[test]
-fn column_header_drag_reorders_columns_within_one_main_dock() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, source_panel) = builder.panel(key("column-reorder-source"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
-
-    let (_, target_panel) = builder.panel(key("column-reorder-target"), constraints());
-    let target_group = builder.tabs(vec![target_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
-    );
-    let root = builder.split(
-        Axis::X,
-        vec![source_column, target_column],
-        vec![0.35, 0.65],
-    );
-    builder.main_area(DockSide::Left, root);
-
-    let mut layout = builder.build();
-    let request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point: Point::new(20.0, 20.0),
-        target: Some(DropTarget::MainColumn {
-            side: DockSide::Left,
-            index: 2,
-        }),
-        floating_bounds: None,
-    };
-
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target: DropTarget::MainColumn {
-                side: DockSide::Left,
-                index: 2,
-            },
-        })
-    );
-    let DragDropAction::Command(command) = action else {
-        panic!("moving to the final insertion slot must reorder the Column");
-    };
-    let outcome = layout.apply(command, &metrics).unwrap();
-
-    assert_eq!(
-        layout.main_columns(DockSide::Left).unwrap(),
-        vec![target_column, source_column]
-    );
-    assert_eq!(
-        outcome.inverse,
-        Some(DockCommand::MoveColumnToMainColumn {
-            column: source_column,
-            side: DockSide::Left,
-            index: 0,
-        })
-    );
-
-    layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
-    assert_eq!(
-        layout.main_columns(DockSide::Left).unwrap(),
-        vec![source_column, target_column]
-    );
-    let Some(Node::Split(split)) = layout.node(root) else {
-        panic!("the original Split(X) root remains the main dock composition");
-    };
-    assert_eq!(split.ratios, vec![0.35, 0.65]);
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-#[test]
 fn photoshop_column_can_float_as_one_composition_and_dock_back() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -1350,7 +1086,7 @@ fn photoshop_column_can_float_as_one_composition_and_dock_back() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 #[test]
-fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
+fn dock_area_header_uses_group_drop_semantics_for_single_group_composition() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -1373,8 +1109,8 @@ fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
         .unwrap();
     let zones = layout
         .compute_drop_zones(
-            DropSource::Column {
-                column: source_column,
+            DropSource::Composition {
+                root: source_column,
             },
             &rects,
             &metrics,
@@ -1400,31 +1136,26 @@ fn dock_area_header_can_dock_its_single_column_to_the_opposite_main_edge() {
     };
     assert_eq!(
         layout.resolve_drag_drop(&request, &metrics).unwrap(),
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target,
+        DragDropAction::Command(DockCommand::MoveGroupToMainColumn {
+            group: source_group,
+            side: DockSide::Right,
+            index: 0,
         })
     );
 
-    layout
-        .apply(
-            DockCommand::MoveColumnToTarget {
-                column: source_column,
-                target,
-            },
-            &metrics,
-        )
-        .unwrap();
+    let DragDropAction::Command(command) =
+        layout.resolve_drag_drop(&request, &metrics).unwrap()
+    else {
+        panic!("the single-group composition should use normal Group docking");
+    };
+    layout.apply(command, &metrics).unwrap();
     assert!(layout.main_area(DockSide::Left).is_none());
-    assert_eq!(
-        layout.main_columns(DockSide::Right).unwrap(),
-        vec![source_column]
-    );
+    assert_eq!(layout.main_columns(DockSide::Right).unwrap().len(), 1);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 #[test]
-fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
+fn floating_composition_capture_uses_composition_drop_zones_and_docks_as_one_unit() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -1462,7 +1193,7 @@ fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
         .unwrap();
     let Some(crate::CommandValue::FloatingGroup(floating_group)) = float_outcome.actual_value
     else {
-        panic!("floating the Column must create a FloatingGroup");
+        panic!("floating the composition must create a FloatingGroup");
     };
 
     let rects = layout
@@ -1472,7 +1203,7 @@ fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
         )
         .unwrap();
     let zones = layout
-        .compute_drop_zones(DropSource::Column { column: source_column }, &rects, &metrics)
+        .compute_drop_zones(DropSource::Composition { root: source_column }, &rects, &metrics)
         .unwrap();
 
     assert!(zones.iter().all(|zone| matches!(
@@ -1518,311 +1249,6 @@ fn floating_column_capture_uses_column_drop_zones_and_docks_as_one_column() {
         Some(Node::Column(value))
             if value.groups == vec![first_group, second_group]
                 && value.group_ratios == vec![0.35, 0.65]
-    ));
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-#[test]
-fn photoshop_main_column_moves_directly_into_an_existing_floating_column() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, source_first_panel) =
-        builder.panel(key("main-column-to-floating-first"), constraints());
-    let source_first_group = builder.tabs(vec![source_first_panel], 0, false);
-    let (_, source_second_panel) =
-        builder.panel(key("main-column-to-floating-second"), constraints());
-    let source_second_group = builder.tabs(vec![source_second_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_first_group, source_second_group],
-        vec![0.35, 0.65],
-    );
-    builder.main_area(DockSide::Left, source_column);
-
-    let (_, target_first_panel) =
-        builder.panel(key("floating-column-target-first"), constraints());
-    let target_first_group = builder.tabs(vec![target_first_panel], 0, false);
-    let (_, target_second_panel) =
-        builder.panel(key("floating-column-target-second"), constraints());
-    let target_second_group = builder.tabs(vec![target_second_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_first_group, target_second_group],
-        vec![0.4, 0.6],
-    );
-    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
-    let mut layout = builder.build();
-
-    // Drop-zone resolution needs one snapshot containing both the Main
-    // source geometry and the Floating target geometry.
-    let mut target_rects = layout
-        .compute_rects(
-            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
-            &metrics,
-        )
-        .unwrap();
-    let floating_rects = layout
-        .compute_floating_rects(target_floating, &metrics)
-        .unwrap();
-    target_rects.columns.extend(floating_rects.columns);
-    target_rects.groups.extend(floating_rects.groups);
-    target_rects.tab_strips.extend(floating_rects.tab_strips);
-    target_rects.tab_headers.extend(floating_rects.tab_headers);
-    target_rects.tab_overflows.extend(floating_rects.tab_overflows);
-    target_rects.panels.extend(floating_rects.panels);
-    target_rects.splitters.extend(floating_rects.splitters);
-    target_rects
-        .floating_groups
-        .extend(floating_rects.floating_groups);
-    target_rects
-        .vertical_overflow
-        .extend(floating_rects.vertical_overflow);
-    let source = DropSource::Column {
-        column: source_column,
-    };
-    let zones = layout
-        .compute_drop_zones(source, &target_rects, &metrics)
-        .unwrap();
-    let left_zone = zones
-        .iter()
-        .find(|zone| {
-            zone.target
-                == DropTarget::GroupEdge {
-                    group: target_first_group,
-                    zone: crate::DropZone::Left,
-                }
-                && zone.zone == crate::DropZone::Left
-        })
-        .expect("a Floating Column must expose its left edge to a Main Column");
-    let point = Point::new(
-        left_zone.rect.origin.x + left_zone.rect.size.width / 2.0,
-        left_zone.rect.origin.y + left_zone.rect.size.height / 2.0,
-    );
-    let target = DropTarget::GroupEdge {
-        group: target_first_group,
-        zone: crate::DropZone::Left,
-    };
-
-    assert_eq!(
-        layout
-            .resolve_drop(point, source, &target_rects, &metrics)
-            .unwrap(),
-        Some(target)
-    );
-
-    let request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point,
-        target: Some(target),
-        floating_bounds: None,
-    };
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target,
-        })
-    );
-
-    let DragDropAction::Command(command) = action else {
-        panic!("the Main Column must move directly into the Floating composition");
-    };
-    layout.apply(command, &metrics).unwrap();
-
-    assert!(layout.main_area(DockSide::Left).is_none());
-    let target_area = layout.floating_group(target_floating).unwrap().area;
-    let target_root = layout.dock_area(target_area).unwrap().root;
-    let Some(Node::Split(split)) = layout.node(target_root) else {
-        panic!("joining a Main Column must create a horizontal Floating composition");
-    };
-    assert_eq!(split.axis, Axis::X);
-    assert_eq!(split.children, vec![source_column, target_column]);
-    assert!(matches!(
-        layout.node(source_column),
-        Some(Node::Column(column))
-            if column.groups == vec![source_first_group, source_second_group]
-                && column.group_ratios == vec![0.35, 0.65]
-    ));
-    assert!(matches!(
-        layout.node(target_column),
-        Some(Node::Column(column))
-            if column.groups == vec![target_first_group, target_second_group]
-                && column.group_ratios == vec![0.4, 0.6]
-    ));
-    assert_eq!(layout.panel_instances().count(), 4);
-    assert_eq!(layout.floating_groups().count(), 1);
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-
-#[test]
-fn floating_column_header_moves_directly_to_main_column() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, source_panel) = builder.panel(key("floating-column-to-main"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
-    let (_, sibling_panel) = builder.panel(key("floating-column-sibling"), constraints());
-    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
-    let sibling_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![sibling_group],
-        vec![1.0],
-    );
-    let source_root = builder.split(
-        Axis::X,
-        vec![source_column, sibling_column],
-        vec![0.4, 0.6],
-    );
-    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
-
-    let (_, target_panel) = builder.panel(key("floating-column-to-main-target"), constraints());
-    let target_group = builder.tabs(vec![target_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
-    );
-    builder.main_area(DockSide::Right, target_column);
-
-    let mut layout = builder.build();
-    let target = DropTarget::MainColumn {
-        side: DockSide::Right,
-        index: 0,
-    };
-    let request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point: Point::new(600.0, 300.0),
-        target: Some(target),
-        floating_bounds: None,
-    };
-
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target,
-        })
-    );
-    let DragDropAction::Command(command) = action else {
-        panic!("a Floating Column dropped on Main must produce one direct move command");
-    };
-    layout.apply(command, &metrics).unwrap();
-
-    let source_area = layout.floating_group(source_floating).unwrap().area;
-    assert_eq!(layout.dock_area(source_area).unwrap().root, sibling_column);
-    assert_eq!(
-        layout.main_columns(DockSide::Right).unwrap(),
-        vec![source_column, target_column]
-    );
-    assert!(matches!(
-        layout.node(source_column),
-        Some(Node::Column(column)) if column.groups == vec![source_group]
-    ));
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-#[test]
-fn floating_column_moves_directly_into_another_floating_composition() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, source_panel) = builder.panel(key("floating-to-floating-source"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
-    let (_, sibling_panel) = builder.panel(key("floating-column-sibling"), constraints());
-    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
-    let sibling_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![sibling_group],
-        vec![1.0],
-    );
-    let source_root = builder.split(
-        Axis::X,
-        vec![source_column, sibling_column],
-        vec![0.4, 0.6],
-    );
-    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
-
-    let (_, target_panel) = builder.panel(key("floating-to-floating-target"), constraints());
-    let target_group = builder.tabs(vec![target_panel], 0, false);
-    let target_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![target_group],
-        vec![1.0],
-    );
-    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 2);
-
-    let mut layout = builder.build();
-    let target = DropTarget::GroupEdge {
-        group: target_group,
-        zone: crate::DropZone::Right,
-    };
-    let request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point: Point::new(900.0, 300.0),
-        target: Some(target),
-        floating_bounds: None,
-    };
-
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target,
-        })
-    );
-    let DragDropAction::Command(command) = action else {
-        panic!("moving one Floating Column must not dock the entire source window");
-    };
-    layout.apply(command, &metrics).unwrap();
-
-    let source_area = layout.floating_group(source_floating).unwrap().area;
-    assert_eq!(layout.dock_area(source_area).unwrap().root, sibling_column);
-    let target_area = layout.floating_group(target_floating).unwrap().area;
-    let root = layout.dock_area(target_area).unwrap().root;
-    let Some(Node::Split(split)) = layout.node(root) else {
-        panic!("the destination Floating area must keep both Columns in one composition");
-    };
-    assert_eq!(split.axis, Axis::X);
-    assert_eq!(split.children, vec![target_column, source_column]);
-    assert_eq!(layout.floating_groups().count(), 2);
-    assert!(matches!(
-        layout.node(source_column),
-        Some(Node::Column(column)) if column.groups == vec![source_group]
     ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
@@ -2058,76 +1484,6 @@ fn direct_column_move_rejects_invalid_target_atomically_and_undo_restores_source
         layout.node(source_column),
         Some(Node::Column(column)) if column.groups == vec![source_group]
     ));
-    assert_eq!(layout.validate(&metrics), Ok(()));
-}
-
-
-#[test]
-fn floating_column_header_dropped_in_free_area_detaches_only_on_release() {
-    let metrics = DockMetrics::default();
-    let mut builder = LayoutBuilder::new(Profile::Photoshop);
-
-    let (_, source_panel) = builder.panel(key("floating-column-free-area"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
-    let source_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
-    let (_, sibling_panel) = builder.panel(key("floating-column-free-area-sibling"), constraints());
-    let sibling_group = builder.tabs(vec![sibling_panel], 0, false);
-    let sibling_column = builder.column(
-        metrics.default_column_width,
-        ColumnMode::Expanded,
-        vec![sibling_group],
-        vec![1.0],
-    );
-    let source_root = builder.split(
-        Axis::X,
-        vec![source_column, sibling_column],
-        vec![0.4, 0.6],
-    );
-    let source_floating = builder.floating_group(source_root, bounds(100.0, 140.0), 1);
-    let mut layout = builder.build();
-
-    let floating_bounds = bounds(900.0, 220.0);
-    let request = DragDropRequest {
-        payload: DragPayload::Column {
-            column: source_column,
-        },
-        handle: DragHandle::ColumnHeader,
-        origin: Point::ZERO,
-        point: Point::new(1000.0, 300.0),
-        target: Some(DropTarget::FreeArea),
-        floating_bounds: Some(floating_bounds),
-    };
-
-    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
-    assert_eq!(
-        action,
-        DragDropAction::Command(DockCommand::Float {
-            node: source_column,
-            bounds: floating_bounds,
-        })
-    );
-    let DragDropAction::Command(command) = action else {
-        panic!("a Column released in free space must create its Floating host on release");
-    };
-    let outcome = layout.apply(command, &metrics).unwrap();
-    let Some(crate::CommandValue::FloatingGroup(detached_floating)) = outcome.actual_value else {
-        panic!("floating a detached Column must return its new FloatingGroupId");
-    };
-
-    let original_area = layout.floating_group(source_floating).unwrap().area;
-    assert_eq!(layout.dock_area(original_area).unwrap().root, sibling_column);
-    let detached_area = layout.floating_group(detached_floating).unwrap().area;
-    assert_eq!(layout.dock_area(detached_area).unwrap().root, source_column);
-    assert_eq!(
-        layout.floating_group(detached_floating).unwrap().bounds,
-        floating_bounds
-    );
-    assert_eq!(layout.floating_groups().count(), 2);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 

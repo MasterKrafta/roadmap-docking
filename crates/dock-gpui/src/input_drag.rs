@@ -78,7 +78,6 @@ fn main_drag_uses_drop_targets(handle: Option<DragHandle>) -> bool {
             DragHandle::PanelTab
                 | DragHandle::FlyoutPanel
                 | DragHandle::GroupGrip
-                | DragHandle::ColumnHeader
                 | DragHandle::DockAreaHeader
                 | DragHandle::FloatingTitle
         )
@@ -385,80 +384,6 @@ pub(crate) fn begin_group_drag_host(
             controller.update(app, |controller, cx| {
                 if let Err(cancel_error) = controller.cancel_pointer_interaction() {
                     tracing::debug!(%cancel_error, "could not cancel failed Group DragHost start");
-                }
-                cx.notify();
-            });
-            false
-        }
-    }
-}
-
-/// Starts DragHost for a ColumnHeader gesture and transfers every active
-/// Group PanelView while preserving the complete Column composition.
-pub(crate) fn begin_column_drag_host(
-    controller: &Entity<DockController>,
-    drag_host_manager: &Entity<DragHostManager>,
-    app: &mut App,
-) -> bool {
-    let candidate = controller.update(app, |controller, _| {
-        let (column, origin) = match controller.drag().session().state() {
-            DragState::Dragging {
-                payload: DragPayload::Column { column },
-                origin,
-                ..
-            } if controller.drag().session().handle() == Some(DragHandle::ColumnHeader) => {
-                (column, origin)
-            }
-            _ => return None,
-        };
-        let host_session = controller.drag().host_session()?;
-        let source_host = host_session.source_host();
-        let source_window_id = host_session.source_window_id()?;
-        let column_rect = match source_host {
-            DragSourceHost::Main => controller
-                .geometry()
-                .ok()?
-                .columns
-                .iter()
-                .find(|rect| rect.column == column)
-                .copied()?,
-            DragSourceHost::Floating { group } => controller
-                .floating_geometry(source_window_id, group)
-                .ok()?
-                .columns
-                .iter()
-                .find(|rect| rect.column == column)
-                .copied()?,
-        };
-        let panels = controller.active_column_panel_ids(column)?;
-        let grab_offset = Point::new(
-            (origin.x - column_rect.rect.origin.x)
-                .clamp(0.0, column_rect.rect.size.width),
-            (origin.y - column_rect.rect.origin.y)
-                .clamp(0.0, column_rect.rect.size.height),
-        );
-        Some((column, panels, grab_offset, column_rect.rect.size))
-    });
-    let Some((column, panels, grab_offset, logical_size)) = candidate else {
-        tracing::debug!("ColumnHeader drag has no valid source geometry for DragHost");
-        controller.update(app, |controller, cx| {
-            if let Err(error) = controller.cancel_pointer_interaction() {
-                tracing::debug!(%error, "could not cancel Column drag without source geometry");
-            }
-            cx.notify();
-        });
-        return false;
-    };
-
-    match drag_host_manager.update(app, |manager, manager_cx| {
-        manager.open_column_at_cursor(column, panels, grab_offset, logical_size, manager_cx)
-    }) {
-        Ok(_) => true,
-        Err(error) => {
-            tracing::warn!(%error, "could not start Column DragHost");
-            controller.update(app, |controller, cx| {
-                if let Err(cancel_error) = controller.cancel_pointer_interaction() {
-                    tracing::debug!(%cancel_error, "could not cancel failed Column DragHost start");
                 }
                 cx.notify();
             });
@@ -1026,7 +951,6 @@ pub(crate) fn drop_source(payload: DragPayload) -> Option<DropSource> {
     match payload {
         DragPayload::Panel { panel } => Some(DropSource::Panel { panel }),
         DragPayload::Group { group } => Some(DropSource::Group { group }),
-        DragPayload::Column { column } => Some(DropSource::Column { column }),
         // DockArea and whole-floating-window captures are routed by
         // FloatingWindowManager, not by the Main-host resolver.
         DragPayload::DockArea { .. } | DragPayload::FloatingGroup { .. } => None
@@ -1151,7 +1075,6 @@ fn floating_bounds_for_request_in_host(
                 .preferred_size
         }
         DragPayload::Group { .. }
-        | DragPayload::Column { .. }
         | DragPayload::DockArea { .. } => source_rect.size,
         DragPayload::FloatingGroup { group } => {
             controller.layout().floating_group(group)?.bounds.size
@@ -1204,14 +1127,6 @@ fn source_rect_for_request(
             .iter()
             .find(|group_rect| group_rect.group == group)
             .map(|group_rect| group_rect.rect),
-        (DragHandle::ColumnHeader, DragPayload::Column { column }) => {
-            let source = rects
-                .columns
-                .iter()
-                .find(|column_rect| column_rect.column == column)?
-                .rect;
-            column_tab_floating_bounds(source, request.origin, column_header_height)
-        }
         (DragHandle::DockAreaHeader, DragPayload::DockArea { .. }) => {
             let ids = dock_area_column_ids?;
             let columns = ids
@@ -1270,29 +1185,6 @@ fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
     ))
 }
 
-/// Preserves the full Column rectangle for a ColumnHeader drag. The fallback
-/// crop keeps older content-row drag origins from carrying the shared header band.
-fn column_tab_floating_bounds(
-    source: Rect,
-    origin: Point,
-    header_height: f32,
-) -> Option<Rect> {
-    let hidden_height = header_height.max(0.0).min(source.size.height);
-    if origin.y < source.origin.y + hidden_height {
-        return Some(source);
-    }
-
-    let height = source.size.height - hidden_height;
-    if height <= 0.0 {
-        return None;
-    }
-
-    Some(Rect::new(
-        Point::new(source.origin.x, source.origin.y + hidden_height),
-        Size::new(source.size.width, height),
-    ))
-}
-
 /// Builds an adapter-side bounds proposal without applying viewport or
 /// panel-constraint normalization. Core owns those decisions.
 fn desired_floating_bounds(
@@ -1332,7 +1224,6 @@ mod main_drop_resolution_tests {
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::PanelTab)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::FlyoutPanel)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::GroupGrip)));
-        assert!(!main_drag_uses_drop_targets(Some(DragHandle::ColumnHeader)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::DockAreaHeader)));
         assert!(!main_drag_uses_drop_targets(Some(DragHandle::FloatingTitle)));
     }

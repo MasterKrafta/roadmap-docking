@@ -19,13 +19,14 @@ fn session() -> DragSession {
 }
 
 #[test]
-fn column_payload_defaults_to_column_header_handle() {
-    let column = NodeId::null();
-    let payload = DragPayload::Column { column };
+fn dock_area_payload_defaults_to_dock_area_header_handle() {
+    let payload = DragPayload::DockArea {
+        side: crate::DockSide::Left,
+    };
     let mut session = session();
 
     session.pointer_down(payload, Point::ZERO).unwrap();
-    assert_eq!(session.handle(), Some(DragHandle::ColumnHeader));
+    assert_eq!(session.handle(), Some(DragHandle::DockAreaHeader));
     assert!(matches!(
         session.state(),
         DragState::Pressed { payload: active, .. } if active == payload
@@ -39,9 +40,9 @@ fn column_payload_defaults_to_column_header_handle() {
     let request = session
         .pointer_up(Point::new(8.0, 0.0), Some(target))
         .unwrap()
-        .expect("ColumnHeader is a docking drag and emits a request on release");
+        .expect("DockAreaHeader is a composition drag and emits a request on release");
     assert_eq!(request.payload, payload);
-    assert_eq!(request.handle, DragHandle::ColumnHeader);
+    assert_eq!(request.handle, DragHandle::DockAreaHeader);
     assert_eq!(request.target, Some(target));
 }
 
