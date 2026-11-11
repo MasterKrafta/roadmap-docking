@@ -471,6 +471,43 @@ impl Render for DockHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(source_window_id)
         });
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(source_window_id)
+        });
+        let transferred_panel_set = transferred_panels.iter().copied().collect::<HashSet<_>>();
+        let groups_without_visible_tabs = group_presentations
+            .iter()
+            .filter_map(|(group, presentation)| {
+                (!presentation.tabs.is_empty()
+                    && presentation
+                        .tabs
+                        .iter()
+                        .all(|tab| transferred_panel_set.contains(&tab.panel)))
+                .then_some(*group)
+            })
+            .collect::<HashSet<_>>();
+        let main_tab_strips = rects
+            .as_ref()
+            .map(|rects| {
+                rects
+                    .tab_strips
+                    .iter()
+                    .filter(|strip| !groups_without_visible_tabs.contains(&strip.group))
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let main_tab_headers = rects
+            .as_ref()
+            .map(|rects| {
+                rects
+                    .tab_headers
+                    .iter()
+                    .filter(|header| !transferred_panel_set.contains(&header.panel))
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         if !pending_transfers.is_empty()
             && pending_transfers.iter().all(|panel| {
                 panel_views
@@ -846,8 +883,8 @@ impl Render for DockHost {
                 dragged_group,
                 dragged_column,
                 dragged_dock_area,
-                &rects.tab_strips,
-                &rects.tab_headers,
+                &main_tab_strips,
+                &main_tab_headers,
                 &rects.tab_overflows,
                 &group_presentations,
                 &rail_display_orders,
