@@ -92,6 +92,21 @@ impl PanelWindowHandle {
             }
         }
     }
+
+    /// Refreshes GPUI's internal viewport after the native HWND was resized directly.
+    fn refresh_gpui_bounds(
+        &self,
+        cx: &mut Context<FloatingWindowManager>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Floating(window) => window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string()),
+            Self::DragHost(window) => window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string()),
+        }
+    }
 }
 
 struct PanelWindowEntry {
@@ -2119,6 +2134,17 @@ impl FloatingWindowManager {
                 "could not synchronize floating native-window bounds"
             );
             return;
+        }
+
+        // The HWND has been resized through the native API rather than
+        // Window::resize. Refresh GPUI's cached viewport immediately so an
+        // adopted DragHost does not keep rendering at its pre-promotion height.
+        if let Err(error) = entry.window.refresh_gpui_bounds(cx) {
+            tracing::warn!(
+                ?group.id,
+                %error,
+                "could not refresh GPUI bounds after native floating-window resize"
+            );
         }
 
         // Moving to another monitor can synchronously update the HWND DPI.
