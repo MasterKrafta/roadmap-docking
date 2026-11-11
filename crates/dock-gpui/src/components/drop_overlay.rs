@@ -666,14 +666,14 @@ mod tests {
         let top_zone = Rect::new(Point::new(10.0, 40.0), Size::new(200.0, 20.0));
         let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
         assert_eq!(
-            super::main_group_edge_guide_rect(top_zone, DropZone::Top, Some(target_group)),
+            main_group_edge_guide_rect(top_zone, DropZone::Top, Some(target_group)),
             Rect::new(Point::new(10.0, 58.0), Size::new(200.0, 4.0))
         );
 
         let bottom_zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
         let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
         assert_eq!(
-            super::main_group_edge_guide_rect(
+            main_group_edge_guide_rect(
                 bottom_zone,
                 DropZone::Bottom,
                 Some(target_group),
@@ -684,7 +684,7 @@ mod tests {
         let internal_zone = Rect::new(Point::new(10.0, 196.0), Size::new(200.0, 24.0));
         let upper_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 140.0));
         assert_eq!(
-            super::main_group_edge_guide_rect(
+            main_group_edge_guide_rect(
                 internal_zone,
                 DropZone::Bottom,
                 Some(upper_group),
