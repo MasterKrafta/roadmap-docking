@@ -2286,7 +2286,6 @@ impl Render for DragHostSurface {
                         .w_full()
                         .h(px(metrics.column_header_height))
                         .flex_none()
-                        .bg(rgb(self.theme.colors.dock_background)),
                 );
             }
             root = root.child(tab_surface.child(DockGroupView::render_active(
