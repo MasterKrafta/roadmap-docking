@@ -1,5 +1,5 @@
 use dock_core::{PanelRect, Point};
-use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px};
+use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 use crate::dock_components::PanelContent;
