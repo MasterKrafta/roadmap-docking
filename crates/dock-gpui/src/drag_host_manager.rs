@@ -23,8 +23,8 @@ use dock_core::{
 use crate::{
     components::{context_menu::GroupMenuToggle, FloatingHost, MainDockView, PanelHost},
     dock_components::{
-        collect_group_presentations, DockCompositionView, DockGroupView,
-        GroupPresentation,
+        collect_group_presentations, CollapseColumnButton, DockCompositionView,
+        DockGroupView, GroupPresentation,
     },
     floating_manager::DockingWindowAtPoint,
     geometry::DockGeometry,
@@ -2301,6 +2301,23 @@ impl Render for DragHostSurface {
                     metrics,
                     self.theme,
                 ));
+                let control_width = metrics.column_control_button_width;
+                root = root.child(
+                    div()
+                        .absolute()
+                        .left(px(
+                            (self.composition_header_width - 2.0 * control_width).max(0.0),
+                        ))
+                        .top_0()
+                        .w(px(control_width))
+                        .h(px(metrics.column_header_height))
+                        .child(CollapseColumnButton::render_with_metrics(
+                            format!("drag-tab-collapse-column-{panel:?}"),
+                            self.theme,
+                            control_width,
+                            metrics.control_icon_size,
+                        )),
+                );
                 tab_surface = tab_surface.child(
                     div()
                         .w_full()
