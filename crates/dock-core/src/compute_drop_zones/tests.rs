@@ -3061,6 +3061,23 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         })
         .expect("a Floating Column source must expose the bottom edge of another Floating window");
 
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::Left
+            && zone.target
+                == DropTarget::GroupEdge {
+                    group: first_group,
+                    zone: DropZone::Left,
+                }
+    }), "a Main Column composition must expose the Floating left side");
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::Right
+            && zone.target
+                == DropTarget::GroupEdge {
+                    group: third_group,
+                    zone: DropZone::Right,
+                }
+    }), "a Main Column composition must expose the Floating right side");
+
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)
         .unwrap();
@@ -3099,17 +3116,20 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
 
 
 #[test]
-fn main_single_group_column_exposes_vertical_targets_in_floating() {
+fn main_column_composition_exposes_all_edge_targets_in_floating() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
     let (_, source_panel) = builder.panel(key("main-floating-column-source"), constraints());
     let source_group = builder.tabs(vec![source_panel], 0, false);
+    let (_, source_second_panel) =
+        builder.panel(key("main-floating-column-source-second"), constraints());
+    let source_second_group = builder.tabs(vec![source_second_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
+        vec![source_group, source_second_group],
+        vec![0.5, 0.5],
     );
     builder.main_area(DockSide::Left, source_column);
 
@@ -3154,7 +3174,7 @@ fn main_single_group_column_exposes_vertical_targets_in_floating() {
                         zone: DropZone::Top,
                     }
         })
-        .expect("a Main single-group Column must expose the Floating top edge");
+        .expect("a Main Column composition must expose the Floating top edge");
 
     let between_groups = zones
         .iter()
@@ -3166,7 +3186,7 @@ fn main_single_group_column_exposes_vertical_targets_in_floating() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Main single-group Column must expose the boundary between Floating groups");
+        .expect("a Main Column composition must expose the boundary between Floating groups");
 
     let splitter = rects
         .splitters
@@ -3203,7 +3223,7 @@ fn main_single_group_column_exposes_vertical_targets_in_floating() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("a Main single-group Column must expose the Floating bottom edge");
+        .expect("a Main Column composition must expose the Floating bottom edge");
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)

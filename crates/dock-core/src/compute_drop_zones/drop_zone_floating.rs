@@ -212,15 +212,12 @@ impl FloatingZoneContext<'_> {
             && matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
     }
 
-    fn source_is_main_single_group_column(&self) -> bool {
+    fn source_is_main_column_composition(&self) -> bool {
         let DropSource::Column { column } = self.source else {
             return false;
         };
         if column != self.source_root
-            || !matches!(
-                self.layout.node(column),
-                Some(Node::Column(source)) if source.groups.len() == 1
-            )
+            || !matches!(self.layout.node(column), Some(Node::Column(_)))
         {
             return false;
         }
@@ -244,7 +241,7 @@ impl FloatingZoneContext<'_> {
     ) -> Result<(), ComputeRectsError> {
         if self.layout.profile() != Profile::Photoshop
             || !(self.source_is_floating_column_composition()
-                || self.source_is_main_single_group_column())
+                || self.source_is_main_column_composition())
         {
             return Ok(());
         }
@@ -563,7 +560,7 @@ impl FloatingZoneContext<'_> {
                 (self.layout.profile() == Profile::Generic
                     && source_is_floating_root(self.layout, self.source_root))
                     || self.source_is_floating_column_composition()
-                    || self.source_is_main_single_group_column()
+                    || self.source_is_main_column_composition()
             }
         };
         if !source_can_split_vertically {
