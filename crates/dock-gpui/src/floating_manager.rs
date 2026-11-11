@@ -1510,7 +1510,7 @@ impl FloatingWindowManager {
                 }
             }
 
-            self.sync_window_bounds(&mut entry, group);
+            self.sync_window_bounds(&mut entry, group, cx);
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
                     self.restore_native_window_to_monitor(&mut entry, areas)
@@ -2069,6 +2069,7 @@ impl FloatingWindowManager {
         &self,
         entry: &mut PanelWindowEntry,
         group: &FloatingGroupSnapshot,
+        cx: &mut Context<Self>,
     ) {
         let Some(native_window) = entry.native_window else {
             entry.native_scale_factor = None;
