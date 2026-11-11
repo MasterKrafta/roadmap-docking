@@ -2582,18 +2582,13 @@ fn floating_panel_and_group_use_the_same_main_dock_drop_zones() {
             })
             .expect("a Floating source must expose the full Main tab-strip target");
         assert_eq!(tab_zone.rect, target_strip.rect);
+        let before_target = match tab_target {
+            DropTarget::Tabs { group, .. } => DropTarget::Tabs { group, index: 0 },
+            DropTarget::GroupTabs { group, .. } => DropTarget::GroupTabs { group, index: 0 },
+            _ => unreachable!("the test only uses Main tab-strip targets"),
+        };
         assert!(!zones.iter().any(|zone| {
-            zone.zone == DropZone::TabInsertion
-                && match tab_target {
-                    DropTarget::Tabs { group, index }
-                    | DropTarget::GroupTabs { group, index } => {
-                        zone.target == (match tab_target {
-                            DropTarget::Tabs { .. } => DropTarget::Tabs { group, index: 0 },
-                            _ => DropTarget::GroupTabs { group, index: 0 },
-                        })
-                    }
-                    _ => false,
-                }
+            zone.zone == DropZone::TabInsertion && zone.target == before_target
         }));
 
         let top_zone = zones
