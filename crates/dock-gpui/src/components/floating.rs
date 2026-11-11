@@ -2074,7 +2074,7 @@ impl Render for FloatingHost {
                 .left_0()
                 .size_full()
                 .border_2()
-                .border_color(rgb(0xFFFF00)),
+                .border_color(rgb(0xFF3030)),
         );
 
         root
