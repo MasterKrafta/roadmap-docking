@@ -478,7 +478,7 @@ impl Render for DockHost {
         let groups_without_visible_tabs = group_presentations
             .iter()
             .filter_map(|(group, presentation)| {
-                (!presentation.tabs.is_empty()
+                (presentation.tab_count() > 0
                     && presentation
                         .tabs
                         .iter()

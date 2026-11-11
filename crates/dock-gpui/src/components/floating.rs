@@ -377,7 +377,7 @@ fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap
         let Some(presentation) = snapshot.group_presentations.get(&group.group) else {
             continue;
         };
-        if presentation.tabs.len() == 1
+        if presentation.is_single_tab()
             && presentation.active_panel == presentation.tabs.first().map(|tab| tab.panel)
             && let Some(tab) = presentation.tabs.first()
         {

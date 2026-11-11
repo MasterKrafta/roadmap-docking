@@ -2,6 +2,8 @@
 mod header;
 #[path = "group.rs"]
 mod group;
+#[path = "tab.rs"]
+mod tab;
 
 use std::collections::{HashMap, HashSet};
 
@@ -25,7 +27,8 @@ use crate::{
     dock_components::GroupPresentation,
 };
 
-pub use group::{DockTab, GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
+pub use group::{GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
+pub use tab::DockTab;
 pub use header::{
     CloseCompositionButton, CollapseColumnButton, CompositionDragArea, CompositionHeader,
 };

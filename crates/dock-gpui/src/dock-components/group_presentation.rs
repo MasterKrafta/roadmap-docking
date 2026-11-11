@@ -123,3 +123,15 @@ mod tests {
         assert!(groups.is_empty());
     }
 }
+
+impl GroupPresentation {
+    /// Number of tabs currently belonging to this Group.
+    pub(crate) fn tab_count(&self) -> usize {
+        self.tabs.len()
+    }
+
+    /// Whether this Group contains exactly one tab.
+    pub(crate) fn is_single_tab(&self) -> bool {
+        self.tab_count() == 1
+    }
+}
