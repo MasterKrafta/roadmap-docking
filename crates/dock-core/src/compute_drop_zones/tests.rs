@@ -212,7 +212,7 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
 }
 
 #[test]
-fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
+fn adjacent_main_groups_share_one_full_width_vertical_drop_strip() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -230,7 +230,7 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
     );
     builder.main_area(DockSide::Left, target_column);
 
-    let (_, source_node) = builder.panel(key("boundary-source"), constraints());
+    let (source_panel, source_node) = builder.panel(key("boundary-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
     let source_column =
         builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
@@ -238,12 +238,16 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
 
     let layout = builder.build();
     let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let target_column_rect = rects
+        .columns
+        .iter()
+        .find(|column| column.column == target_column)
+        .expect("the target Column should have computed bounds")
+        .rect;
+
+    let group_source = DropSource::Group { group: source_group };
     let zones = layout
-        .compute_drop_zones(
-            DropSource::Group { group: source_group },
-            &rects,
-            &metrics,
-        )
+        .compute_drop_zones(group_source, &rects, &metrics)
         .unwrap();
 
     let first_bottom = zones
@@ -256,30 +260,17 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
                         zone: DropZone::Bottom,
                     }
         })
-        .expect("the first group should expose its bottom edge");
-    let second_top = zones
-        .iter()
-        .find(|zone| {
+        .expect("the first group should own the shared boundary below it");
+    assert!(
+        !zones.iter().any(|zone| {
             zone.zone == DropZone::Top
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: second_group,
                         zone: DropZone::Top,
                     }
-        })
-        .expect("the second group should expose its top edge");
-
-    let first_right = first_bottom.rect.checked_right().unwrap();
-    let second_right = second_top.rect.checked_right().unwrap();
-    let horizontal_overlap = first_right.min(second_right)
-        - first_bottom.rect.origin.x.max(second_top.rect.origin.x);
-    let first_bottom_y = first_bottom.rect.checked_bottom().unwrap();
-    let second_bottom_y = second_top.rect.checked_bottom().unwrap();
-    let vertical_overlap = first_bottom_y.min(second_bottom_y)
-        - first_bottom.rect.origin.y.max(second_top.rect.origin.y);
-    assert!(
-        horizontal_overlap <= 0.0 || vertical_overlap <= 0.0,
-        "neighboring GroupEdge zones must not overlap: {first_bottom:?} vs {second_top:?}"
+        }),
+        "the lower group must not create a second overlapping target for the same boundary"
     );
 
     let splitter = rects
@@ -295,18 +286,79 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
         splitter.rect.origin.x + splitter.rect.size.width * 0.5,
         splitter.rect.origin.y + splitter.rect.size.height * 0.5,
     );
-    let resolver = layout
-        .prepare_drop_resolver(
-            DropSource::Group { group: source_group },
-            &rects,
-            &metrics,
-        )
-        .unwrap();
+    assert_eq!(first_bottom.rect.size.width, target_column_rect.size.width);
     assert_eq!(
-        resolver.resolve_zone(boundary_point).unwrap(),
-        None,
-        "the shared splitter hit area must not choose between the two neighboring Group targets"
+        first_bottom.rect.origin.x,
+        target_column_rect.origin.x
     );
+    assert!(
+        first_bottom.rect.contains(boundary_point).unwrap(),
+        "the shared drop strip must cover the splitter hit area"
+    );
+
+    let group_resolver = layout
+        .prepare_drop_resolver(group_source, &rects, &metrics)
+        .unwrap();
+    let group_resolved = group_resolver
+        .resolve_zone(boundary_point)
+        .unwrap()
+        .expect("a Group drag must resolve on the shared inter-group strip");
+    assert_eq!(group_resolved.target, first_bottom.target);
+    assert_eq!(group_resolved.zone, DropZone::Bottom);
+    assert_eq!(group_resolved.rect, first_bottom.rect);
+
+    let panel_source = DropSource::Panel { panel: source_panel };
+    let panel_zones = layout
+        .compute_drop_zones(panel_source, &rects, &metrics)
+        .unwrap();
+    let panel_boundary = panel_zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("a detached Panel must use the same shared inter-group strip");
+    assert_eq!(panel_boundary.rect, first_bottom.rect);
+
+    let panel_resolver = layout
+        .prepare_drop_resolver(panel_source, &rects, &metrics)
+        .unwrap();
+    let panel_resolved = panel_resolver
+        .resolve_zone(boundary_point)
+        .unwrap()
+        .expect("a Panel drag must resolve on the shared inter-group strip");
+    assert_eq!(panel_resolved.target, panel_boundary.target);
+    assert_eq!(panel_resolved.zone, DropZone::Bottom);
+    assert_eq!(panel_resolved.rect, panel_boundary.rect);
+
+    let first_top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("the top of the first group remains a separate outer drop strip");
+    let last_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("the bottom of the last group remains a separate outer drop strip");
+    assert_eq!(first_top.rect.size.width, target_column_rect.size.width);
+    assert_eq!(last_bottom.rect.size.width, target_column_rect.size.width);
 }
 
 #[test]

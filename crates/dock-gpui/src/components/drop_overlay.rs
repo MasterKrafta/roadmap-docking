@@ -80,7 +80,8 @@ impl DropOverlay {
                     if let Some(group) = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                     {
-                        layer = layer.child(highlight_rect(group.rect, theme, 0.06, true));
+                        // A tab-strip drop highlights the complete destination group.
+                        layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
                     }
                     if let Some(line) =
                         tab_insertion_rect(target, zone.rect, tab_headers, tab_strips)
@@ -89,12 +90,13 @@ impl DropOverlay {
                     }
                 }
                 DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom => {
-                    if let Some(group) = target_group(target)
-                        .and_then(|id| groups.iter().find(|group| group.group == id))
-                    {
-                        let half = group_edge_half(group.rect, zone.zone);
-                        layer = layer.child(highlight_rect(half, theme, 0.25, true));
-                    }
+                    // Highlight the actual hit strip and place a guide at its center;
+                    // do not shade half of the target group for an edge drop.
+                    layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
+                    layer = layer.child(guide_rect(
+                        group_edge_guide_rect(zone.rect, zone.zone),
+                        theme,
+                    ));
                 }
                 DropZone::ColumnLeft | DropZone::ColumnRight => {
                     // Core resolves Photoshop side docking at Column scope; paint
@@ -377,24 +379,25 @@ fn floating_for_target(
         .copied()
 }
 
-fn group_edge_half(rect: Rect, zone: DropZone) -> Rect {
+fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
+    const GUIDE_THICKNESS: f32 = 4.0;
+    let guide_half = GUIDE_THICKNESS * 0.5;
+
     match zone {
-        DropZone::Left => Rect::new(
-            rect.origin,
-            dock_core::Size::new(rect.size.width * 0.5, rect.size.height),
-        ),
-        DropZone::Right => Rect::new(
-            Point::new(rect.origin.x + rect.size.width * 0.5, rect.origin.y),
-            dock_core::Size::new(rect.size.width * 0.5, rect.size.height),
-        ),
-        DropZone::Top => Rect::new(
-            rect.origin,
-            dock_core::Size::new(rect.size.width, rect.size.height * 0.5),
-        ),
-        DropZone::Bottom => Rect::new(
-            Point::new(rect.origin.x, rect.origin.y + rect.size.height * 0.5),
-            dock_core::Size::new(rect.size.width, rect.size.height * 0.5),
-        ),
+        DropZone::Left | DropZone::Right => {
+            let x = rect.origin.x + rect.size.width * 0.5 - guide_half;
+            Rect::new(
+                Point::new(x, rect.origin.y),
+                dock_core::Size::new(GUIDE_THICKNESS, rect.size.height),
+            )
+        }
+        DropZone::Top | DropZone::Bottom => {
+            let y = rect.origin.y + rect.size.height * 0.5 - guide_half;
+            Rect::new(
+                Point::new(rect.origin.x, y),
+                dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+            )
+        }
         _ => rect,
     }
 }
@@ -537,7 +540,7 @@ mod tests {
     use slotmap::Key;
 
     use super::{
-        composition_edge_highlight_rect, group_edge_half, main_dock_edge_guide_rect,
+        composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
         same_group_panel_tab_insertion_rect, zone_matches_preview,
     };
 
@@ -586,16 +589,22 @@ mod tests {
     }
 
     #[test]
-    fn group_edge_preview_covers_half_of_the_target_group() {
-        let rect = Rect::new(Point::new(10.0, 20.0), Size::new(200.0, 100.0));
+    fn group_edge_guides_follow_the_center_of_the_resolved_drop_strip() {
+        let rect = Rect::new(Point::new(10.0, 20.0), Size::new(200.0, 24.0));
 
         assert_eq!(
-            group_edge_half(rect, DropZone::Left),
-            Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 100.0))
+            group_edge_guide_rect(rect, DropZone::Top),
+            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
         );
         assert_eq!(
-            group_edge_half(rect, DropZone::Bottom),
-            Rect::new(Point::new(10.0, 70.0), Size::new(200.0, 50.0))
+            group_edge_guide_rect(rect, DropZone::Bottom),
+            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
+        );
+
+        let side_rect = Rect::new(Point::new(10.0, 20.0), Size::new(24.0, 100.0));
+        assert_eq!(
+            group_edge_guide_rect(side_rect, DropZone::Left),
+            Rect::new(Point::new(20.0, 20.0), Size::new(4.0, 100.0))
         );
     }
 

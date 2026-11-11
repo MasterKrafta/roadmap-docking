@@ -232,6 +232,26 @@ impl Layout {
                 (DropZone::Top, DropZone::Top),
                 (DropZone::Bottom, DropZone::Bottom),
             ] {
+                let zone_rect = if area == AllowedArea::MAIN_DOCK {
+                    main_group_vertical_edge_rect(
+                        self,
+                        rects,
+                        tree_index,
+                        group_rect.group,
+                        group_rect.rect,
+                        edge,
+                        metrics,
+                    )?
+                } else {
+                    Some(group_edge_rect(
+                        group_rect.rect,
+                        edge,
+                        metrics.edge_drop_width,
+                    )?)
+                };
+                let Some(zone_rect) = zone_rect else {
+                    continue;
+                };
                 if group_edge_is_noop(self, tree_index, source, group_rect.group, edge) {
                     continue;
                 }
@@ -239,12 +259,7 @@ impl Layout {
                     group: group_rect.group,
                     zone: edge,
                 };
-                push_zone(
-                    zones,
-                    target,
-                    kind,
-                    group_edge_rect(group_rect.rect, edge, metrics.edge_drop_width)?,
-                )?;
+                push_zone(zones, target, kind, zone_rect)?;
             }
 
             // Photoshop exposes horizontal insertion at the Column boundary,
@@ -533,6 +548,61 @@ fn main_column_boundary_drop_rect(
     );
     result.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(Some(result))
+}
+
+/// Returns the vertical edge band for a Main group.
+///
+/// On Photoshop layouts, the boundary between two stacked groups is one
+/// shared drop strip aligned to the Column's Y splitter. It is represented
+/// only as the Bottom edge of the group above the splitter; the lower
+/// group's matching Top zone is omitted to avoid overlapping targets.
+fn main_group_vertical_edge_rect(
+    layout: &Layout,
+    rects: &LayoutRects,
+    tree_index: &DropZoneTreeIndex,
+    group: NodeId,
+    group_rect: Rect,
+    edge: DropZone,
+    metrics: &DockMetrics,
+) -> Result<Option<Rect>, ComputeRectsError> {
+    if layout.profile() != Profile::Photoshop {
+        return Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?));
+    }
+
+    let Some(column_id) = owner_column(layout, tree_index, group) else {
+        return Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?));
+    };
+    let Some(Node::Column(column)) = layout.node(column_id) else {
+        return Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?));
+    };
+    let Some(group_index) = column.groups.iter().position(|candidate| *candidate == group) else {
+        return Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?));
+    };
+
+    match edge {
+        DropZone::Top if group_index > 0 => Ok(None),
+        DropZone::Bottom if group_index + 1 < column.groups.len() => {
+            let Some(splitter) = rects.splitters.iter().find(|splitter| {
+                splitter.owner == column_id
+                    && splitter.axis == crate::Axis::Y
+                    && splitter.boundary_index == group_index
+            }) else {
+                return Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?));
+            };
+            let height = metrics.edge_drop_width.max(splitter.rect.size.height);
+            let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
+            let boundary = Rect::new(
+                Point::new(group_rect.origin.x, center_y - height * 0.5),
+                Size::new(group_rect.size.width, height),
+            );
+            boundary.validate().map_err(ComputeRectsError::Geometry)?;
+            Ok(Some(boundary))
+        }
+        DropZone::Top | DropZone::Bottom => {
+            Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?))
+        }
+        _ => Err(ComputeRectsError::InvalidLayoutState),
+    }
 }
 
 /// Uses the splitter-aligned horizontal band while preserving a group's own
