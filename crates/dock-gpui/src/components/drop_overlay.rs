@@ -97,10 +97,15 @@ impl DropOverlay {
                 DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom => {
                     // Highlight the actual hit strip and place a guide at its center;
                     // do not shade half of the target group for an edge drop.
-                    layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
                     let target_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
+                    let highlight = if main_dock_bounds.is_some() {
+                        main_group_edge_highlight_rect(zone.rect, zone.zone)
+                    } else {
+                        zone.rect
+                    };
+                    layer = layer.child(highlight_rect(highlight, theme, 0.10, false));
                     let guide = if main_dock_bounds.is_some() {
                         main_group_edge_guide_rect(zone.rect, zone.zone, target_bounds)
                     } else {
@@ -412,6 +417,18 @@ fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     }
 }
 
+fn main_group_edge_highlight_rect(rect: Rect, zone: DropZone) -> Rect {
+    match zone {
+        // Keep the hit zone in the header, but paint its broad translucent
+        // highlight downward into the first Group instead of upward into chrome.
+        DropZone::Top => Rect::new(
+            Point::new(rect.origin.x, rect.origin.y + rect.size.height),
+            rect.size,
+        ),
+        _ => rect,
+    }
+}
+
 fn main_group_edge_guide_rect(
     rect: Rect,
     zone: DropZone,
@@ -658,6 +675,21 @@ mod tests {
         assert_eq!(
             group_edge_guide_rect(side_rect, DropZone::Left),
             Rect::new(Point::new(20.0, 20.0), Size::new(4.0, 100.0))
+        );
+    }
+
+    #[test]
+    fn main_top_edge_wide_highlight_extends_down_into_the_group() {
+        let top_zone = Rect::new(Point::new(10.0, 40.0), Size::new(200.0, 20.0));
+        assert_eq!(
+            super::main_group_edge_highlight_rect(top_zone, DropZone::Top),
+            Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 20.0))
+        );
+
+        let bottom_zone = Rect::new(Point::new(10.0, 340.0), Size::new(200.0, 20.0));
+        assert_eq!(
+            super::main_group_edge_highlight_rect(bottom_zone, DropZone::Bottom),
+            bottom_zone
         );
     }
 
