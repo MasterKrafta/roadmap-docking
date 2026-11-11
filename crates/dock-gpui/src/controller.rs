@@ -671,6 +671,24 @@ impl DockController {
             .flatten()
     }
 
+    /// Returns every PanelView currently transferred from this persistent source host.
+    ///
+    /// Unlike pending_panel_view_transfers_from, this includes views whose source
+    /// placeholder has already rendered. The source tab must remain hidden until
+    /// the drag session finishes, not only until the transfer handshake completes.
+    pub(crate) fn transferred_panel_views_from(
+        &self,
+        source_window_id: WindowId,
+    ) -> Vec<PanelId> {
+        let Some(session) = self.drag.host_session() else {
+            return Vec::new();
+        };
+        if session.source_window_id() != Some(source_window_id) {
+            return Vec::new();
+        }
+        session.transferred_panels().to_vec()
+    }
+
     pub(crate) fn pending_panel_view_transfers_from(
         &self,
         source_window_id: WindowId,
