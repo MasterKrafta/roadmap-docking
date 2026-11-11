@@ -1826,36 +1826,6 @@ impl Render for FloatingHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(window_id)
         });
-        let transferred_panels = self.controller.update(cx, |controller, _| {
-            controller.transferred_panel_views_from(window_id)
-        });
-        let transferred_panel_set = transferred_panels.iter().copied().collect::<HashSet<_>>();
-        let groups_without_visible_tabs = snapshot
-            .group_presentations
-            .iter()
-            .filter_map(|(group, presentation)| {
-                (!presentation.tabs.is_empty()
-                    && presentation
-                        .tabs
-                        .iter()
-                        .all(|tab| transferred_panel_set.contains(&tab.panel)))
-                .then_some(*group)
-            })
-            .collect::<HashSet<_>>();
-        let floating_tab_strips = snapshot
-            .rects
-            .tab_strips
-            .iter()
-            .filter(|strip| !groups_without_visible_tabs.contains(&strip.group))
-            .copied()
-            .collect::<Vec<_>>();
-        let floating_tab_headers = snapshot
-            .rects
-            .tab_headers
-            .iter()
-            .filter(|header| !transferred_panel_set.contains(&header.panel))
-            .copied()
-            .collect::<Vec<_>>();
         if !pending_transfers.is_empty()
             && pending_transfers.iter().all(|panel| {
                 panel_views
@@ -1969,8 +1939,8 @@ impl Render for FloatingHost {
             panel_views,
             dragged_group,
             dragged_column,
-            &floating_tab_strips,
-            &floating_tab_headers,
+            &snapshot.rects.tab_strips,
+            &snapshot.rects.tab_headers,
             &snapshot.rects.tab_overflows,
             &snapshot.group_presentations,
             &snapshot.column_groups,
