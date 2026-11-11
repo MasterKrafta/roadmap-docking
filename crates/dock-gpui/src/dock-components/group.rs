@@ -133,7 +133,7 @@ impl DockGroupView {
             .w(px(group.rect.size.width))
             .h(px(group.rect.size.height))
             .border_1()
-            .border_color(rgb(theme.colors.group_frame_border));
+            .border_color(rgb(0xFF00FF)); // TEMP: Group bounds diagnostic
 
         if !compact_header && header_height > 0.0 {
             let grip_width =
@@ -164,6 +164,8 @@ impl DockGroupView {
             .flex()
             .items_stretch()
             .bg(rgb(theme.colors.tab_strip_background))
+            .border_1()
+            .border_color(rgb(0xFFB000)) // TEMP: TabStrip bounds diagnostic
             .child(GroupDragArea::render(
                 format!("group-drag-area-{:?}", group.group),
                 theme,

@@ -27,12 +27,14 @@ impl PanelHost {
             let panel = panel_rect.panel;
             let rect = panel_rect.rect;
 
+            let left = rect.origin.x - coordinate_origin.x;
+            let top = rect.origin.y - coordinate_origin.y;
             layer = layer.child(
                 div()
                     .id(format!("panel-host-{:?}", panel))
                     .absolute()
-                    .left(px(rect.origin.x - coordinate_origin.x))
-                    .top(px(rect.origin.y - coordinate_origin.y))
+                    .left(px(left))
+                    .top(px(top))
                     .w(px(rect.size.width))
                     .h(px(rect.size.height))
                     .overflow_hidden()
@@ -41,6 +43,20 @@ impl PanelHost {
                         theme,
                         view,
                     )),
+            );
+
+            // TEMP: Draw the PanelRect bounds separately so this outline does
+            // not reduce the clipped area or change the panel's layout.
+            layer = layer.child(
+                div()
+                    .id(format!("panel-host-debug-outline-{:?}", panel))
+                    .absolute()
+                    .left(px(left))
+                    .top(px(top))
+                    .w(px(rect.size.width))
+                    .h(px(rect.size.height))
+                    .border_2()
+                    .border_color(rgb(0x00FF66)),
             );
         }
 
