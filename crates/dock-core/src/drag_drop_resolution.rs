@@ -2138,7 +2138,7 @@ fn main_single_group_dock_area_can_split_into_a_floating_group() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
     let (_, source_panel) = builder.panel(key("main-dock-area-floating-source"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, true);
+    let source_group = builder.tabs(vec![source_panel], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
