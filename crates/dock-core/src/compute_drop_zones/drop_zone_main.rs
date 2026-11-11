@@ -435,11 +435,39 @@ impl Layout {
             return Ok(());
         }
 
+        if self.profile() == Profile::Photoshop {
+            for strip in &rects.tab_strips {
+                if target_area(self, tree_index, strip.group) != Some(AllowedArea::MAIN_DOCK)
+                    || !source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
+                    || contains_node(tree_index, source_root_id, strip.group)
+                    || contains_node(tree_index, strip.group, source_root_id)
+                {
+                    continue;
+                }
+                let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
+                    continue;
+                };
+                push_zone(
+                    zones,
+                    DropTarget::GroupTabs {
+                        group: strip.group,
+                        index: tabs.children.len(),
+                    },
+                    DropZone::TabInsertion,
+                    strip.rect,
+                )?;
+            }
+        }
+
         for header in &rects.tab_headers {
             let Some(area) = target_area(self, tree_index, header.group) else {
                 continue;
             };
             if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
+                continue;
+            }
+            // Photoshop Main tab drops are handled by the append-only strip above.
+            if self.profile() == Profile::Photoshop && area == AllowedArea::MAIN_DOCK {
                 continue;
             }
             if contains_node(tree_index, source_root_id, header.group)
@@ -581,6 +609,35 @@ fn main_group_vertical_edge_rect(
 
     match edge {
         DropZone::Top if group_index > 0 => Ok(None),
+        DropZone::Top => {
+            let Some(column_rect) = rects
+                .columns
+                .iter()
+                .find(|column_rect| column_rect.column == column_id)
+                .map(|column_rect| column_rect.rect)
+            else {
+                return Ok(Some(group_edge_rect(
+                    group_rect,
+                    edge,
+                    metrics.edge_drop_width,
+                )?));
+            };
+            let header_height = (group_rect.origin.y - column_rect.origin.y).max(0.0);
+            let height = metrics.edge_drop_width.min(header_height);
+            if height <= 0.0 {
+                return Ok(Some(group_edge_rect(
+                    group_rect,
+                    edge,
+                    metrics.edge_drop_width,
+                )?));
+            }
+            let header_band = Rect::new(
+                Point::new(group_rect.origin.x, group_rect.origin.y - height),
+                Size::new(group_rect.size.width, height),
+            );
+            header_band.validate().map_err(ComputeRectsError::Geometry)?;
+            Ok(Some(header_band))
+        }
         DropZone::Bottom if group_index + 1 < column.groups.len() => {
             let Some(splitter) = rects.splitters.iter().find(|splitter| {
                 splitter.owner == column_id

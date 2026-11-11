@@ -14,9 +14,9 @@ use crate::dock_components::GroupPresentation;
 
 /// Visual feedback for the current dock destination.
 ///
-/// Most targets are painted from the active DropZoneResolver snapshot. A
-/// same-group PanelTab reorder has no resolver zone by design, so its insertion
-/// marker is derived from the source group's existing tab geometry.
+/// Most targets are painted from the active DropZoneResolver snapshot.
+/// Floating same-group PanelTab reordering may use a geometry-only insertion
+/// marker; Main tab-strip drops are append-only and never show between-tab markers.
 pub struct DropOverlay;
 
 /// A non-interactive visual card that follows the active drag pointer.
@@ -59,8 +59,9 @@ impl DropOverlay {
         let Some(zone) = resolved_zone
             .filter(|zone| zone_matches_preview(zone, Some(target), preview.point))
         else {
-            if let Some(line) =
-                same_group_panel_tab_insertion_rect(preview, target, tab_headers, tab_strips)
+            if main_dock_bounds.is_none()
+                && let Some(line) =
+                    same_group_panel_tab_insertion_rect(preview, target, tab_headers, tab_strips)
             {
                 layer = layer.child(guide_rect(line, theme));
             }
@@ -70,8 +71,11 @@ impl DropOverlay {
         {
             match zone.zone {
                 DropZone::Center => {
-                    if let Some(group) = target_group(target)
-                        .and_then(|id| groups.iter().find(|group| group.group == id))
+                    // Main content remains a valid append destination, but only
+                    // the explicit tab strip receives visual drop feedback.
+                    if main_dock_bounds.is_none()
+                        && let Some(group) = target_group(target)
+                            .and_then(|id| groups.iter().find(|group| group.group == id))
                     {
                         layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
                     }
@@ -83,8 +87,9 @@ impl DropOverlay {
                         // A tab-strip drop highlights the complete destination group.
                         layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
                     }
-                    if let Some(line) =
-                        tab_insertion_rect(target, zone.rect, tab_headers, tab_strips)
+                    if main_dock_bounds.is_none()
+                        && let Some(line) =
+                            tab_insertion_rect(target, zone.rect, tab_headers, tab_strips)
                     {
                         layer = layer.child(guide_rect(line, theme));
                     }
@@ -93,10 +98,15 @@ impl DropOverlay {
                     // Highlight the actual hit strip and place a guide at its center;
                     // do not shade half of the target group for an edge drop.
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
-                    layer = layer.child(guide_rect(
-                        group_edge_guide_rect(zone.rect, zone.zone),
-                        theme,
-                    ));
+                    let target_bounds = target_group(target)
+                        .and_then(|id| groups.iter().find(|group| group.group == id))
+                        .map(|group| group.rect);
+                    let guide = if main_dock_bounds.is_some() {
+                        main_group_edge_guide_rect(zone.rect, zone.zone, target_bounds)
+                    } else {
+                        group_edge_guide_rect(zone.rect, zone.zone)
+                    };
+                    layer = layer.child(guide_rect(guide, theme));
                 }
                 DropZone::ColumnLeft | DropZone::ColumnRight => {
                     // Core resolves Photoshop side docking at Column scope; paint
@@ -402,6 +412,45 @@ fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     }
 }
 
+fn main_group_edge_guide_rect(
+    rect: Rect,
+    zone: DropZone,
+    target_group: Option<Rect>,
+) -> Rect {
+    const GUIDE_THICKNESS: f32 = 4.0;
+    let centered = || group_edge_guide_rect(rect, zone);
+
+    match zone {
+        DropZone::Top => {
+            // The Top hit zone lives inside the bottom of the composition header.
+            let y = rect.origin.y + rect.size.height - GUIDE_THICKNESS * 0.5;
+            Rect::new(
+                Point::new(rect.origin.x, y - GUIDE_THICKNESS * 0.5),
+                dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+            )
+        }
+        DropZone::Bottom => {
+            let Some(group) = target_group else {
+                return centered();
+            };
+            let group_bottom = group.origin.y + group.size.height;
+            let zone_bottom = rect.origin.y + rect.size.height;
+            if (zone_bottom - group_bottom).abs() <= 1.0 {
+                // The last group: place the bright stripe at the outer bottom edge.
+                let y = zone_bottom - GUIDE_THICKNESS;
+                Rect::new(
+                    Point::new(rect.origin.x, y),
+                    dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+                )
+            } else {
+                // Internal separator: keep the stripe centered on the splitter.
+                centered()
+            }
+        }
+        _ => centered(),
+    }
+}
+
 fn same_group_panel_tab_insertion_rect(
     preview: DragPreview,
     target: DropTarget,
@@ -545,7 +594,7 @@ mod tests {
 
     use super::{
         composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
-        same_group_panel_tab_insertion_rect, zone_matches_preview,
+        main_group_edge_guide_rect, same_group_panel_tab_insertion_rect, zone_matches_preview,
     };
 
     #[test]
@@ -609,6 +658,38 @@ mod tests {
         assert_eq!(
             group_edge_guide_rect(side_rect, DropZone::Left),
             Rect::new(Point::new(20.0, 20.0), Size::new(4.0, 100.0))
+        );
+    }
+
+    #[test]
+    fn main_group_edge_guides_align_with_the_header_seam_and_outer_bottom() {
+        let top_zone = Rect::new(Point::new(10.0, 40.0), Size::new(200.0, 20.0));
+        let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
+        assert_eq!(
+            super::main_group_edge_guide_rect(top_zone, DropZone::Top, Some(target_group)),
+            Rect::new(Point::new(10.0, 58.0), Size::new(200.0, 4.0))
+        );
+
+        let bottom_zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
+        let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
+        assert_eq!(
+            super::main_group_edge_guide_rect(
+                bottom_zone,
+                DropZone::Bottom,
+                Some(target_group),
+            ),
+            Rect::new(Point::new(10.0, 356.0), Size::new(200.0, 4.0))
+        );
+
+        let internal_zone = Rect::new(Point::new(10.0, 196.0), Size::new(200.0, 24.0));
+        let upper_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 140.0));
+        assert_eq!(
+            super::main_group_edge_guide_rect(
+                internal_zone,
+                DropZone::Bottom,
+                Some(upper_group),
+            ),
+            Rect::new(Point::new(10.0, 206.0), Size::new(200.0, 4.0))
         );
     }
 

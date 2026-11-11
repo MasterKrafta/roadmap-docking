@@ -112,27 +112,60 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
             &metrics,
         )
         .unwrap();
-    for index in [0, 1] {
-        assert!(
-            group_zones.iter().any(|zone| {
-                zone.target
+    let group_append_zones: Vec<_> = group_zones
+        .iter()
+        .filter(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && zone.target
                     == DropTarget::GroupTabs {
                         group: target_group,
-                        index,
+                        index: 1,
                     }
-                    && zone.zone == DropZone::TabInsertion
-            }),
-            "whole Group drags retain exact tab-strip slot {index}"
-        );
-    }
-    assert!(zones.iter().any(|zone| {
-        zone.target
-            == DropTarget::GroupEdge {
-                group: target_group,
-                zone: DropZone::Top,
-            }
-            && zone.zone == DropZone::Top
-    }));
+        })
+        .collect();
+    assert_eq!(
+        group_append_zones.len(),
+        1,
+        "a Main Dock Group drag must expose one append-only tab-strip zone"
+    );
+    assert_eq!(group_append_zones[0].rect, target_strip.rect);
+    assert!(
+        !group_zones.iter().any(|zone| {
+            zone.target
+                == DropTarget::GroupTabs {
+                    group: target_group,
+                    index: 0,
+                }
+                && zone.zone == DropZone::TabInsertion
+        }),
+        "a Main Dock Group drag must not expose insertion between existing tabs"
+    );
+    assert_eq!(
+        layout
+            .resolve_drop(
+                strip_center,
+                DropSource::Group { group: source_group },
+                &rects,
+                &metrics,
+            )
+            .unwrap(),
+        Some(DropTarget::GroupTabs {
+            group: target_group,
+            index: 1,
+        }),
+        "dropping a Group on a Main Dock tab strip must append it to the end"
+    );
+    assert!(
+        !zones.iter().any(|zone| {
+            zone.target
+                == DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: DropZone::Top,
+                }
+                && zone.zone == DropZone::Top
+        }),
+        "the top edge of a later group is represented by the previous group's bottom strip"
+    );
     assert!(zones.iter().any(|zone| {
         zone.target
             == DropTarget::GroupEdge {
@@ -250,6 +283,33 @@ fn adjacent_main_groups_share_one_full_width_vertical_drop_strip() {
         .compute_drop_zones(group_source, &rects, &metrics)
         .unwrap();
 
+    let first_group_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == first_group)
+        .expect("the first group should have computed bounds")
+        .rect;
+    let first_top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("the first group should expose a drop band in the composition header");
+    assert_eq!(
+        first_top.rect.origin.y + first_top.rect.size.height,
+        first_group_rect.origin.y,
+        "the bright top guide must align with the bottom edge of the composition header"
+    );
+    assert_eq!(
+        first_top.rect.size.height,
+        metrics.edge_drop_width.min(metrics.column_header_height)
+    );
+
     let first_bottom = zones
         .iter()
         .find(|zone| {
@@ -311,6 +371,19 @@ fn adjacent_main_groups_share_one_full_width_vertical_drop_strip() {
     let panel_zones = layout
         .compute_drop_zones(panel_source, &rects, &metrics)
         .unwrap();
+    let panel_top = panel_zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("a detached Panel must use the same header-bottom drop band");
+    assert_eq!(panel_top.rect, first_top.rect);
+
     let panel_boundary = panel_zones
         .iter()
         .find(|zone| {
