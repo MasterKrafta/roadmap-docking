@@ -140,6 +140,17 @@ pub trait NativeWindowOps {
         window: NativeWindowId,
         position: PhysicalPoint,
     ) -> Result<(), NativeError>;
+    /// Moves a window to the top of the regular Z-order without activating it.
+    ///
+    /// The default preserves compatibility with platform adapters that do not
+    /// expose a separate non-activating Z-order operation.
+    fn move_window_to_top(
+        &self,
+        window: NativeWindowId,
+        position: PhysicalPoint,
+    ) -> Result<(), NativeError> {
+        self.move_window(window, position)
+    }
     /// Sets the requested client-content size in physical pixels.
     /// The native implementation accounts for the non-client window frame.
     fn resize_window(
@@ -742,6 +753,29 @@ mod windows_impl {
                 )
             }
             .map_err(|error| platform_error("SetWindowPos(move)", error))
+        }
+
+        fn move_window_to_top(
+            &self,
+            window: NativeWindowId,
+            position: PhysicalPoint,
+        ) -> Result<(), NativeError> {
+            // Keep the temporary drag surface above sibling Floating windows while
+            // leaving activation and the owner's Z-order unchanged. Drop routing
+            // skips this HWND and continues hit-testing the window underneath it.
+            // SAFETY: The HWND is a live GPUI-owned window and position is valid.
+            unsafe {
+                SetWindowPos(
+                    hwnd(window),
+                    Some(HWND_TOP),
+                    position.x,
+                    position.y,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(move to top)", error))
         }
 
         fn resize_window(

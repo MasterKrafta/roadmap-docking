@@ -689,7 +689,8 @@ impl DragHostManager {
             DockGeometry::physical_offset_from_logical(grab_offset, scale)
                 .ok_or(DragHostError::InvalidGrabOffset)?;
         let position = DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
-        self.native_ops.move_window(active.native_window, position)?;
+        self.native_ops
+            .move_window_to_top(active.native_window, position)?;
         Ok(())
     }
 
