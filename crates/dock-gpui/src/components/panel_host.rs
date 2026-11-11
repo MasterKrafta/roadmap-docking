@@ -1,8 +1,8 @@
 use dock_core::{PanelRect, Point};
-use gpui::{
-    AnyView, IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _, px, rgb,
-};
+use gpui::{AnyView, IntoElement, ParentElement, Styled, div, px};
 use ui::Theme;
+
+use crate::dock_components::PanelContent;
 
 /// Places cached panel views in the rectangles emitted by dock-core.
 ///
@@ -24,18 +24,8 @@ impl PanelHost {
         let mut layer = div().absolute().top_0().left_0().size_full();
 
         for (panel_rect, view) in panels {
-            // The body fill belongs to this exact Core PanelRect. During a
-            // host transfer the AnyView may be absent for one or more frames;
-            // keep only the normal surface, without placeholder text or border.
             let panel = panel_rect.panel;
             let rect = panel_rect.rect;
-            let mut content = div()
-                .size_full()
-                .bg(rgb(theme.colors.panel_surface_background))
-                .text_color(rgb(theme.colors.primary_text));
-            if let Some(view) = view {
-                content = content.child(view);
-            }
 
             layer = layer.child(
                 div()
@@ -46,7 +36,11 @@ impl PanelHost {
                     .w(px(rect.size.width))
                     .h(px(rect.size.height))
                     .overflow_hidden()
-                    .child(content),
+                    .child(PanelContent::render_with_view(
+                        format!("panel-content-{:?}", panel),
+                        theme,
+                        view,
+                    )),
             );
         }
 

@@ -80,8 +80,11 @@ impl DockGroupView {
                     .flex_1()
                     .min_h_0()
                     .overflow_hidden()
-                    .bg(rgb(theme.colors.panel_surface_background))
-                    .child(panel_view),
+                    .child(PanelContent::render_with_view(
+                        format!("{id}-panel-surface"),
+                        theme,
+                        Some(panel_view),
+                    )),
             )
     }
 
@@ -342,7 +345,14 @@ impl DockGroupView {
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border))
             .child(header)
-            .child(PanelContent::render(format!("{id}-content"), theme))
+            .child(
+                div()
+                    .w_full()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .child(PanelContent::render(format!("{id}-content"), theme)),
+            )
     }
 
     fn render_header(
