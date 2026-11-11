@@ -24,22 +24,20 @@ impl PanelHost {
         let mut layer = div().absolute().top_0().left_0().size_full();
 
         for (panel_rect, view) in panels {
+            // A transferred PanelView is temporarily mounted by DragHost.
+            // Do not paint a text/bordered placeholder over its old location:
+            // the Group's own header and content surfaces remain responsible
+            // for the source composition's appearance.
+            let Some(view) = view else {
+                continue;
+            };
+
             let panel = panel_rect.panel;
             let rect = panel_rect.rect;
-
-            let content = match view {
-                Some(view) => div().size_full().child(view),
-                None => div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(rgb(theme.colors.panel_surface_background))
-                    .border_1()
-                    .border_color(rgb(theme.colors.group_frame_border))
-                    .text_color(rgb(theme.colors.primary_text))
-                    .child("Перемещение панели…"),
-            };
+            let content = div()
+                .size_full()
+                .bg(rgb(theme.colors.panel_surface_background))
+                .child(view);
 
             layer = layer.child(
                 div()

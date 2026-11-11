@@ -315,6 +315,7 @@ pub(crate) fn group_surface(
     let left = group.rect.origin.x - content_origin.x;
     let top = group.rect.origin.y - content_origin.y;
     let header_height = metrics.header_height.min(group.rect.size.height);
+    let content_height = (group.rect.size.height - header_height).max(0.0);
 
     div()
         .id(format!("dock-group-{:?}", group.group))
@@ -323,7 +324,6 @@ pub(crate) fn group_surface(
         .top(px(top))
         .w(px(group.rect.size.width))
         .h(px(group.rect.size.height))
-        .bg(rgb(theme.colors.group_frame_background))
         .border_1()
         .border_color(rgb(theme.colors.group_frame_border))
         .child(
@@ -334,6 +334,15 @@ pub(crate) fn group_surface(
                 .w_full()
                 .h(px(header_height))
                 .bg(rgb(theme.colors.group_grip_background)),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(header_height))
+                .left_0()
+                .w_full()
+                .h(px(content_height))
+                .bg(rgb(theme.colors.panel_surface_background)),
         )
 }
 

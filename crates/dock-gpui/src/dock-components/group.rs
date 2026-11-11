@@ -124,7 +124,6 @@ impl DockGroupView {
             .top(px(top))
             .w(px(group.rect.size.width))
             .h(px(group.rect.size.height))
-            .bg(rgb(theme.colors.group_frame_background))
             .border_1()
             .border_color(rgb(theme.colors.group_frame_border));
 
