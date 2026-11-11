@@ -1146,7 +1146,22 @@ fn floating_bounds_for_request_in_host(
         }
     };
 
-    desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)
+    let mut bounds =
+        desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)?;
+
+    // A detached PanelTab becomes a one-tab Group inside a Floating composition.
+    // Reserve the composition-header band above that Group so promotion does not
+    // push the tab down relative to the pointer when the header becomes visible.
+    if matches!(
+        (request.handle, request.payload),
+        (DragHandle::PanelTab, DragPayload::Panel { .. })
+    ) {
+        bounds.origin.y -= column_header_height;
+        bounds.size.height += column_header_height;
+    }
+
+    bounds.validate_non_empty().ok()?;
+    Some(bounds)
 }
 
 fn source_rect_for_request(
