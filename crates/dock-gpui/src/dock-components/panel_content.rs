@@ -1,4 +1,4 @@
-use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, rgb};
+use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 /// Draws the visual surface that owns a panel's actual content.
@@ -19,6 +19,7 @@ impl PanelContent {
         theme: Theme,
         view: Option<AnyView>,
     ) -> impl IntoElement {
+        let outline_id = format!("{id}-debug-outline");
         let mut surface = div()
             .id(id)
             .size_full()
@@ -30,6 +31,18 @@ impl PanelContent {
             surface = surface.child(view);
         }
 
-        surface
+        // TEMP: Inset outline shows the actual PanelContent bounds separately
+        // from PanelHost's green PanelRect outline.
+        surface.child(
+            div()
+                .id(outline_id)
+                .absolute()
+                .top(px(3.0))
+                .left(px(3.0))
+                .right(px(3.0))
+                .bottom(px(3.0))
+                .border_2()
+                .border_color(rgb(0x00BFFF)),
+        )
     }
 }
