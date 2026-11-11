@@ -197,7 +197,7 @@ impl DockGroupView {
     }
 
     /// Renders a live Group with one active tab and its panel view.
-    pub(super) fn render_active(
+    pub(crate) fn render_active(
         id: String,
         title: String,
         panel_view: gpui::AnyView,
