@@ -247,113 +247,92 @@ impl Layout {
                 )?;
             }
 
-            let left_edge =
-                group_edge_rect(group_rect.rect, DropZone::Left, metrics.edge_drop_width)?;
-            let right_edge =
-                group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
-            if let Some((side, column_index, column_rect)) = group_main_column(
-                self,
-                tree_index,
-                group_rect.group,
-                left_columns,
-                right_columns,
-            ) {
-                if may_add_column(side) {
-                    let columns = match side {
-                        DockSide::Left => left_columns,
-                        DockSide::Right => right_columns,
-                    };
-                    let column_level_side_drop = self.profile() == Profile::Photoshop;
-                    let edge_width = metrics.edge_drop_width.min(column_rect.size.width / 3.0);
-                    let left_fallback = Rect::new(
-                        column_rect.origin,
-                        Size::new(edge_width, column_rect.size.height),
-                    );
-                    let right_fallback = Rect::new(
-                        Point::new(
-                            column_rect.origin.x + column_rect.size.width - edge_width,
-                            column_rect.origin.y,
-                        ),
-                        Size::new(edge_width, column_rect.size.height),
-                    );
-                    let left_zone_rect = if column_level_side_drop {
-                        main_column_boundary_drop_rect(
-                            self, rects, side, columns, column_index, metrics,
-                        )?
-                        .unwrap_or(left_fallback)
-                    } else {
-                        main_column_boundary_drop_rect(
+            // Photoshop exposes horizontal insertion at the Column boundary,
+            // not on each individual Group. Its full-height ColumnLeft /
+            // ColumnRight targets are built by append_main_column_zones.
+            // Generic layouts retain group-scoped horizontal splitting.
+            if self.profile() == Profile::Generic {
+                let left_edge =
+                    group_edge_rect(group_rect.rect, DropZone::Left, metrics.edge_drop_width)?;
+                let right_edge =
+                    group_edge_rect(group_rect.rect, DropZone::Right, metrics.edge_drop_width)?;
+                if let Some((side, column_index, _column_rect)) = group_main_column(
+                    self,
+                    tree_index,
+                    group_rect.group,
+                    left_columns,
+                    right_columns,
+                ) {
+                    if may_add_column(side) {
+                        let columns = match side {
+                            DockSide::Left => left_columns,
+                            DockSide::Right => right_columns,
+                        };
+                        let left_zone_rect = main_column_boundary_drop_rect(
                             self, rects, side, columns, column_index, metrics,
                         )?
                         .map(|boundary| preserve_vertical_span(boundary, left_edge))
-                        .unwrap_or(left_edge)
-                    };
-                    let right_zone_rect = if column_level_side_drop {
-                        main_column_boundary_drop_rect(
-                            self, rects, side, columns, column_index + 1, metrics,
-                        )?
-                        .unwrap_or(right_fallback)
-                    } else {
-                        main_column_boundary_drop_rect(
+                        .unwrap_or(left_edge);
+                        let right_zone_rect = main_column_boundary_drop_rect(
                             self, rects, side, columns, column_index + 1, metrics,
                         )?
                         .map(|boundary| preserve_vertical_span(boundary, right_edge))
-                        .unwrap_or(right_edge)
-                    };
-                    let left_target = match source {
-                        DropSource::Panel { .. } => DropTarget::MainColumn {
-                            side,
-                            index: column_index,
-                        },
-                        DropSource::Group { .. } => DropTarget::GroupEdge {
-                            group: group_rect.group,
-                            zone: DropZone::Left,
-                        },
-                        DropSource::Column { .. } => continue,
-                    };
-                    let right_target = match source {
-                        DropSource::Panel { .. } => DropTarget::MainColumn {
-                            side,
-                            index: column_index + 1,
-                        },
-                        DropSource::Group { .. } => DropTarget::GroupEdge {
-                            group: group_rect.group,
-                            zone: DropZone::Right,
-                        },
-                        DropSource::Column { .. } => continue,
-                    };
-                    if !group_edge_is_noop(
-                        self,
-                        tree_index,
-                        source,
-                        group_rect.group,
-                        DropZone::Left,
-                    ) {
-                        push_zone(zones, left_target, DropZone::ColumnLeft, left_zone_rect)?;
-                    }
-                    if !group_edge_is_noop(
-                        self,
-                        tree_index,
-                        source,
-                        group_rect.group,
-                        DropZone::Right,
-                    ) {
-                        push_zone(zones, right_target, DropZone::ColumnRight, right_zone_rect)?;
-                    }
-                }
-            } else if self.profile() == Profile::Generic {
-                // Generic layouts permit a nested horizontal Split around a group.
-                for (edge, rect) in [(DropZone::Left, left_edge), (DropZone::Right, right_edge)] {
-                    if !group_edge_is_noop(self, tree_index, source, group_rect.group, edge) {
-                        push_zone(
-                            zones,
-                            DropTarget::GroupEdge {
-                                group: group_rect.group,
-                                zone: edge,
+                        .unwrap_or(right_edge);
+                        let left_target = match source {
+                            DropSource::Panel { .. } => DropTarget::MainColumn {
+                                side,
+                                index: column_index,
                             },
-                            edge,
-                            rect,
-                        )?;
+                            DropSource::Group { .. } => DropTarget::GroupEdge {
+                                group: group_rect.group,
+                                zone: DropZone::Left,
+                            },
+                            DropSource::Column { .. } => continue,
+                        };
+                        let right_target = match source {
+                            DropSource::Panel { .. } => DropTarget::MainColumn {
+                                side,
+                                index: column_index + 1,
+                            },
+                            DropSource::Group { .. } => DropTarget::GroupEdge {
+                                group: group_rect.group,
+                                zone: DropZone::Right,
+                            },
+                            DropSource::Column { .. } => continue,
+                        };
+                        if !group_edge_is_noop(
+                            self,
+                            tree_index,
+                            source,
+                            group_rect.group,
+                            DropZone::Left,
+                        ) {
+                            push_zone(zones, left_target, DropZone::ColumnLeft, left_zone_rect)?;
+                        }
+                        if !group_edge_is_noop(
+                            self,
+                            tree_index,
+                            source,
+                            group_rect.group,
+                            DropZone::Right,
+                        ) {
+                            push_zone(zones, right_target, DropZone::ColumnRight, right_zone_rect)?;
+                        }
+                    }
+                } else {
+                    // Generic layouts permit a nested horizontal Split around a group.
+                    for (edge, rect) in [(DropZone::Left, left_edge), (DropZone::Right, right_edge)] {
+                        if !group_edge_is_noop(self, tree_index, source, group_rect.group, edge) {
+                            push_zone(
+                                zones,
+                                DropTarget::GroupEdge {
+                                    group: group_rect.group,
+                                    zone: edge,
+                                },
+                                edge,
+                                rect,
+                            )?;
+                        }
                     }
                 }
             }

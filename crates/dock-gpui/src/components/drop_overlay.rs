@@ -97,8 +97,8 @@ impl DropOverlay {
                     }
                 }
                 DropZone::ColumnLeft | DropZone::ColumnRight => {
-                    // Keep Core's group-sized hit zone for precise target selection,
-                    // but paint the side affordance across its complete Main DockArea.
+                    // Core resolves Photoshop side docking at Column scope; paint
+                    // the guide across the corresponding Main DockArea's full height.
                     let visual_rect =
                         composition_edge_highlight_rect(zone, target, main_dock_bounds);
                     let x = visual_rect.origin.x + visual_rect.size.width * 0.5;

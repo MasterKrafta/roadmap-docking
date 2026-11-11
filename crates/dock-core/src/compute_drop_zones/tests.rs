@@ -310,7 +310,7 @@ fn adjacent_main_groups_have_non_overlapping_vertical_drop_boundaries() {
 }
 
 #[test]
-fn photoshop_group_side_drop_zones_cover_the_entire_target_column_height() {
+fn photoshop_side_drop_targets_are_column_scoped_and_cover_full_height() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -328,14 +328,10 @@ fn photoshop_group_side_drop_zones_cover_the_entire_target_column_height() {
     );
     builder.main_area(DockSide::Left, target_column);
 
-    let (_, source_node) = builder.panel(key("full-height-source"), constraints());
+    let (source_panel, source_node) = builder.panel(key("full-height-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
-    let source_column = builder.column(
-        280.0,
-        ColumnMode::Expanded,
-        vec![source_group],
-        vec![1.0],
-    );
+    let source_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
     let layout = builder.build();
@@ -344,70 +340,102 @@ fn photoshop_group_side_drop_zones_cover_the_entire_target_column_height() {
         .columns
         .iter()
         .find(|column| column.column == target_column)
-        .unwrap()
+        .expect("the target Main Column should have computed bounds")
         .rect;
-    let zones = layout
-        .compute_drop_zones(
-            DropSource::Group { group: source_group },
-            &rects,
-            &metrics,
-        )
+
+    let group_source = DropSource::Group { group: source_group };
+    let group_left_target = DropTarget::GroupEdge {
+        group: first_group,
+        zone: DropZone::Left,
+    };
+    let group_right_target = DropTarget::GroupEdge {
+        group: third_group,
+        zone: DropZone::Right,
+    };
+    let group_zones = layout
+        .compute_drop_zones(group_source, &rects, &metrics)
         .unwrap();
 
-    for target_group in [first_group, second_group, third_group] {
-        for side_zone in [DropZone::ColumnLeft, DropZone::ColumnRight] {
-            let zone = zones
-                .iter()
-                .find(|zone| {
-                    zone.zone == side_zone
-                        && zone.target
-                            == (DropTarget::GroupEdge {
-                                group: target_group,
-                                zone: if side_zone == DropZone::ColumnLeft {
-                                    DropZone::Left
-                                } else {
-                                    DropZone::Right
-                                },
-                            })
-                })
-                .unwrap_or_else(|| panic!("missing {side_zone:?} zone for {target_group:?}"));
-
-            assert_eq!(zone.rect.origin.y, target_column_rect.origin.y);
-            assert_eq!(zone.rect.size.height, target_column_rect.size.height);
-        }
-    }
-
-    let left_zone = zones
+    let group_left_zone = group_zones
         .iter()
         .find(|zone| {
-            zone.zone == DropZone::ColumnLeft
-                && zone.target
-                    == (DropTarget::GroupEdge {
-                        group: first_group,
-                        zone: DropZone::Left,
-                    })
+            zone.target == group_left_target && zone.zone == DropZone::ColumnLeft
         })
-        .unwrap();
-    let point = Point::new(
-        left_zone.rect.origin.x + left_zone.rect.size.width * 0.5,
-        target_column_rect.origin.y + target_column_rect.size.height * 0.5,
+        .expect("the whole column's left edge should accept a Group");
+    let group_right_zone = group_zones
+        .iter()
+        .find(|zone| {
+            zone.target == group_right_target && zone.zone == DropZone::ColumnRight
+        })
+        .expect("the whole column's right edge should accept a Group");
+
+    for zone in [group_left_zone, group_right_zone] {
+        assert_eq!(zone.rect.origin.y, target_column_rect.origin.y);
+        assert_eq!(zone.rect.size.height, target_column_rect.size.height);
+    }
+    assert!(
+        !group_zones.iter().any(|zone| {
+            matches!(
+                zone.target,
+                DropTarget::GroupEdge {
+                    group: second_group,
+                    zone: DropZone::Left | DropZone::Right,
+                }
+            ) && matches!(zone.zone, DropZone::ColumnLeft | DropZone::ColumnRight)
+        }),
+        "an individual Group must not add its own horizontal side target"
     );
-    let resolver = layout
-        .prepare_drop_resolver(
-            DropSource::Group { group: source_group },
-            &rects,
-            &metrics,
-        )
+
+    let group_resolver = layout
+        .prepare_drop_resolver(group_source, &rects, &metrics)
         .unwrap();
-    let resolved = resolver.resolve_zone(point).unwrap().unwrap();
-    assert_eq!(resolved.zone, DropZone::ColumnLeft);
-    assert!(matches!(
-        resolved.target,
-        DropTarget::GroupEdge {
-            zone: DropZone::Left,
-            ..
-        }
-    ));
+    for fraction in [0.05, 0.5, 0.95] {
+        let point = Point::new(
+            group_right_zone.rect.origin.x + group_right_zone.rect.size.width * 0.5,
+            target_column_rect.origin.y + target_column_rect.size.height * fraction,
+        );
+        let resolved = group_resolver
+            .resolve_zone(point)
+            .unwrap()
+            .expect("the column-wide right side should resolve at every vertical position");
+        assert_eq!(resolved.target, group_right_target);
+        assert_eq!(resolved.zone, DropZone::ColumnRight);
+        assert_eq!(resolved.rect.origin.y, target_column_rect.origin.y);
+        assert_eq!(resolved.rect.size.height, target_column_rect.size.height);
+    }
+
+    let panel_source = DropSource::Panel { panel: source_panel };
+    let panel_target = DropTarget::MainColumn {
+        side: DockSide::Left,
+        index: 1,
+    };
+    let panel_zones = layout
+        .compute_drop_zones(panel_source, &rects, &metrics)
+        .unwrap();
+    let panel_zone = panel_zones
+        .iter()
+        .find(|zone| zone.target == panel_target && zone.zone == DropZone::ColumnRight)
+        .expect("the whole column's right edge should accept a detached Panel");
+    assert_eq!(panel_zone.rect.origin.y, target_column_rect.origin.y);
+    assert_eq!(panel_zone.rect.size.height, target_column_rect.size.height);
+
+    let panel_resolver = layout
+        .prepare_drop_resolver(panel_source, &rects, &metrics)
+        .unwrap();
+    for fraction in [0.05, 0.5, 0.95] {
+        let point = Point::new(
+            panel_zone.rect.origin.x + panel_zone.rect.size.width * 0.5,
+            target_column_rect.origin.y + target_column_rect.size.height * fraction,
+        );
+        let resolved = panel_resolver
+            .resolve_zone(point)
+            .unwrap()
+            .expect("the column-wide right side should resolve for a Panel at every height");
+        assert_eq!(resolved.target, panel_target);
+        assert_eq!(resolved.zone, DropZone::ColumnRight);
+        assert_eq!(resolved.rect.origin.y, target_column_rect.origin.y);
+        assert_eq!(resolved.rect.size.height, target_column_rect.size.height);
+    }
 }
 
 #[test]
