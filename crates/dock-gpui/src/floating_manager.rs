@@ -739,17 +739,6 @@ impl FloatingWindowManager {
         self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
-    /// Starts moving the existing Floating HWND from a tab or group gesture.
-    /// The DockArea header is hidden until the native move session finishes.
-    pub(crate) fn begin_existing_window_move_with_hidden_header(
-        &mut self,
-        group: FloatingGroupId,
-        pointer: Point,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.begin_existing_window_move_with_header(group, pointer, true, cx)
-    }
-
     fn begin_existing_window_move_with_header(
         &mut self,
         group: FloatingGroupId,
