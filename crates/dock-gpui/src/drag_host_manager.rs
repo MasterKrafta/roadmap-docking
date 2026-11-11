@@ -727,11 +727,26 @@ impl DragHostManager {
         let grab_offset = active.grab_offset;
         let floating_manager = self.floating_manager.clone();
 
-        // DragHost is shown without activation, so Windows may briefly report
-        // no foreground window while focus moves between managed dock hosts.
-        // Debounce that transition; a sustained loss still cancels the gesture.
+        // DragHost is shown without activation, so the foreground HWND can lag
+        // behind the window currently under the cursor. Treat a registered dock
+        // target under the pointer as an active in-app drag even before Windows
+        // transfers foreground activation to that target.
+        let cursor_at_tick = self.native_ops.cursor_position().ok();
+        let cursor_over_managed_host = cursor_at_tick.as_ref().is_some_and(|cursor| {
+            floating_manager.as_ref().is_some_and(|manager| {
+                manager.update(cx, |manager, _| {
+                    matches!(
+                        manager.docking_window_at_point(*cursor, native_drag_host, None),
+                        Some(
+                            DockingWindowAtPoint::Main { .. }
+                                | DockingWindowAtPoint::Floating { .. }
+                        )
+                    )
+                })
+            })
+        });
         let foreground = self.native_ops.foreground_window().ok().flatten();
-        let managed_foreground = foreground.is_some_and(|window| {
+        let managed_foreground = cursor_over_managed_host || foreground.is_some_and(|window| {
             window == native_drag_host
                 || floating_manager.as_ref().is_some_and(|manager| {
                     manager.update(cx, |manager, _| {
@@ -831,13 +846,16 @@ impl DragHostManager {
             .and_then(|active| active.pending_release_cursor);
         let cursor = match pending_release_cursor {
             Some(cursor) => cursor,
-            None => match self.native_ops.cursor_position() {
-                Ok(cursor) => cursor,
-                Err(error) => {
-                    tracing::warn!(?id, %error, "could not read cursor position during DragHost tracking");
-                    self.cancel_active_drag(id, cx);
-                    return false;
-                }
+            None => match cursor_at_tick {
+                Some(cursor) => cursor,
+                None => match self.native_ops.cursor_position() {
+                    Ok(cursor) => cursor,
+                    Err(error) => {
+                        tracing::warn!(?id, %error, "could not read cursor position during DragHost tracking");
+                        self.cancel_active_drag(id, cx);
+                        return false;
+                    }
+                },
             },
         };
         if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
