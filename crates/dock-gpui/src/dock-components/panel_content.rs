@@ -1,4 +1,4 @@
-use gpui::{AnyView, IntoElement, ParentElement, Styled, div, rgb};
+use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, rgb};
 use ui::Theme;
 
 /// Draws the visual surface that owns a panel's actual content.

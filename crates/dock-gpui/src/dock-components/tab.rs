@@ -1,6 +1,6 @@
 use dock_core::{DockMetrics, NodeId, Point, Rect, TabHeaderRect};
 use gpui::{
-    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img,
+    IntoElement, ParentElement, SharedString, Styled, div, img,
     prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
