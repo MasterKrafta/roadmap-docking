@@ -339,6 +339,13 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
+        // The DragHost was created before the Floating composition header
+        // existed. Start reconciliation from its actual native bounds so the
+        // newly reserved header height moves the top edge upward and increases
+        // the client height instead of shifting the detached tab downward.
+        let current_native_bounds = self
+            .core_bounds_from_native_window(native_window)
+            .unwrap_or(bounds);
 
         let configured = window.update(cx, |surface, native, surface_cx| {
             surface.set_floating_group(Some(group), native, surface_cx)
@@ -354,7 +361,7 @@ impl FloatingWindowManager {
                 window: PanelWindowHandle::DragHost(window),
                 window_id,
                 native_window: Some(native_window),
-                bounds,
+                bounds: current_native_bounds,
                 native_min_size: None,
                 native_scale_factor: scale,
                 resize_enabled: false,
