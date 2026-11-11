@@ -326,12 +326,17 @@ pub(crate) fn group_edge_is_noop(
     target_group: NodeId,
     zone: DropZone,
 ) -> bool {
-    let source_root = match source {
+    let source_group = match source {
         DropSource::Group { group } => group,
-        DropSource::Composition { root } => root,
+        DropSource::Composition { root } => {
+            let Some(group) = single_group_in_subtree(layout, root) else {
+                return false;
+            };
+            group
+        }
         DropSource::Panel { .. } => return false,
     };
-    if source_root == target_group || contains_node(tree_index, source_root, target_group) {
+    if source_group == target_group || contains_node(tree_index, source_group, target_group) {
         return true;
     }
     let source_parent = direct_parent(tree_index, source_group);

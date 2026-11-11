@@ -480,7 +480,7 @@ fn main_group_vertical_edge_rect(
             boundary.validate().map_err(ComputeRectsError::Geometry)?;
             Ok(Some(boundary))
         }
-        DropZone::Top | DropZone::Bottom => {
+        DropZone::Bottom => {
             Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?))
         }
         _ => Err(ComputeRectsError::InvalidLayoutState),
