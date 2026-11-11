@@ -1411,31 +1411,6 @@ impl DragHostManager {
         });
     }
 
-    fn cancel_active_drag_on_focus_loss(&mut self, id: DragHostId, cx: &mut Context<Self>) {
-        if let Err(error) = self.close(id, cx) {
-            tracing::warn!(
-                ?id,
-                %error,
-                "could not close DragHost after application focus loss"
-            );
-        }
-        self.controller.update(cx, |controller, controller_cx| {
-            if let Err(error) = controller.cancel_pointer_interaction_on_focus_loss() {
-                tracing::debug!(
-                    ?id,
-                    %error,
-                    "could not cancel DragHost pointer interaction after focus loss"
-                );
-            }
-            if let Err(error) = controller.drag_mut().session_mut().reset() {
-                tracing::debug!(?id, %error, "could not reset DragHost session after focus loss");
-            }
-            controller.drag_mut().clear_resolver();
-            controller.drag_mut().clear_layout_version();
-            controller_cx.notify();
-        });
-    }
-
     /// Cancels the active content drag and restores its cached PanelView.
     pub(crate) fn cancel_active(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(id) = self.active.as_ref().map(|active| active.id) else {
