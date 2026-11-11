@@ -2775,3 +2775,172 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+
+#[test]
+fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_node) =
+        builder.panel(key("floating-main-vertical-source-first"), constraints());
+    let source_first_group = builder.tabs(vec![source_first_node], 0, false);
+    let (_, source_second_node) =
+        builder.panel(key("floating-main-vertical-source-second"), constraints());
+    let source_second_group = builder.tabs(vec![source_second_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_first_group, source_second_group],
+        vec![0.5, 0.5],
+    );
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(820.0, 100.0), Size::new(420.0, 520.0)),
+        1,
+    );
+
+    let (_, first_node) = builder.panel(key("floating-main-vertical-first"), constraints());
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let (_, second_node) = builder.panel(key("floating-main-vertical-second"), constraints());
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let (_, third_node) = builder.panel(key("floating-main-vertical-third"), constraints());
+    let third_group = builder.tabs(vec![third_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group, third_group],
+        vec![0.34, 0.33, 0.33],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let source = DropSource::Column {
+        column: source_column,
+    };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let target_column_rect = rects
+        .columns
+        .iter()
+        .find(|column| column.column == target_column)
+        .expect("the Main target Column should have computed bounds")
+        .rect;
+
+    let first_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == first_group)
+        .expect("the first Main Group should have computed bounds")
+        .rect;
+    let first_top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("a Floating Column composition must expose the top of the Main stack");
+    assert_eq!(
+        first_top.rect.origin.y + first_top.rect.size.height,
+        first_rect.origin.y
+    );
+    assert_eq!(
+        first_top.rect.size.height,
+        metrics.edge_drop_width.min(metrics.column_header_height)
+    );
+
+    let shared_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("a Floating Column composition must expose the shared inter-group strip");
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == target_column
+                && splitter.axis == Axis::Y
+                && splitter.boundary_index == 0
+        })
+        .expect("the Main Column should have a splitter after its first Group");
+    let splitter_center = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    assert_eq!(shared_bottom.rect.origin.x, target_column_rect.origin.x);
+    assert_eq!(shared_bottom.rect.size.width, target_column_rect.size.width);
+    assert!(shared_bottom.rect.contains(splitter_center).unwrap());
+    assert!(!zones.iter().any(|zone| {
+        zone.zone == DropZone::Top
+            && zone.target
+                == DropTarget::GroupEdge {
+                    group: second_group,
+                    zone: DropZone::Top,
+                }
+    }));
+
+    let third_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == third_group)
+        .expect("the last Main Group should have computed bounds")
+        .rect;
+    let last_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("a Floating Column composition must expose the bottom of the Main stack");
+    assert_eq!(
+        last_bottom.rect.origin.y + last_bottom.rect.size.height,
+        third_rect.origin.y + third_rect.size.height
+    );
+
+    let resolver = layout.prepare_drop_resolver(source, &rects, &metrics).unwrap();
+    for zone in [first_top, shared_bottom, last_bottom] {
+        let point = Point::new(
+            zone.rect.origin.x + zone.rect.size.width * 0.5,
+            zone.rect.origin.y + zone.rect.size.height * 0.5,
+        );
+        let resolved = resolver
+            .resolve_zone(point)
+            .unwrap()
+            .expect("each Main vertical drop zone must resolve for a Floating Column");
+        assert_eq!(resolved.target, zone.target);
+        assert_eq!(resolved.zone, zone.zone);
+    }
+
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup { group: source_float },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(
+            first_top.rect.origin.x + first_top.rect.size.width * 0.5,
+            first_top.rect.origin.y + first_top.rect.size.height * 0.5,
+        ),
+        target: Some(first_top.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: first_top.target,
+        })
+    );
+}
+

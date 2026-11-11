@@ -175,9 +175,10 @@ impl Layout {
         };
         if matches!(source, DropSource::Column { .. }) {
             self.append_column_drag_zones(&context, &mut zones)?;
-            // A Floating-root Column is a whole native composition, not a Main
-            // ColumnHeader drag, so only it receives tab insertion zones.
+            // A Floating-root Column is a complete composition. It can also
+            // split above/below Main Groups; Main ColumnHeader drags cannot.
             if source_is_floating_root(self, source_root) {
+                self.append_main_group_zones(&context, &mut zones)?;
                 self.append_tab_insertion_zones(&context, &mut zones)?;
             }
             // Both Main Columns and Columns inside Floating compositions can

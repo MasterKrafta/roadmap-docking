@@ -204,6 +204,7 @@ impl Layout {
             };
             if !source_contains_target
                 && !source_panel_is_here
+                && !matches!(source, DropSource::Column { .. })
                 && source_allows(self, source_panels, area)
             {
                 let center_rect = group_center_rect(group_rect.rect, metrics)?;
