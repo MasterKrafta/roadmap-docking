@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroupRect, GroupRect,
-    DockSide, Point, Rect, TabHeaderRect, TabStripRect,
+    DockSide, NodeId, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
     IntoElement, ParentElement, SharedString, Styled, div, img, prelude::InteractiveElement as _,
