@@ -459,12 +459,12 @@ impl Layout {
                         reason: "vertical Column drops are supported from Main into Floating",
                     });
                 }
-                Ok(DragDropAction::Command(DockCommand::SplitGroup {
+                return Ok(DragDropAction::Command(DockCommand::SplitGroup {
                     group: source_group,
                     target_group,
                     zone,
                     ratio: 0.5,
-                }))
+                }));
             }
             _ => {
                 return Err(CommandError::InvalidTarget {
