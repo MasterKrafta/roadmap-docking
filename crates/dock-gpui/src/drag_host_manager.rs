@@ -2161,11 +2161,35 @@ impl Render for DragHostSurface {
                 ));
             }
         } else if let Some(panel) = self.panel
-            && let Some(view) = self.controller.update(cx, |controller, _| {
-                controller.panel_view_for_drag(panel)
+            && let Some((view, title, metrics)) = self.controller.update(cx, |controller, _| {
+                let view = controller.panel_view_for_drag(panel)?;
+                let title = controller
+                    .layout()
+                    .panel_instance(panel)
+                    .and_then(|instance| controller.registry().get(&instance.key))
+                    .map(|descriptor| descriptor.title().to_string())
+                    .unwrap_or_else(|| format!("Panel {panel:?}"));
+                Some((view, title, controller.metrics()))
             })
         {
-            root = root.child(div().size_full().overflow_hidden().child(view));
+            // A detached tab is presented as a temporary one-tab Group.
+            // The composition header remains hidden until the DragHost is
+            // promoted into its persistent FloatingHost after a FreeArea drop.
+            root = root.child(
+                div()
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .child(DockGroupView::render_active(
+                        format!("drag-tab-group-{panel:?}"),
+                        title,
+                        view,
+                        metrics,
+                        self.theme,
+                    )),
+            );
         }
 
         root
