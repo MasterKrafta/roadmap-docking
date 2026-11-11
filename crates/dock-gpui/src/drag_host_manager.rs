@@ -407,6 +407,11 @@ impl DragHostManager {
                         column,
                         dock_area,
                         reserve_composition_header,
+                        composition_header_width: if reserve_composition_header {
+                            drag_logical_size.width
+                        } else {
+                            0.0
+                        },
                         handoff_placeholder: false,
                         floating_host,
                         floating_group_active: false,
@@ -1633,6 +1638,7 @@ pub(crate) struct DragHostSurface {
     column: Option<NodeId>,
     dock_area: Option<DockSide>,
     reserve_composition_header: bool,
+    composition_header_width: f32,
     handoff_placeholder: bool,
     floating_host: Option<Entity<FloatingHost>>,
     floating_group_active: bool,
@@ -1741,10 +1747,8 @@ impl Render for DragHostSurface {
         let mut root = div()
             .relative()
             .size_full()
-            .overflow_hidden();
-        if !self.reserve_composition_header {
-            root = root.bg(rgb(self.theme.colors.window_background));
-        }
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.window_background));
 
         if self.floating_group_active
             && let Some(host) = self.floating_host.as_ref()
@@ -2273,9 +2277,9 @@ impl Render for DragHostSurface {
                 Some((view, title, controller.metrics()))
             })
         {
-            // A detached tab is presented as a temporary one-tab Group.
-            // The shared composition-header band is reserved for the entire drag,
-            // even though the actual header is only rendered after a FreeArea drop.
+            // A detached tab keeps the same composition header visible during
+            // the drag and after a FreeArea drop. The DragHost does not attach
+            // pointer actions to this preview header, so it cannot start a second drag.
             let mut tab_surface = div()
                 .size_full()
                 .min_w_0()
@@ -2283,11 +2287,25 @@ impl Render for DragHostSurface {
                 .flex()
                 .flex_col();
             if self.reserve_composition_header {
+                root = root.child(DockCompositionView::render_header(
+                    format!("drag-tab-composition-header-{panel:?}"),
+                    Rect::new(
+                        Point::ZERO,
+                        Size::new(
+                            self.composition_header_width,
+                            metrics.column_header_height,
+                        ),
+                    ),
+                    &[],
+                    None,
+                    metrics,
+                    self.theme,
+                ));
                 tab_surface = tab_surface.child(
                     div()
                         .w_full()
                         .h(px(metrics.column_header_height))
-                        .flex_none()
+                        .flex_none(),
                 );
             }
             root = root.child(tab_surface.child(DockGroupView::render_active(
