@@ -35,9 +35,13 @@ impl Layout {
                     .position(|(id, _)| *id == source_column)
                     .map(|index| (DockSide::Right, index))
             });
-        if source_position.is_none()
-            && self.find_floating_root_containing(source_column).is_none()
-        {
+        // A Floating target supplies a window-local geometry snapshot, so its
+        // columns do not include a Main source column. The source is still valid
+        // when it belongs to a Main DockArea; there are simply no Main insertion
+        // zones to emit from this Floating snapshot.
+        let source_has_layout_owner = self.main_column_position(source_column).is_some()
+            || self.find_floating_root_containing(source_column).is_some();
+        if source_position.is_none() && !source_has_layout_owner {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
 
