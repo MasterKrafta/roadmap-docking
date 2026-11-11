@@ -2061,17 +2061,18 @@ impl FloatingWindowManager {
             return;
         };
 
-        let scale = self
+        let Some(scale) = self
             .native_ops
             .scale_factor(native_window)
             .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0);
-        let scale_changed = match (entry.native_scale_factor, scale) {
-            (Some(previous), Some(current)) => (previous - current).abs() > 0.001,
-            (None, Some(_)) => true,
-            _ => false,
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+        else {
+            return;
         };
-        if entry.bounds == group.bounds && scale.is_some() && !scale_changed {
+        let scale_changed = entry.native_scale_factor.is_none_or(|previous| {
+            (previous - scale).abs() > 0.001
+        });
+        if entry.bounds == group.bounds && !scale_changed {
             return;
         }
 
@@ -2083,7 +2084,7 @@ impl FloatingWindowManager {
             .is_some_and(|session| session.group == group.id)
         {
             entry.bounds = group.bounds;
-            entry.native_scale_factor = scale;
+            entry.native_scale_factor = Some(scale);
             return;
         }
 
@@ -2100,7 +2101,7 @@ impl FloatingWindowManager {
         };
         let Some(initial_size) = DockGeometry::physical_size_from_logical(
             group.bounds.size,
-            scale.unwrap_or(1.0),
+            scale,
         ) else {
             tracing::warn!(
                 ?group.id,
@@ -2131,9 +2132,7 @@ impl FloatingWindowManager {
             // Keep the old cache so a later reconciliation retries the sync.
             return;
         };
-        let effective_scale_changed = scale.is_none_or(|previous| {
-            (previous - effective_scale).abs() > 0.001
-        });
+        let effective_scale_changed = (scale - effective_scale).abs() > 0.001;
 
         if effective_scale_changed {
             let Some(desired_size) = DockGeometry::physical_size_from_logical(
