@@ -3096,3 +3096,128 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         })
     );
 }
+
+
+#[test]
+fn main_single_group_column_exposes_vertical_targets_in_floating() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("main-floating-column-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, first_panel) = builder.panel(key("main-floating-target-first"), constraints());
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let (_, second_panel) = builder.panel(key("main-floating-target-second"), constraints());
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let (_, third_panel) = builder.panel(key("main-floating-target-third"), constraints());
+    let third_group = builder.tabs(vec![third_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group, third_group],
+        vec![0.34, 0.33, 0.33],
+    );
+    let target_float = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(620.0, 100.0), Size::new(420.0, 620.0)),
+        2,
+    );
+
+    let layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let source = DropSource::Column {
+        column: source_column,
+    };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let target_column_rect = rects
+        .columns
+        .iter()
+        .find(|entry| entry.column == target_column)
+        .expect("the target Floating Column should have computed bounds")
+        .rect;
+
+    let top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingTop
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .expect("a Main single-group Column must expose the Floating top edge");
+
+    let between_groups = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("a Main single-group Column must expose the boundary between Floating groups");
+
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == target_column
+                && splitter.axis == Axis::Y
+                && splitter.boundary_index == 0
+        })
+        .expect("the target Floating Column should have a splitter after its first Group");
+    let splitter_center = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    assert_eq!(between_groups.rect.origin.x, target_column_rect.origin.x);
+    assert_eq!(between_groups.rect.size.width, target_column_rect.size.width);
+    assert!(between_groups.rect.contains(splitter_center).unwrap());
+    assert!(!zones.iter().any(|zone| {
+        zone.zone == DropZone::Top
+            && zone.target
+                == DropTarget::GroupEdge {
+                    group: second_group,
+                    zone: DropZone::Top,
+                }
+    }));
+
+    let bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingBottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("a Main single-group Column must expose the Floating bottom edge");
+
+    let resolver = layout
+        .prepare_drop_resolver(source, &rects, &metrics)
+        .unwrap();
+    for zone in [top, between_groups, bottom] {
+        let point = Point::new(
+            zone.rect.origin.x + zone.rect.size.width * 0.5,
+            zone.rect.origin.y + zone.rect.size.height * 0.5,
+        );
+        let resolved = resolver
+            .resolve_zone(point)
+            .unwrap()
+            .expect("each Floating vertical target must resolve");
+        assert_eq!(resolved.target, zone.target);
+        assert_eq!(resolved.zone, zone.zone);
+    }
+}

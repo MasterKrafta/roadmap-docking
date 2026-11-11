@@ -2130,3 +2130,80 @@ fn floating_column_header_dropped_in_free_area_detaches_only_on_release() {
     assert_eq!(layout.floating_groups().count(), 2);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn main_single_group_dock_area_can_split_into_a_floating_group() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_panel) = builder.panel(key("main-dock-area-floating-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel], 0, true);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, first_panel) = builder.panel(key("main-dock-area-floating-first"), constraints());
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let (_, second_panel) = builder.panel(key("main-dock-area-floating-second"), constraints());
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
+    let mut layout = builder.build();
+
+    let target = DropTarget::GroupEdge {
+        group: second_group,
+        zone: crate::DropZone::Top,
+    };
+    let request = DragDropRequest {
+        payload: DragPayload::DockArea {
+            side: DockSide::Left,
+        },
+        handle: DragHandle::DockAreaHeader,
+        origin: Point::ZERO,
+        point: Point::new(800.0, 300.0),
+        target: Some(target),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::SplitGroup {
+            group: source_group,
+            target_group: second_group,
+            zone: crate::DropZone::Top,
+            ratio: 0.5,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a Main DockArea dropped above a Floating Group must move its single Group");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    let target_area = layout.floating_group(target_floating).unwrap().area;
+    assert_eq!(
+        layout.dock_area(target_area).unwrap().root,
+        target_column
+    );
+    let Some(Node::Column(column)) = layout.node(target_column) else {
+        panic!("the destination Floating root must remain a Column");
+    };
+    assert_eq!(column.groups, vec![first_group, source_group, second_group]);
+    assert!(matches!(
+        layout.node(source_group),
+        Some(Node::Tabs(tabs)) if tabs.children.len() == 1 && tabs.active_index == 0 && tabs.collapsed == false
+    ));
+    assert_eq!(layout.panel_instances().count(), 3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}

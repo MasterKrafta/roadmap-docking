@@ -212,15 +212,39 @@ impl FloatingZoneContext<'_> {
             && matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
     }
 
+    fn source_is_main_single_group_column(&self) -> bool {
+        let DropSource::Column { column } = self.source else {
+            return false;
+        };
+        if column != self.source_root
+            || !matches!(
+                self.layout.node(column),
+                Some(Node::Column(source)) if source.groups.len() == 1
+            )
+        {
+            return false;
+        }
+
+        [crate::DockSide::Left, crate::DockSide::Right]
+            .into_iter()
+            .any(|side| {
+                self.layout.main_area(side).is_some_and(|area| {
+                    contains_node(self.tree_index, area.root, column)
+                })
+            })
+    }
+
     /// Adds one splitter-aligned vertical target between each pair of Groups
-    /// in a Floating Column. Photoshop treats these boundaries as full-width
-    /// Column targets rather than narrow per-Group edge bands.
+    /// in a Floating Column for whole-column drags that can split vertically.
+    /// Photoshop treats these boundaries as full-width Column targets rather
+    /// than narrow per-Group edge bands.
     fn append_floating_column_group_boundary_zones(
         &mut self,
         target_groups: &[GroupRect],
     ) -> Result<(), ComputeRectsError> {
         if self.layout.profile() != Profile::Photoshop
-            || !self.source_is_floating_column_composition()
+            || !(self.source_is_floating_column_composition()
+                || self.source_is_main_single_group_column())
         {
             return Ok(());
         }
@@ -539,6 +563,7 @@ impl FloatingZoneContext<'_> {
                 (self.layout.profile() == Profile::Generic
                     && source_is_floating_root(self.layout, self.source_root))
                     || self.source_is_floating_column_composition()
+                    || self.source_is_main_single_group_column()
             }
         };
         if !source_can_split_vertically {

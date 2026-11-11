@@ -440,9 +440,35 @@ impl Layout {
                     return Ok(DragDropAction::NoOp);
                 }
             }
+            DropTarget::GroupEdge {
+                group: target_group,
+                zone: zone @ (DropZone::Top | DropZone::Bottom),
+            } => {
+                let source_group = match self.node(column) {
+                    Some(Node::Column(source)) if source.groups.len() == 1 => source.groups[0],
+                    _ => {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "vertical Column drops into Floating require a single-group Main Column",
+                        });
+                    }
+                };
+                if source_position.is_none()
+                    || self.find_floating_root_containing(target_group).is_none()
+                {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "vertical Column drops are supported from Main into Floating",
+                    });
+                }
+                Ok(DragDropAction::Command(DockCommand::SplitGroup {
+                    group: source_group,
+                    target_group,
+                    zone,
+                    ratio: 0.5,
+                }))
+            }
             _ => {
                 return Err(CommandError::InvalidTarget {
-                    reason: "a Column can only dock into a MainColumn or a horizontal GroupEdge",
+                    reason: "a Column can only dock into a MainColumn or a GroupEdge",
                 });
             }
         }
