@@ -2063,6 +2063,20 @@ impl Render for FloatingHost {
             app.stop_propagation();
         });
 
+        // TEMP: Outline the complete GPUI FloatingHost viewport. If the native
+        // client area extends below this edge, the window is larger than the
+        // area GPUI is currently laying out.
+        root = root.child(
+            div()
+                .id(format!("floating-host-debug-bounds-{:?}", group))
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .border_2()
+                .border_color(rgb(0xFFFF00)),
+        );
+
         root
     }
 }
