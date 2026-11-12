@@ -750,6 +750,27 @@ impl Layout {
                 }
                 minimum
             }
+            Some(Node::Column(column))
+                if column.groups.len() == 1 && !column.mode.is_rail() =>
+            {
+                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
+                if matches!(
+                    self.nodes.get(column.groups[0]),
+                    Some(Node::Tabs(tabs)) if !tabs.collapsed
+                ) {
+                    let group_minimum = self.minimum_node_size_with_cache(
+                        column.groups[0],
+                        metrics,
+                        cache,
+                    )?;
+                    Size::new(
+                        base.width.max(group_minimum.width),
+                        base.height.max(metrics.column_header_height + group_minimum.height),
+                    )
+                } else {
+                    base
+                }
+            }
             Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
             None => return Err(CommandError::MissingNode { node: node_id }),
         };

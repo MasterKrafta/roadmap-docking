@@ -165,6 +165,23 @@ impl FloatingZoneContext<'_> {
 
         for target_group in target_groups {
             for edge in [DropZone::Top, DropZone::Bottom] {
+                // A whole Composition uses FloatingTop/FloatingBottom for its
+                // outer boundaries. Keep GroupEdge targets for internal
+                // Column splitters, where a complete composition can be inserted.
+                if matches!(self.source, DropSource::Composition { .. })
+                    && let Some(column_id) =
+                        owner_column(self.layout, self.tree_index, target_group.group)
+                    && let Some(Node::Column(column)) = self.layout.node(column_id)
+                    && let Some(group_index) = column
+                        .groups
+                        .iter()
+                        .position(|group| *group == target_group.group)
+                    && ((edge == DropZone::Top && group_index == 0)
+                        || (edge == DropZone::Bottom
+                            && group_index + 1 == column.groups.len()))
+                {
+                    continue;
+                }
                 if group_edge_is_noop(
                     self.layout,
                     self.tree_index,
@@ -182,7 +199,15 @@ impl FloatingZoneContext<'_> {
                         zone: edge,
                     },
                     edge,
-                    floating_group_edge_rect(target_group.rect, edge, self.metrics)?,
+                    floating_group_edge_rect(
+                        self.layout,
+                        self.rects,
+                        self.tree_index,
+                        target_group.group,
+                        target_group.rect,
+                        edge,
+                        self.metrics,
+                    )?,
                 )?;
             }
         }
@@ -202,7 +227,9 @@ impl FloatingZoneContext<'_> {
                         Some(Node::Split(split)) if split.axis == crate::Axis::Y
                     )
             }
-            DropSource::Composition { .. } => false,
+            DropSource::Composition { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
+            },
         };
         if !source_can_enter_column
             || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
@@ -375,26 +402,69 @@ impl FloatingZoneContext<'_> {
 }
 
 fn floating_group_edge_rect(
-    rect: Rect,
+    layout: &Layout,
+    rects: &LayoutRects,
+    tree_index: &DropZoneTreeIndex,
+    group: NodeId,
+    group_rect: Rect,
     edge: DropZone,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
-    let content_top = (metrics.header_height + metrics.tab_strip_height).min(rect.size.height);
-    let content_height = (rect.size.height - content_top).max(0.0);
-    let height = metrics.edge_drop_width.min(content_height / 2.0);
-    let bottom = rect.checked_bottom().map_err(ComputeRectsError::Geometry)?;
-    let y = match edge {
-        // The top edge starts below the Floating title and the group's tab strip.
-        DropZone::Top => rect.origin.y + content_top,
-        DropZone::Bottom => bottom - height,
+    let Some(column_id) = owner_column(layout, tree_index, group) else {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    };
+    let Some(Node::Column(column)) = layout.node(column_id) else {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    };
+    let Some(group_index) = column.groups.iter().position(|candidate| *candidate == group) else {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    };
+
+    let boundary_index = match edge {
+        DropZone::Top if group_index > 0 => group_index - 1,
+        DropZone::Bottom if group_index + 1 < column.groups.len() => group_index,
+        DropZone::Top => {
+            let Some(column_rect) = rects
+                .columns
+                .iter()
+                .find(|column_rect| column_rect.column == column_id)
+                .map(|column_rect| column_rect.rect)
+            else {
+                return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+            };
+            let header_height = (group_rect.origin.y - column_rect.origin.y).max(0.0);
+            let height = metrics.edge_drop_width.min(header_height);
+            if height <= 0.0 {
+                return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+            }
+            let rect = Rect::new(
+                Point::new(group_rect.origin.x, group_rect.origin.y - height),
+                Size::new(group_rect.size.width, height),
+            );
+            rect.validate().map_err(ComputeRectsError::Geometry)?;
+            return Ok(rect);
+        }
+        DropZone::Bottom => {
+            return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+        }
         _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
-    let result = Rect::new(
-        Point::new(rect.origin.x, y),
-        Size::new(rect.size.width, height),
+
+    let Some(splitter) = rects.splitters.iter().find(|splitter| {
+        splitter.owner == column_id
+            && splitter.axis == crate::Axis::Y
+            && splitter.boundary_index == boundary_index
+    }) else {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    };
+    let height = metrics.edge_drop_width.max(splitter.rect.size.height);
+    let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
+    let rect = Rect::new(
+        Point::new(group_rect.origin.x, center_y - height * 0.5),
+        Size::new(group_rect.size.width, height),
     );
-    result.validate().map_err(ComputeRectsError::Geometry)?;
-    Ok(result)
+    rect.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(rect)
 }
 
 impl FloatingZoneContext<'_> {

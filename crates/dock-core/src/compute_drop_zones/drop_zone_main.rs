@@ -262,8 +262,11 @@ impl Layout {
 
         if self.profile() == Profile::Photoshop {
             for strip in &rects.tab_strips {
-                if target_area(self, tree_index, strip.group) != Some(AllowedArea::MAIN_DOCK)
-                    || !source_allows(self, source_panels, AllowedArea::MAIN_DOCK)
+                let Some(area) = target_area(self, tree_index, strip.group) else {
+                    continue;
+                };
+                if (area != AllowedArea::MAIN_DOCK && area != AllowedArea::FLOATING)
+                    || !source_allows(self, source_panels, area)
                     || contains_node(tree_index, source_root_id, strip.group)
                     || contains_node(tree_index, strip.group, source_root_id)
                 {
@@ -291,8 +294,11 @@ impl Layout {
             if area == AllowedArea::ICON_RAIL || !source_allows(self, source_panels, area) {
                 continue;
             }
-            // Photoshop Main tab drops are handled by the append-only strip above.
-            if self.profile() == Profile::Photoshop && area == AllowedArea::MAIN_DOCK {
+            // Photoshop Main and Floating group drops use the full append-only
+            // strip above rather than per-tab insertion halves.
+            if self.profile() == Profile::Photoshop
+                && (area == AllowedArea::MAIN_DOCK || area == AllowedArea::FLOATING)
+            {
                 continue;
             }
             if contains_node(tree_index, source_root_id, header.group)

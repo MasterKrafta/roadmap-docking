@@ -313,10 +313,15 @@ pub(super) fn floating_edge_rect(
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
     let inset_x = metrics.splitter_hit_zone.min(rect.size.width / 3.0);
-    let height = metrics.edge_drop_width.min(rect.size.height / 3.0);
+    let height = match edge {
+        DropZone::Top => metrics.edge_drop_width.min(metrics.column_header_height),
+        DropZone::Bottom => metrics.edge_drop_width.min(rect.size.height / 3.0),
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
+    };
     let y = match edge {
-        // Keep stack insertion below the floating title and tab-strip hit bands.
-        DropZone::Top => rect.origin.y + metrics.header_height + metrics.tab_strip_height,
+        // The top insertion band occupies the bottom of the Column header
+        // and touches the first Group, matching Main composition geometry.
+        DropZone::Top => rect.origin.y + metrics.column_header_height - height,
         DropZone::Bottom => rect.origin.y + rect.size.height - height,
         _ => return Err(ComputeRectsError::InvalidLayoutState),
     };
@@ -523,9 +528,9 @@ fn zone_priority(zone: DropZone) -> u8 {
         DropZone::TabInsertion => 1,
         DropZone::DockEdge => 2,
         DropZone::ColumnLeft | DropZone::ColumnRight => 3,
-        DropZone::FloatingTop | DropZone::FloatingBottom => 4,
-        DropZone::Top | DropZone::Bottom => 5,
-        DropZone::ColumnEnd => 6,
+        DropZone::ColumnEnd => 4,
+        DropZone::FloatingTop | DropZone::FloatingBottom => 5,
+        DropZone::Top | DropZone::Bottom => 6,
         DropZone::Left | DropZone::Right => 7,
         DropZone::FloatingCenter => 8,
         DropZone::Center => 9,

@@ -2213,7 +2213,7 @@ fn floating_stack_exposes_column_end_for_another_floating_column() {
 
     let mut layout = builder.build();
     let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
-    let source = DropSource::Group { group: source_stack };
+    let source = DropSource::Composition { root: source_stack };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
     let expected_target = DropTarget::ColumnSlot {
         column: target_column,
@@ -2223,9 +2223,9 @@ fn floating_stack_exposes_column_end_for_another_floating_column() {
         zone.zone == DropZone::ColumnEnd && zone.target == expected_target
     }).expect("a Floating Column must expose its end slot to a whole vertical stack");
 
-    assert!(!zones.iter().any(|zone| {
-        matches!(zone.target, DropTarget::GroupTabs { .. } | DropTarget::GroupEdge { .. })
-    }));
+    assert!(!zones
+        .iter()
+        .any(|zone| matches!(zone.target, DropTarget::GroupTabs { .. })));
     let point = Point::new(
         end_zone.rect.origin.x + end_zone.rect.size.width / 2.0,
         end_zone.rect.origin.y + end_zone.rect.size.height / 2.0,
@@ -2806,14 +2806,14 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
     assert_eq!(shared_bottom.rect.origin.x, target_column_rect.origin.x);
     assert_eq!(shared_bottom.rect.size.width, target_column_rect.size.width);
     assert!(shared_bottom.rect.contains(splitter_center).unwrap());
-    assert!(zones.iter().any(|zone| {
+    assert!(!zones.iter().any(|zone| {
         zone.zone == DropZone::Top
             && zone.target
                 == DropTarget::GroupEdge {
                     group: second_group,
                     zone: DropZone::Top,
                 }
-    }), "the normalized Group source must use the same top edge as any other Group drag");
+    }), "Main exposes the shared inter-group boundary only once as the Bottom edge of the preceding Group");
 
     let third_rect = rects
         .groups
