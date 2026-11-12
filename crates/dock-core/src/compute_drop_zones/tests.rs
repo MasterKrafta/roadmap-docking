@@ -3205,6 +3205,24 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
             assert_eq!(resolved.zone, zone.zone);
             assert_eq!(resolved.rect, zone.rect);
         }
+
+        for splitter in rects
+            .splitters
+            .iter()
+            .filter(|splitter| splitter.axis == Axis::Y)
+        {
+            let point = Point::new(
+                zone.rect.origin.x + zone.rect.size.width * 0.5,
+                splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+            );
+            let resolved = resolver
+                .resolve_zone(point)
+                .unwrap()
+                .expect("the side zone must remain reachable at an internal Group splitter");
+            assert_eq!(resolved.zone, zone.zone);
+            assert_eq!(resolved.target, zone.target);
+            assert_eq!(resolved.rect, zone.rect);
+        }
     }
 
     for zone in [first_top, shared_bottom, last_bottom] {

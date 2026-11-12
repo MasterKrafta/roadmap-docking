@@ -431,20 +431,6 @@ impl FloatingZoneContext<'_> {
             {
                 continue;
             }
-            // Photoshop only supports a Group/Panel side drop against a
-            // single-Group Floating Column. Adding a sibling Column beside
-            // one Group in a vertical stack would make the drop target ambiguous;
-            // whole-Composition drops use the column-level transfer path instead.
-            if self.layout.profile() == Profile::Photoshop
-                && !matches!(self.source, DropSource::Composition { .. })
-                && let Some(target_column) =
-                    owner_column(self.layout, self.tree_index, target_group.group)
-                && let Some(Node::Column(column)) = self.layout.node(target_column)
-                && column.groups.len() > 1
-            {
-                continue;
-            }
-
             let (allow_left, allow_right) = if matches!(self.source, DropSource::Composition { .. }) {
                 let Some(target_column) =
                     owner_column(self.layout, self.tree_index, target_group.group)
