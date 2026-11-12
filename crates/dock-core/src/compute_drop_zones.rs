@@ -525,11 +525,13 @@ fn best_containing_zone(
 fn zone_priority(zone: DropZone) -> u8 {
     match zone {
         DropZone::RailInsertion => 0,
-        DropZone::TabInsertion => 1,
-        DropZone::DockEdge => 2,
-        DropZone::ColumnLeft | DropZone::ColumnRight => 3,
-        DropZone::FloatingTop | DropZone::FloatingBottom => 4,
-        DropZone::Top | DropZone::Bottom => 5,
+        // A Group boundary is a narrower, more specific target than the
+        // tab-strip insertion area it can slightly overlap at a splitter.
+        DropZone::Top | DropZone::Bottom => 1,
+        DropZone::TabInsertion => 2,
+        DropZone::DockEdge => 3,
+        DropZone::ColumnLeft | DropZone::ColumnRight => 4,
+        DropZone::FloatingTop | DropZone::FloatingBottom => 5,
         DropZone::ColumnEnd => 6,
         DropZone::Left | DropZone::Right => 7,
         DropZone::FloatingCenter => 8,

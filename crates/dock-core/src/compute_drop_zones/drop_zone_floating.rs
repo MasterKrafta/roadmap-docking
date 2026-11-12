@@ -286,9 +286,9 @@ impl FloatingZoneContext<'_> {
         target_groups: &[GroupRect],
         floating_root: NodeId,
     ) -> Result<(), ComputeRectsError> {
-        // Photoshop allows Group side insertion only beside a single-Group
-        // Floating Column. Multi-Group columns require a whole-Composition move;
-        // Generic keeps its flexible group-scoped horizontal splits.
+        // Individual Panel/Group horizontal splits remain Generic-only.
+        // A whole Floating Column may join a compatible Column composition
+        // in either profile, but only at the composition's outer edges.
         let target_columns = match self.layout.node(floating_root) {
             Some(Node::Column(_)) => Some((None, None)),
             Some(Node::Split(split))
