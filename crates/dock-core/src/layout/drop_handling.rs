@@ -187,6 +187,9 @@ impl Layout {
                     ratio: 0.5,
                 }))
             }
+            DropTarget::GroupEdge { .. } => Err(CommandError::InvalidTarget {
+                reason: "simple-composition group-edge target requires a cardinal edge zone",
+            }),
             DropTarget::GroupTabs {
                 group: target_group,
                 index,
