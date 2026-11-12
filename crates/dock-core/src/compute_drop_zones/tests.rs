@@ -503,9 +503,9 @@ fn photoshop_side_drop_targets_are_column_scoped_and_cover_full_height() {
             matches!(
                 zone.target,
                 DropTarget::GroupEdge {
-                    group: second_group,
+                    group: target_group,
                     zone: DropZone::Left | DropZone::Right,
-                }
+                } if target_group == second_group
             ) && matches!(zone.zone, DropZone::ColumnLeft | DropZone::ColumnRight)
         }),
         "an individual Group must not add its own horizontal side target"

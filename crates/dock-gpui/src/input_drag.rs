@@ -1051,7 +1051,6 @@ fn floating_bounds_for_request_in_host(
                 request,
                 rects,
                 dock_area_column_ids.as_deref(),
-                column_header_height,
             )?
         }
         DragSourceHost::Floating { group } => {
@@ -1061,7 +1060,6 @@ fn floating_bounds_for_request_in_host(
                 request,
                 rects,
                 dock_area_column_ids.as_deref(),
-                column_header_height,
             )?
         }
     };
@@ -1103,7 +1101,6 @@ fn source_rect_for_request(
     request: &DragDropRequest,
     rects: &LayoutRects,
     dock_area_column_ids: Option<&[NodeId]>,
-    column_header_height: f32,
 ) -> Option<Rect> {
     match (request.handle, request.payload) {
         (DragHandle::PanelTab, DragPayload::Panel { panel }) => rects
@@ -1238,7 +1235,7 @@ mod main_drop_resolution_tests {
 mod floating_bounds_tests {
     use dock_core::{Point, Rect, Size};
 
-    use super::{column_tab_floating_bounds, desired_floating_bounds};
+    use super::desired_floating_bounds;
 
     #[test]
     fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
@@ -1254,39 +1251,6 @@ mod floating_bounds_tests {
         assert_eq!(
             bounds,
             Rect::new(Point::new(1_360.0, 925.0), Size::new(640.0, 480.0))
-        );
-    }
-
-    #[test]
-    fn dock_tab_detach_removes_column_header_area_and_preserves_grab_offset() {
-        let source = Rect::new(Point::new(100.0, 200.0), Size::new(300.0, 500.0));
-        let pointer_origin = Point::new(120.0, 250.0);
-        let detached = column_tab_floating_bounds(source, pointer_origin, 32.0).unwrap();
-
-        assert_eq!(
-            detached,
-            Rect::new(Point::new(100.0, 232.0), Size::new(300.0, 468.0))
-        );
-
-        let floating = desired_floating_bounds(
-            detached,
-            detached.size,
-            pointer_origin,
-            Point::new(500.0, 600.0),
-        )
-        .unwrap();
-        assert_eq!(
-            floating,
-            Rect::new(Point::new(480.0, 582.0), Size::new(300.0, 468.0))
-        );
-    }
-
-    #[test]
-    fn column_header_drag_keeps_the_full_column_bounds() {
-        let source = Rect::new(Point::new(100.0, 200.0), Size::new(300.0, 500.0));
-        assert_eq!(
-            column_tab_floating_bounds(source, Point::new(120.0, 220.0), 32.0),
-            Some(source),
         );
     }
 
