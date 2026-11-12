@@ -3076,6 +3076,11 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         .find(|column| column.column == target_column)
         .expect("the target Floating Column should have computed bounds")
         .rect;
+    let floating_bounds = rects
+        .floating_groups
+        .first()
+        .expect("the target Floating window should have bounds")
+        .rect;
 
     let first_top = zones
         .iter()
@@ -3166,10 +3171,10 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                     }
         })
         .expect("a Main composition must expose one full-height Floating right side");
-    assert_eq!(left_side.rect.origin.y, target_column_rect.origin.y);
-    assert_eq!(right_side.rect.origin.y, target_column_rect.origin.y);
-    assert_eq!(left_side.rect.size.height, target_column_rect.size.height);
-    assert_eq!(right_side.rect.size.height, target_column_rect.size.height);
+    assert_eq!(left_side.rect.origin.y, floating_bounds.origin.y);
+    assert_eq!(right_side.rect.origin.y, floating_bounds.origin.y);
+    assert_eq!(left_side.rect.size.height, floating_bounds.size.height);
+    assert_eq!(right_side.rect.size.height, floating_bounds.size.height);
     assert_eq!(left_side.rect.size.width, metrics.edge_drop_width);
     assert_eq!(right_side.rect.size.width, metrics.edge_drop_width);
     assert_eq!(
@@ -3190,7 +3195,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         for fraction in [0.02, 0.5, 0.98] {
             let point = Point::new(
                 zone.rect.origin.x + zone.rect.size.width * 0.5,
-                target_column_rect.origin.y + target_column_rect.size.height * fraction,
+                floating_bounds.origin.y + floating_bounds.size.height * fraction,
             );
             let resolved = resolver
                 .resolve_zone(point)
@@ -3202,9 +3207,6 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         }
     }
 
-    let resolver = layout
-        .prepare_drop_resolver(source, &rects, &metrics)
-        .unwrap();
     for zone in [first_top, shared_bottom, last_bottom] {
         let point = Point::new(
             zone.rect.origin.x + zone.rect.size.width * 0.5,
