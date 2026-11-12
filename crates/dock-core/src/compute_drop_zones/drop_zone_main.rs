@@ -35,7 +35,6 @@ impl Layout {
                 continue;
             };
             if area == AllowedArea::FLOATING {
-
                 continue;
             }
 
