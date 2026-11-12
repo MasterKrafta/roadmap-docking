@@ -1242,8 +1242,7 @@ fn labeled_rail_targets_flattened_insertion_order() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("rail-source"), constraints());
-    let (_, source_sibling_node) = builder.panel(key("rail-source-sibling"), constraints());
-    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
+    let source_group = builder.tabs(vec![source_node], 0, false);
     let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
@@ -1280,6 +1279,21 @@ fn labeled_rail_targets_flattened_insertion_order() {
                 && zone.zone == DropZone::RailInsertion
         }));
     }
+
+    let composition_zones = layout
+        .compute_drop_zones(
+            DropSource::Composition {
+                root: source_column,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    let group_zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
+        .unwrap();
+    assert_eq!(zones, composition_zones);
+    assert_eq!(zones, group_zones);
 
     assert!(!zones.iter().any(|zone| match zone.target {
         DropTarget::Tabs { group, .. }
@@ -3126,6 +3140,16 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
     );
     builder.main_area(DockSide::Left, source_column);
 
+    let (_, main_target_panel) = builder.panel(key("main-center-target"), constraints());
+    let main_target_group = builder.tabs(vec![main_target_panel], 0, false);
+    let main_target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![main_target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Right, main_target_column);
+
     let (_, first_panel) = builder.panel(key("main-floating-target-first"), constraints());
     let first_group = builder.tabs(vec![first_panel], 0, false);
     let (_, second_panel) = builder.panel(key("main-floating-target-second"), constraints());
@@ -3198,7 +3222,7 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
     assert!(main_zones.iter().any(|zone| {
         zone.zone == DropZone::Center
             && zone.target == DropTarget::GroupTabs {
-                group: first_group,
+                group: main_target_group,
                 index: 1,
             }
     }), "the simple composition must expose Main group-center docking");

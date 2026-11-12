@@ -688,6 +688,7 @@ impl Layout {
     ) -> Result<(), ComputeRectsError> {
         let DropZoneBuildContext {
             source,
+            source_root,
             source_panels,
             tree_index,
             rects,
@@ -695,7 +696,9 @@ impl Layout {
             right_columns,
             ..
         } = *context;
-        if matches!(source, DropSource::Composition { .. }) {
+        let simple_composition = matches!(source, DropSource::Composition { .. })
+            && self.is_simple_composition_root(source_root);
+        if matches!(source, DropSource::Composition { .. }) && !simple_composition {
             return Ok(());
         }
         // Exact insertion points in icon rails follow each rail's flattened group order.
