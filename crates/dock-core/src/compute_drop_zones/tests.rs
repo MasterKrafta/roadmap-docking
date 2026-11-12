@@ -3062,7 +3062,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
         2,
     );
 
-    let layout = builder.build();
+    let mut layout = builder.build();
     let rects = layout
         .compute_floating_rects(target_float, &metrics)
         .unwrap();
@@ -3186,6 +3186,25 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)
         .unwrap();
+    for zone in [left_side, right_side] {
+        for fraction in [0.02, 0.5, 0.98] {
+            let point = Point::new(
+                zone.rect.origin.x + zone.rect.size.width * 0.5,
+                target_column_rect.origin.y + target_column_rect.size.height * fraction,
+            );
+            let resolved = resolver
+                .resolve_zone(point)
+                .unwrap()
+                .expect("the side zone must resolve across the entire Floating height");
+            assert_eq!(resolved.target, zone.target);
+            assert_eq!(resolved.zone, zone.zone);
+            assert_eq!(resolved.rect, zone.rect);
+        }
+    }
+
+    let resolver = layout
+        .prepare_drop_resolver(source, &rects, &metrics)
+        .unwrap();
     for zone in [first_top, shared_bottom, last_bottom] {
         let point = Point::new(
             zone.rect.origin.x + zone.rect.size.width * 0.5,
@@ -3217,6 +3236,45 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
             target: shared_bottom.target,
         })
     );
+
+    let side_point = Point::new(
+        right_side.rect.origin.x + right_side.rect.size.width * 0.5,
+        right_side.rect.origin.y + right_side.rect.size.height * 0.5,
+    );
+    let side_request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup { group: source_float },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: side_point,
+        target: Some(right_side.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&side_request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: right_side.target,
+        })
+    );
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_float,
+                target: right_side.target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let target_area = layout.floating_group(target_float).unwrap().area;
+    let composition_root = layout.dock_area(target_area).unwrap().root;
+    let Some(crate::Node::Split(composition)) = layout.node(composition_root) else {
+        panic!("a Floating side drop must create a horizontal composition of Columns");
+    };
+    assert_eq!(composition.axis, Axis::X);
+    assert_eq!(composition.children, vec![target_column, source_column]);
+    assert!(layout.floating_group(source_float).is_none());
+    assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
 

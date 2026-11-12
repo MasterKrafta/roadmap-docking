@@ -309,9 +309,8 @@ impl FloatingZoneContext<'_> {
         target_groups: &[GroupRect],
         floating_root: NodeId,
     ) -> Result<(), ComputeRectsError> {
-        // Individual Panel/Group horizontal splits remain Generic-only.
-        // A whole Floating Column may join a compatible Column composition
-        // in either profile, but only at the composition's outer edges.
+        // Photoshop uses the two outer Floating composition edges and spans
+        // the full window height. Generic retains flexible per-Group side zones.
         let target_columns = match self.layout.node(floating_root) {
             Some(Node::Column(_)) => Some((None, None)),
             Some(Node::Split(split))
