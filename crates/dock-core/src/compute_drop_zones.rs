@@ -329,7 +329,8 @@ pub(super) fn floating_top_edge_rect(
         return Ok(None);
     }
 
-    let inset_x = metrics.splitter_hit_zone.min(floating_bounds.size.width / 3.0);
+    // Keep the top band clear of the full-height left/right side strips.
+    let inset_x = metrics.edge_drop_width.min(floating_bounds.size.width / 3.0);
     let result = Rect::new(
         Point::new(
             floating_bounds.origin.x + inset_x,

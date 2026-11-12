@@ -476,16 +476,9 @@ impl Layout {
                 )
             }
             DropZone::Left | DropZone::Right => {
-                if self.find_floating_root_containing(target_group).is_some()
-                    && matches!(
-                        self.nodes.get(column_id),
-                        Some(Node::Column(column)) if column.groups.len() > 1
-                    )
-                {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "horizontal splits are not supported inside a floating stack",
-                    });
-                }
+                // Floating side zones represent the whole composition edge. The
+                // target may therefore be any Group in an outermost Column,
+                // regardless of how many vertically stacked Groups it contains.
                 let column = self.nodes.insert(Node::Column(crate::Column {
                     width: metrics.default_column_width,
                     mode: ColumnMode::Expanded,

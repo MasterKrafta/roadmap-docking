@@ -12,6 +12,25 @@ struct FloatingZoneContext<'a> {
     zones: &'a mut Vec<DropZoneRect>,
 }
 
+fn floating_side_edge_rect(
+    floating_bounds: Rect,
+    edge: DropZone,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    let width = metrics.edge_drop_width.min(floating_bounds.size.width / 3.0);
+    let x = match edge {
+        DropZone::Left => floating_bounds.origin.x,
+        DropZone::Right => floating_bounds.origin.x + floating_bounds.size.width - width,
+        _ => return Err(ComputeRectsError::InvalidLayoutState),
+    };
+    let rect = Rect::new(
+        Point::new(x, floating_bounds.origin.y),
+        Size::new(width, floating_bounds.size.height),
+    );
+    rect.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(rect)
+}
+
 impl Layout {
     pub(in crate::compute_drop_zones) fn append_floating_window_zones(
         &self,
@@ -91,7 +110,7 @@ impl FloatingZoneContext<'_> {
                 DropSource::Group { .. } | DropSource::Composition { .. }
             )
         {
-            self.append_side_zones(&target_groups, area.root)?;
+            self.append_side_zones(floating_rect, &target_groups, area.root)?;
         }
         Ok(())
     }
@@ -293,6 +312,7 @@ impl FloatingZoneContext<'_> {
 
     pub(super) fn append_side_zones(
         &mut self,
+        floating_rect: FloatingGroupRect,
         target_groups: &[GroupRect],
         floating_root: NodeId,
     ) -> Result<(), ComputeRectsError> {
@@ -338,6 +358,76 @@ impl FloatingZoneContext<'_> {
             DropSource::Composition { .. } => target_is_column_composition,
         };
         if !source_can_split_horizontally {
+            return Ok(());
+        }
+
+        if self.layout.profile() == Profile::Photoshop {
+            // A source already inside this Floating composition must not create
+            // an outer side target for its own window. Otherwise, side targets
+            // belong to the composition's two outermost Columns, not to every
+            // individual Group in the vertical stacks.
+            if matches!(self.source, DropSource::Group { .. })
+                && contains_node(self.tree_index, floating_root, self.source_root)
+            {
+                return Ok(());
+            }
+
+            let (left_column, right_column) = match target_columns {
+                Some((None, None)) => (floating_root, floating_root),
+                Some((Some(left), Some(right))) => (left, right),
+                _ => return Ok(()),
+            };
+
+            for (edge, target_column, first_in_stack) in [
+                (DropZone::Left, left_column, true),
+                (DropZone::Right, right_column, false),
+            ] {
+                let Some(Node::Column(column)) = self.layout.node(target_column) else {
+                    continue;
+                };
+                if column.mode.is_rail() {
+                    continue;
+                }
+
+                let target_group = target_groups
+                    .iter()
+                    .filter(|group| {
+                        owner_column(self.layout, self.tree_index, group.group)
+                            == Some(target_column)
+                    })
+                    .min_by(|left, right| {
+                        let ordering = left
+                            .rect
+                            .origin
+                            .y
+                            .partial_cmp(&right.rect.origin.y)
+                            .unwrap_or(std::cmp::Ordering::Equal);
+                        if first_in_stack { ordering } else { ordering.reverse() }
+                    });
+                let Some(target_group) = target_group else {
+                    continue;
+                };
+
+                if group_edge_is_noop(
+                    self.layout,
+                    self.tree_index,
+                    self.source,
+                    target_group.group,
+                    edge,
+                ) {
+                    continue;
+                }
+
+                push_zone(
+                    self.zones,
+                    DropTarget::GroupEdge {
+                        group: target_group.group,
+                        zone: edge,
+                    },
+                    edge,
+                    floating_side_edge_rect(floating_rect.rect, edge, self.metrics)?,
+                )?;
+            }
             return Ok(());
         }
 

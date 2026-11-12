@@ -3144,14 +3144,44 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                     zone: DropZone::Left,
                 }
     }), "a Main composition must expose the Floating left side");
-    assert!(zones.iter().any(|zone| {
-        zone.zone == DropZone::Right
-            && zone.target
-                == DropTarget::GroupEdge {
-                    group: third_group,
-                    zone: DropZone::Right,
-                }
-    }), "a Main composition must expose the Floating right side");
+    let left_side = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Left
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Left,
+                    }
+        })
+        .expect("a Main composition must expose one full-height Floating left side");
+    let right_side = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Right
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::Right,
+                    }
+        })
+        .expect("a Main composition must expose one full-height Floating right side");
+    assert_eq!(left_side.rect.origin.y, target_column_rect.origin.y);
+    assert_eq!(right_side.rect.origin.y, target_column_rect.origin.y);
+    assert_eq!(left_side.rect.size.height, target_column_rect.size.height);
+    assert_eq!(right_side.rect.size.height, target_column_rect.size.height);
+    assert_eq!(left_side.rect.size.width, metrics.edge_drop_width);
+    assert_eq!(right_side.rect.size.width, metrics.edge_drop_width);
+    assert_eq!(
+        zones.iter().filter(|zone| zone.zone == DropZone::Left).count(),
+        1,
+        "the left edge is one composition-wide zone, not one zone per Group"
+    );
+    assert_eq!(
+        zones.iter().filter(|zone| zone.zone == DropZone::Right).count(),
+        1,
+        "the right edge is one composition-wide zone, not one zone per Group"
+    );
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)
@@ -3189,6 +3219,179 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
     );
 }
 
+
+#[test]
+fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_panel_node) =
+        builder.panel(key("floating-side-full-height-source"), constraints());
+    let (_, source_sibling_node) =
+        builder.panel(key("floating-side-full-height-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_panel_node, source_sibling_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, left_first_node) =
+        builder.panel(key("floating-side-left-first"), constraints());
+    let left_first_group = builder.tabs(vec![left_first_node], 0, false);
+    let (_, left_second_node) =
+        builder.panel(key("floating-side-left-second"), constraints());
+    let left_second_group = builder.tabs(vec![left_second_node], 0, false);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![left_first_group, left_second_group],
+        vec![0.5, 0.5],
+    );
+
+    let (_, right_first_node) =
+        builder.panel(key("floating-side-right-first"), constraints());
+    let right_first_group = builder.tabs(vec![right_first_node], 0, false);
+    let (_, right_second_node) =
+        builder.panel(key("floating-side-right-second"), constraints());
+    let right_second_group = builder.tabs(vec![right_second_node], 0, false);
+    let right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![right_first_group, right_second_group],
+        vec![0.5, 0.5],
+    );
+
+    let target_root = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.5, 0.5],
+    );
+    let target_float = builder.floating_group(
+        target_root,
+        Rect::new(Point::new(520.0, 100.0), Size::new(620.0, 620.0)),
+        2,
+    );
+
+    let mut layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let bounds = rects
+        .floating_groups
+        .first()
+        .expect("the Floating composition should have bounds")
+        .rect;
+    let group_source = DropSource::Group { group: source_group };
+    let panel_source = DropSource::Panel { panel: source_panel };
+    let group_zones = layout
+        .compute_drop_zones(group_source, &rects, &metrics)
+        .unwrap();
+    let panel_zones = layout
+        .compute_drop_zones(panel_source, &rects, &metrics)
+        .unwrap();
+
+    let side_zones = |zones: &[crate::DropZoneRect]| {
+        zones
+            .iter()
+            .filter(|zone| matches!(zone.zone, DropZone::Left | DropZone::Right))
+            .copied()
+            .collect::<Vec<_>>()
+    };
+    let group_sides = side_zones(&group_zones);
+    let panel_sides = side_zones(&panel_zones);
+    assert_eq!(group_sides.len(), 2, "one left and one right side zone are expected");
+    assert_eq!(panel_sides, group_sides, "Panel and Group handles share side geometry");
+
+    let left_side = group_sides
+        .iter()
+        .find(|zone| zone.zone == DropZone::Left)
+        .unwrap();
+    let right_side = group_sides
+        .iter()
+        .find(|zone| zone.zone == DropZone::Right)
+        .unwrap();
+    assert_eq!(
+        left_side.target,
+        DropTarget::GroupEdge {
+            group: left_first_group,
+            zone: DropZone::Left,
+        }
+    );
+    assert_eq!(
+        right_side.target,
+        DropTarget::GroupEdge {
+            group: right_second_group,
+            zone: DropZone::Right,
+        }
+    );
+
+    for zone in [left_side, right_side] {
+        assert_eq!(zone.rect.origin.y, bounds.origin.y);
+        assert_eq!(zone.rect.size.height, bounds.size.height);
+        assert_eq!(zone.rect.size.width, metrics.edge_drop_width);
+
+        for fraction in [0.02, 0.5, 0.98] {
+            let point = Point::new(
+                zone.rect.origin.x + zone.rect.size.width * 0.5,
+                bounds.origin.y + bounds.size.height * fraction,
+            );
+            for source in [group_source, panel_source] {
+                let resolved = layout
+                    .resolve_drop(point, source, &rects, &metrics)
+                    .unwrap()
+                    .expect("the full-height side must resolve at every vertical position");
+                assert_eq!(resolved, Some(zone.target));
+            }
+        }
+    }
+
+    let point = Point::new(
+        right_side.rect.origin.x + right_side.rect.size.width * 0.5,
+        bounds.origin.y + bounds.size.height * 0.5,
+    );
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::Group { group: source_group },
+        handle: crate::DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point,
+        target: Some(right_side.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::SplitGroup {
+            group: source_group,
+            target_group: right_second_group,
+            zone: DropZone::Right,
+            ratio: 0.5,
+        })
+    );
+
+    layout.apply(
+        DockCommand::SplitGroup {
+            group: source_group,
+            target_group: right_second_group,
+            zone: DropZone::Right,
+            ratio: 0.5,
+        },
+        &metrics,
+    ).unwrap();
+
+    let target_area = layout.floating_group(target_float).unwrap().area;
+    let resulting_root = layout.dock_area(target_area).unwrap().root;
+    let Some(crate::Node::Split(split)) = layout.node(resulting_root) else {
+        panic!("the Floating drop must create a horizontal Split(X) of Columns");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children, vec![left_column, right_column, source_column]);
+    let Some(crate::Node::Column(inserted_column)) = layout.node(source_column) else {
+        panic!("the dropped Group must be wrapped in a new Column");
+    };
+    assert_eq!(inserted_column.groups, vec![source_group]);
+    assert!(layout.floating_group(target_float).is_some());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
 
 #[test]
 fn a_single_group_with_multiple_tabs_keeps_panel_tab_drop_semantics() {
