@@ -54,7 +54,10 @@ impl FloatingZoneContext<'_> {
         let Some(area) = self.layout.dock_area(floating.area) else {
             return Ok(());
         };
-        if !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING) {
+        if !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
+            || (matches!(self.source, DropSource::Composition { .. })
+                && area.root == self.source_root)
+        {
             return Ok(());
         }
 
@@ -427,7 +430,9 @@ fn floating_group_edge_rect(
     }) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
-    let height = metrics.edge_drop_width.max(splitter.rect.size.height);
+    // Keep the lower Group's Top zone separate: the Bottom zone occupies
+    // only the physical splitter thickness while remaining centred on it.
+    let height = metrics.splitter_thickness.min(splitter.rect.size.height);
     let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
     let rect = Rect::new(
         Point::new(group_rect.origin.x, center_y - height * 0.5),
