@@ -3341,7 +3341,7 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                     .resolve_drop(point, source, &rects, &metrics)
                     .unwrap()
                     .expect("the full-height side must resolve at every vertical position");
-                assert_eq!(resolved, Some(zone.target));
+                assert_eq!(resolved, zone.target);
             }
         }
     }
@@ -3384,8 +3384,13 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
         panic!("the Floating drop must create a horizontal Split(X) of Columns");
     };
     assert_eq!(split.axis, Axis::X);
-    assert_eq!(split.children, vec![left_column, right_column, source_column]);
-    let Some(crate::Node::Column(inserted_column)) = layout.node(source_column) else {
+    assert_eq!(split.children.len(), 3);
+    assert_eq!(&split.children[..2], &[left_column, right_column]);
+    let inserted_column_id = *split
+        .children
+        .last()
+        .expect("the new right-side Column should be appended");
+    let Some(crate::Node::Column(inserted_column)) = layout.node(inserted_column_id) else {
         panic!("the dropped Group must be wrapped in a new Column");
     };
     assert_eq!(inserted_column.groups, vec![source_group]);

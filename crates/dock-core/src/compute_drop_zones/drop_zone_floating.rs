@@ -102,16 +102,9 @@ impl FloatingZoneContext<'_> {
         self.append_group_edge_zones(&target_groups)?;
         self.append_column_slot_zones(area.root)?;
         self.append_edge_zones(floating_rect, area.root, &target_groups)?;
-        // Photoshop whole-composition side docking targets the outer edges of a
-        // compatible Floating composition. Generic keeps its flexible group edges.
-        if self.layout.profile() == Profile::Generic
-            || matches!(
-                self.source,
-                DropSource::Group { .. } | DropSource::Composition { .. }
-            )
-        {
-            self.append_side_zones(floating_rect, &target_groups, area.root)?;
-        }
+        // Side targets are source-aware: Photoshop uses composition-wide edges,
+        // while Generic retains its flexible per-Group horizontal split zones.
+        self.append_side_zones(floating_rect, &target_groups, area.root)?;
         Ok(())
     }
 }
@@ -366,8 +359,10 @@ impl FloatingZoneContext<'_> {
             // an outer side target for its own window. Otherwise, side targets
             // belong to the composition's two outermost Columns, not to every
             // individual Group in the vertical stacks.
-            if matches!(self.source, DropSource::Group { .. })
-                && contains_node(self.tree_index, floating_root, self.source_root)
+            if matches!(
+                self.source,
+                DropSource::Panel { .. } | DropSource::Group { .. }
+            ) && contains_node(self.tree_index, floating_root, self.source_root)
             {
                 return Ok(());
             }
