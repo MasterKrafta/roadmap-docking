@@ -593,10 +593,10 @@ fn best_containing_zone(
 
 fn zone_priority(zone: DropZone) -> u8 {
     match zone {
-        DropZone::RailInsertion => 0,
+        DropZone::RailInsertion | DropZone::Left | DropZone::Right => 0,
         DropZone::TabInsertion => 1,
         DropZone::DockEdge => 2,
-        DropZone::ColumnLeft | DropZone::ColumnRight | DropZone::Left | DropZone::Right => 3,
+        DropZone::ColumnLeft | DropZone::ColumnRight => 3,
         DropZone::FloatingTop | DropZone::FloatingBottom => 4,
         DropZone::Top | DropZone::Bottom => 5,
         DropZone::ColumnEnd => 6,

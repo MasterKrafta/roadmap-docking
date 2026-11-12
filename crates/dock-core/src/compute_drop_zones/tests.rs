@@ -3422,6 +3422,20 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                 assert_eq!(resolved, zone.target);
             }
         }
+
+        for strip in &rects.tab_strips {
+            let point = Point::new(
+                zone.rect.origin.x + zone.rect.size.width * 0.5,
+                strip.rect.origin.y + strip.rect.size.height * 0.5,
+            );
+            for source in [group_source, panel_source] {
+                let resolved = layout
+                    .resolve_drop(point, source, &rects, &metrics)
+                    .unwrap()
+                    .expect("the full-height side must remain active over tab strips");
+                assert_eq!(resolved, zone.target);
+            }
+        }
     }
 
     let point = Point::new(
