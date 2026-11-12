@@ -3052,12 +3052,65 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
 
 
 #[test]
-fn main_single_group_composition_uses_group_drop_zones_in_floating() {
+fn a_single_group_with_multiple_tabs_keeps_panel_tab_drop_semantics() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_panel) = builder.panel(key("main-floating-group-source"), constraints());
-    let source_group = builder.tabs(vec![source_panel], 0, false);
+    let (_, first_node) =
+        builder.panel(key("multi-tab-simple-first"), constraints());
+    let (source_panel, second_node) =
+        builder.panel(key("multi-tab-simple-second"), constraints());
+    let source_group = builder.tabs(vec![first_node, second_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_node) =
+        builder.panel(key("multi-tab-simple-target"), constraints());
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_float = builder.floating_group(
+        target_group,
+        Rect::new(Point::new(520.0, 100.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let layout = builder.build();
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::TabInsertion
+            && zone.target == (DropTarget::Tabs {
+                group: target_group,
+                index: 1,
+            })
+    }));
+    assert!(!zones.iter().any(|zone| {
+        matches!(
+            zone.target,
+            DropTarget::GroupTabs { group, .. } if group == target_group
+        )
+    }));
+}
+
+#[test]
+fn simple_composition_sources_share_identical_drop_zones_in_floating() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_panel_node) =
+        builder.panel(key("main-floating-group-source"), constraints());
+    let source_group = builder.tabs(vec![source_panel_node], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
@@ -3093,9 +3146,16 @@ fn main_single_group_composition_uses_group_drop_zones_in_floating() {
     let group_zones = layout
         .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
         .unwrap();
+    let panel_zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
+        .unwrap();
     assert_eq!(
         zones, group_zones,
-        "Main→Floating composition zones must match an ordinary Group drag"
+        "Main→Floating GroupGrip must use the same simple-composition zones"
+    );
+    assert_eq!(
+        zones, panel_zones,
+        "Main→Floating PanelTab must use the same simple-composition zones"
     );
     let target_column_rect = rects
         .columns
@@ -3156,14 +3216,14 @@ fn main_single_group_composition_uses_group_drop_zones_in_floating() {
     let bottom = zones
         .iter()
         .find(|zone| {
-            zone.zone == DropZone::FloatingBottom
+            zone.zone == DropZone::ColumnEnd
                 && zone.target
-                    == DropTarget::GroupEdge {
-                        group: third_group,
-                        zone: DropZone::Bottom,
+                    == DropTarget::ColumnSlot {
+                        column: target_column,
+                        index: 3,
                     }
         })
-        .expect("a single-group Main composition must expose the Floating bottom edge");
+        .expect("a simple Main composition must expose the Floating Column end slot");
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)

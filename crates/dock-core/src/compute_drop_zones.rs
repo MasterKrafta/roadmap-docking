@@ -110,11 +110,16 @@ impl Layout {
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
         let initial_root = source_root(self, source, tree_index)?;
-        let source = match source {
-            DropSource::Composition { .. } => single_group_in_subtree(self, initial_root)
-                .map(|group| DropSource::Group { group })
-                .unwrap_or(source),
-            _ => source,
+        let simple_composition = self.simple_composition_root_for_source(source);
+        let source = if let Some(root) = simple_composition {
+            DropSource::Composition { root }
+        } else {
+            match source {
+                DropSource::Composition { .. } => single_group_in_subtree(self, initial_root)
+                    .map(|group| DropSource::Group { group })
+                    .unwrap_or(source),
+                _ => source,
+            }
         };
         let source_root = source_root(self, source, tree_index)?;
         let source_panels = collect_panels(self, source_root);
@@ -181,6 +186,7 @@ impl Layout {
             may_add_right_column,
         };
         if matches!(source, DropSource::Composition { .. })
+            && simple_composition.is_none()
             && !source_is_floating_root(self, source_root)
         {
             if source_allows(self, &source_panels, AllowedArea::FLOATING)

@@ -238,6 +238,71 @@ impl Layout {
         })
     }
 
+    /// Returns the owning dock-area root when it has the exact Photoshop
+    /// single-Column / single-Group / single-Panel shape.
+    pub(crate) fn simple_composition_root_for_source(
+        &self,
+        source: DropSource,
+    ) -> Option<NodeId> {
+        if self.profile != Profile::Photoshop {
+            return None;
+        }
+
+        let node = match source {
+            DropSource::Composition { root } => {
+                let is_area_root = [DockSide::Left, DockSide::Right]
+                    .into_iter()
+                    .filter_map(|side| self.main_area(side).map(|area| area.root))
+                    .any(|area_root| area_root == root)
+                    || self.floating_groups.values().any(|floating| {
+                        self.dock_areas
+                            .get(floating.area)
+                            .is_some_and(|area| area.root == root)
+                    });
+                if !is_area_root {
+                    return None;
+                }
+                return self.is_simple_composition_root(root).then_some(root);
+            }
+            DropSource::Group { group } => group,
+            DropSource::Panel { panel } => self.find_panel_node(panel)?,
+        };
+
+        let root = [DockSide::Left, DockSide::Right]
+            .into_iter()
+            .filter_map(|side| self.main_area(side).map(|area| area.root))
+            .find(|root| self.is_descendant_or_same(*root, node))
+            .or_else(|| self.find_floating_root_containing(node))?;
+
+        self.is_simple_composition_root(root).then_some(root)
+    }
+
+    pub(crate) fn is_simple_composition_root(&self, root: NodeId) -> bool {
+        let Some(Node::Column(column)) = self.nodes.get(root) else {
+            return false;
+        };
+        let [group] = column.groups.as_slice() else {
+            return false;
+        };
+        let Some(Node::Tabs(tabs)) = self.nodes.get(*group) else {
+            return false;
+        };
+        let [panel] = tabs.children.as_slice() else {
+            return false;
+        };
+        matches!(self.nodes.get(*panel), Some(Node::Panel(_)))
+    }
+
+    pub(crate) fn simple_composition_group(&self, root: NodeId) -> Option<NodeId> {
+        if !self.is_simple_composition_root(root) {
+            return None;
+        }
+        match self.nodes.get(root) {
+            Some(Node::Column(column)) => column.groups.first().copied(),
+            _ => None,
+        }
+    }
+
     pub(super) fn is_descendant_or_same(&self, root: NodeId, target: NodeId) -> bool {
         if root == target {
             return true;

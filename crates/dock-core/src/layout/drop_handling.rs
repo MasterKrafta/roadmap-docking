@@ -33,6 +33,10 @@ impl Layout {
             });
         }
 
+        if let Some(root) = self.simple_composition_root_for_drag_request(request) {
+            return self.resolve_simple_composition_drag(request, root, metrics);
+        }
+
         match (request.handle, request.payload) {
             (DragHandle::FloatingTitle, DragPayload::FloatingGroup { group }) => {
                 self.resolve_floating_title_drag(request, group)
@@ -52,6 +56,182 @@ impl Layout {
             _ => Err(CommandError::InvalidTarget {
                 reason: "drag handle and payload do not describe a supported drag operation",
             }),
+        }
+    }
+
+    fn simple_composition_root_for_drag_request(
+        &self,
+        request: &DragDropRequest,
+    ) -> Option<NodeId> {
+        match (request.handle, request.payload) {
+            (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+                self.simple_composition_root_for_source(DropSource::Panel { panel })
+            }
+            (DragHandle::GroupGrip, DragPayload::Group { group }) => {
+                self.simple_composition_root_for_source(DropSource::Group { group })
+            }
+            (DragHandle::DockAreaHeader, DragPayload::DockArea { side }) => {
+                let root = self.main_area(side)?.root;
+                self.simple_composition_root_for_source(DropSource::Composition { root })
+            }
+            (DragHandle::FloatingCapture, DragPayload::FloatingGroup { group }) => {
+                let root = self
+                    .floating_group(group)
+                    .and_then(|floating| self.dock_area(floating.area))
+                    .map(|area| area.root)?;
+                self.simple_composition_root_for_source(DropSource::Composition { root })
+            }
+            _ => None,
+        }
+    }
+
+    /// The exact 1/1/1 shape is one semantic drag source regardless of which
+    /// surface initiated it. Keep the Column as the payload root whenever the
+    /// destination accepts a complete Column; only vertical Group insertion
+    /// consumes the structural wrapper and moves its sole Tabs child.
+    fn resolve_simple_composition_drag(
+        &self,
+        request: &DragDropRequest,
+        column: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<DragDropAction, CommandError> {
+        let group = self
+            .simple_composition_group(column)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "simple composition source no longer has the 1/1/1 shape",
+            })?;
+        let Some(target) = request.target else {
+            return if matches!(request.handle, DragHandle::FloatingCapture) {
+                Ok(DragDropAction::NoOp)
+            } else {
+                Err(CommandError::InvalidTarget {
+                    reason: "simple-composition drag requires a resolved drop target",
+                })
+            };
+        };
+
+        if target
+            .referenced_node_id()
+            .is_some_and(|node| self.is_descendant_or_same(column, node))
+        {
+            return Ok(DragDropAction::NoOp);
+        }
+
+        if matches!(target, DropTarget::FreeArea) {
+            if self.find_floating_root_containing(column).is_some() {
+                return Err(CommandError::InvalidTarget {
+                    reason: "a Floating composition cannot be floated into its own free area",
+                });
+            }
+            let bounds = request.floating_bounds.ok_or(CommandError::InvalidTarget {
+                reason: "FreeArea Float requests require explicit window bounds",
+            })?;
+            bounds
+                .validate_non_empty()
+                .map_err(|_| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: "floating bounds must be finite and positive",
+                })?;
+            self.validate_panel_ids_allowed_for_area(
+                &self.panel_ids_in_subtree(column),
+                AllowedArea::FLOATING,
+            )?;
+            return Ok(DragDropAction::Command(DockCommand::Float {
+                node: column,
+                bounds,
+            }));
+        }
+
+        self.validate_drop_target(target, metrics)?;
+        self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(column), target)?;
+
+        match target {
+            DropTarget::MainColumn { side, index } => {
+                if let Some((source_side, source_index)) = self.main_column_position(column)
+                    && source_side == side
+                    && (index == source_index || index == source_index + 1)
+                {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(
+                    DockCommand::MoveColumnToMainColumn {
+                        column,
+                        side,
+                        index,
+                    },
+                ))
+            }
+            DropTarget::GroupEdge {
+                group: target_group,
+                zone: zone @ (DropZone::Left | DropZone::Right),
+            } => {
+                if self.group_edge_is_same_position(group, target_group, zone) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::MoveColumnToTarget {
+                    column,
+                    target,
+                }))
+            }
+            DropTarget::GroupEdge {
+                group: target_group,
+                zone: zone @ (DropZone::Top | DropZone::Bottom),
+            } => {
+                if self.group_edge_is_same_position(group, target_group, zone) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::SplitGroup {
+                    group,
+                    target_group,
+                    zone,
+                    ratio: 0.5,
+                }))
+            }
+            DropTarget::GroupTabs {
+                group: target_group,
+                index,
+            }
+            | DropTarget::Tabs {
+                group: target_group,
+                index,
+            } => {
+                if group == target_group {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::MergeGroup {
+                    group,
+                    target_group,
+                    index,
+                }))
+            }
+            DropTarget::ColumnSlot {
+                column: target_column,
+                index,
+            } => {
+                if self.group_slot_is_noop(group, target_column, index) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::MoveGroup {
+                    group,
+                    column: target_column,
+                    index,
+                }))
+            }
+            DropTarget::RailSlot {
+                column: target_column,
+                index,
+            } => {
+                let group_index = self.rail_slot_group_index(target_column, index)?;
+                if self.group_slot_is_noop(group, target_column, group_index) {
+                    return Ok(DragDropAction::NoOp);
+                }
+                Ok(DragDropAction::Command(DockCommand::MoveGroup {
+                    group,
+                    column: target_column,
+                    index: group_index,
+                }))
+            }
+            DropTarget::FreeArea => unreachable!("FreeArea is handled before target validation"),
         }
     }
 
