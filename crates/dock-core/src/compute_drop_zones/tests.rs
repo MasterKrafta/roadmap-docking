@@ -454,7 +454,8 @@ fn photoshop_side_drop_targets_are_column_scoped_and_cover_full_height() {
     builder.main_area(DockSide::Left, target_column);
 
     let (source_panel, source_node) = builder.panel(key("full-height-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("full-height-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column =
         builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
@@ -619,7 +620,8 @@ fn allowed_areas_hide_disallowed_main_dock_targets_but_keep_floating_and_free_ar
         key("floating-only"),
         constraints().with_allowed_areas(AllowedArea::FLOATING),
     );
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("floating-only-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Left, column);
 
@@ -1195,7 +1197,8 @@ fn icon_rail_targets_flattened_insertion_order() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("rail-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("rail-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
@@ -1291,7 +1294,8 @@ fn resolver_uses_only_the_supplied_floating_window_snapshot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (source_panel, source_node) = builder.panel(key("resolve-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("resolve-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Left, source_column);
 
@@ -2039,7 +2043,9 @@ fn floating_panel_tab_strip_uses_one_append_zone() {
 
     let (source_panel, source_node) =
         builder.panel(key("floating-strip-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) =
+        builder.panel(key("floating-strip-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
@@ -2417,8 +2423,8 @@ fn photoshop_single_group_composition_uses_group_edges_in_floating_horizontal_co
     };
 
     assert!(has_edge(left_group, DropZone::Left));
-    assert!(has_edge(left_group, DropZone::Right));
-    assert!(has_edge(right_group, DropZone::Left));
+    assert!(!has_edge(left_group, DropZone::Right));
+    assert!(!has_edge(right_group, DropZone::Left));
     assert!(has_edge(right_group, DropZone::Right));
 }
 
@@ -3189,12 +3195,12 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
     assert_eq!(main_zones, main_group_zones);
     assert_eq!(main_zones, main_panel_zones);
     assert!(main_zones.iter().any(|zone| {
-        zone.zone == DropZone::Center
+        zone.zone == DropZone::FloatingCenter
             && zone.target == DropTarget::GroupTabs {
                 group: first_group,
                 index: 1,
             }
-    }), "the simple composition must expose Main group-center docking");
+    }), "the simple composition must expose Floating group-center docking");
 
     let target_column_rect = rects
         .columns

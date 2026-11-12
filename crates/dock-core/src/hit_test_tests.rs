@@ -217,7 +217,8 @@ fn floating_window_hit_testing_and_drop_zones_use_its_local_snapshot() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (lower_panel, lower_node) = builder.panel(key("lower-window"), constraints());
-    let lower_group = builder.tabs(vec![lower_node], 0, false);
+    let (_, lower_sibling_node) = builder.panel(key("lower-window-sibling"), constraints());
+    let lower_group = builder.tabs(vec![lower_node, lower_sibling_node], 0, false);
     let bounds = Rect::new(Point::new(100.0, 80.0), Size::new(300.0, 220.0));
     let lower = builder.floating_group(lower_group, bounds, 1);
 
@@ -281,7 +282,8 @@ fn drop_zone_precedence_makes_tab_insertions_and_group_edges_reachable() {
     builder.main_area(DockSide::Left, target_column);
 
     let (source_panel, source_node) = builder.panel(key("drop-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("drop-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 
@@ -370,7 +372,8 @@ fn drop_zone_precedence_makes_rail_insertions_reachable() {
     builder.main_area(DockSide::Left, rail_column);
 
     let (source_panel, source_node) = builder.panel(key("drop-rail-source"), constraints());
-    let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, source_sibling_node) = builder.panel(key("drop-rail-source-sibling"), constraints());
+    let source_group = builder.tabs(vec![source_node, source_sibling_node], 0, false);
     let source_column = builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
     builder.main_area(DockSide::Right, source_column);
 

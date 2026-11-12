@@ -650,7 +650,8 @@ fn floating_group_can_split_against_another_floating_window_edge() {
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
     let (_, source_panel) = builder.panel(key("floating-edge-source"), constraints());
-    let source_root = builder.tabs(vec![source_panel], 0, false);
+    let (_, source_sibling) = builder.panel(key("floating-edge-source-sibling"), constraints());
+    let source_root = builder.tabs(vec![source_panel, source_sibling], 0, false);
     let source_float = builder.floating_group(source_root, bounds(40.0, 50.0), 1);
 
     let (_, target_panel) = builder.panel(key("floating-edge-target"), constraints());
