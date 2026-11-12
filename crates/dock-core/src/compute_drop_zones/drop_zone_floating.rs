@@ -109,8 +109,10 @@ impl FloatingZoneContext<'_> {
                 Some(Node::Tabs(tabs)) if !tabs.collapsed => tabs,
                 _ => continue,
             };
-            let is_self = matches!(self.source, DropSource::Group { .. })
-                && contains_node(self.tree_index, self.source_root, target_group.group);
+            let is_self = matches!(
+                self.source,
+                DropSource::Group { .. } | DropSource::Composition { .. }
+            ) && contains_node(self.tree_index, self.source_root, target_group.group);
             let panel_already_in_group = match self.source {
                 DropSource::Panel { panel } => {
                     panel_node(self.tree_index, panel)
@@ -130,6 +132,14 @@ impl FloatingZoneContext<'_> {
                 },
                 DropSource::Group { .. }
                     if matches!(self.layout.node(self.source_root), Some(Node::Tabs(_))) =>
+                {
+                    DropTarget::GroupTabs {
+                        group: target_group.group,
+                        index: tabs.children.len(),
+                    }
+                }
+                DropSource::Composition { .. }
+                    if self.layout.is_simple_composition_root(self.source_root) =>
                 {
                     DropTarget::GroupTabs {
                         group: target_group.group,

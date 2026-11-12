@@ -51,9 +51,12 @@ impl Layout {
                 }
                 DropSource::Group { .. } | DropSource::Composition { .. } => false,
             };
+            let simple_composition =
+                matches!(source, DropSource::Composition { .. })
+                    && self.is_simple_composition_root(source_root);
             if !source_contains_target
                 && !source_panel_is_here
-                && !matches!(source, DropSource::Composition { .. })
+                && (!matches!(source, DropSource::Composition { .. }) || simple_composition)
                 && source_allows(self, source_panels, area)
             {
                 let center_rect = group_center_rect(group_rect.rect, metrics)?;
@@ -63,6 +66,10 @@ impl Layout {
                         index: tabs.children.len(),
                     },
                     DropSource::Group { .. } => DropTarget::GroupTabs {
+                        group: group_rect.group,
+                        index: tabs.children.len(),
+                    },
+                    DropSource::Composition { .. } if simple_composition => DropTarget::GroupTabs {
                         group: group_rect.group,
                         index: tabs.children.len(),
                     },
@@ -267,13 +274,21 @@ impl Layout {
             }
         }
 
-        // A single-group composition is normalized to Group before this method.
-        // Multi-group compositions retain composition-level drop targets.
-        if !matches!(source, DropSource::Group { .. })
-            || !matches!(self.node(source_root_id), Some(Node::Tabs(_)))
-        {
+        // A normal Group drag and the strict Photoshop 1/1/1 composition both
+        // append the entire Tabs group to a target tab strip. Other compositions
+        // retain their composition-level destinations and do not merge here.
+        let simple_composition = matches!(source, DropSource::Composition { .. })
+            && self.is_simple_composition_root(source_root_id);
+        if !matches!(source, DropSource::Group { .. }) && !simple_composition {
             return Ok(());
         }
+        let source_group = match source {
+            DropSource::Group { .. } => source_root_id,
+            DropSource::Composition { .. } if simple_composition => self
+                .simple_composition_group(source_root_id)
+                .ok_or(ComputeRectsError::InvalidLayoutState)?,
+            _ => return Ok(()),
+        };
 
         if self.profile() == Profile::Photoshop {
             for strip in &rects.tab_strips {
@@ -282,8 +297,8 @@ impl Layout {
                 };
                 if (area != AllowedArea::MAIN_DOCK && area != AllowedArea::FLOATING)
                     || !source_allows(self, source_panels, area)
-                    || contains_node(tree_index, source_root_id, strip.group)
-                    || contains_node(tree_index, strip.group, source_root_id)
+                    || contains_node(tree_index, source_group, strip.group)
+                    || contains_node(tree_index, strip.group, source_group)
                 {
                     continue;
                 }
@@ -316,8 +331,8 @@ impl Layout {
             {
                 continue;
             }
-            if contains_node(tree_index, source_root_id, header.group)
-                || contains_node(tree_index, header.group, source_root_id)
+            if contains_node(tree_index, source_group, header.group)
+                || contains_node(tree_index, header.group, source_group)
             {
                 continue;
             }

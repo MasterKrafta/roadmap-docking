@@ -1324,7 +1324,7 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
-    let (_, source_node) =
+    let (source_panel, source_node) =
         builder.panel(key("simple-floating-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
     let source_column = builder.column(
@@ -1384,14 +1384,50 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         target: Some(main_target),
         floating_bounds: None,
     };
-    assert_eq!(
-        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+    let floating_to_main_action =
         DragDropAction::Command(DockCommand::MoveColumnToMainColumn {
             column: source_column,
             side: DockSide::Right,
             index: 0,
-        })
+        });
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        floating_to_main_action
     );
+    let group_capture_request = DragDropRequest {
+        payload: DragPayload::Group { group: source_group },
+        handle: DragHandle::GroupGrip,
+        ..request
+    };
+    let panel_capture_request = DragDropRequest {
+        payload: DragPayload::Panel { panel: source_panel },
+        handle: DragHandle::PanelTab,
+        ..request
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&group_capture_request, &metrics).unwrap(),
+        floating_to_main_action
+    );
+    assert_eq!(
+        layout.resolve_drag_drop(&panel_capture_request, &metrics).unwrap(),
+        floating_to_main_action
+    );
+    let main_group_zones = layout
+        .compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    let main_panel_zones = layout
+        .compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(zones, main_group_zones);
+    assert_eq!(zones, main_panel_zones);
 
     let mut main_layout = layout.clone();
     main_layout
@@ -1425,6 +1461,22 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
             &metrics,
         )
         .unwrap();
+    let floating_group_zones = layout
+        .compute_drop_zones(
+            DropSource::Group { group: source_group },
+            &target_rects,
+            &metrics,
+        )
+        .unwrap();
+    let floating_panel_zones = layout
+        .compute_drop_zones(
+            DropSource::Panel { panel: source_panel },
+            &target_rects,
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(floating_zones, floating_group_zones);
+    assert_eq!(floating_zones, floating_panel_zones);
     let floating_target = DropTarget::GroupEdge {
         group: target_group,
         zone: crate::DropZone::Left,
@@ -1439,12 +1491,32 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         point: Point::new(510.0, 260.0),
         ..request
     };
-    assert_eq!(
-        layout.resolve_drag_drop(&floating_request, &metrics).unwrap(),
+    let floating_to_floating_action =
         DragDropAction::Command(DockCommand::MoveColumnToTarget {
             column: source_column,
             target: floating_target,
-        })
+        });
+    assert_eq!(
+        layout.resolve_drag_drop(&floating_request, &metrics).unwrap(),
+        floating_to_floating_action
+    );
+    let group_to_floating_request = DragDropRequest {
+        payload: DragPayload::Group { group: source_group },
+        handle: DragHandle::GroupGrip,
+        ..floating_request
+    };
+    let panel_to_floating_request = DragDropRequest {
+        payload: DragPayload::Panel { panel: source_panel },
+        handle: DragHandle::PanelTab,
+        ..floating_request
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&group_to_floating_request, &metrics).unwrap(),
+        floating_to_floating_action
+    );
+    assert_eq!(
+        layout.resolve_drag_drop(&panel_to_floating_request, &metrics).unwrap(),
+        floating_to_floating_action
     );
 
     layout

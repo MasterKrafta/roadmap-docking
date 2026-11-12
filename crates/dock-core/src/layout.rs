@@ -7,8 +7,9 @@ use slotmap::SlotMap;
 
 use crate::{
     Axis, CanvasState, ChromeMode, Column, ColumnMode, CommandError, CommandOutcome, CommandValue,
-    DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
-    FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, LastDockLocation, Node, NodeId,
+    DockArea, DockAreaId, DockAreaKind, DockCommand, DockMetrics, DockSide, DropSource, DropTarget,
+    DropZone, FloatingGroup, FloatingGroupId, FlyoutState, GeometryError, LastDockLocation, Node,
+    NodeId,
     Panel, PanelId, PanelInstance, PanelKey, Point, Profile, Rect, Size, Split, Tabs,
     ValidationError, ValidationReason, command_application::CommandApplication,
 };

@@ -63,13 +63,15 @@ pub struct DragDropRequest {
 /// DropTarget.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DragHandle {
-    /// One tab header; moves/reorders a single Panel.
+    /// One tab header; normally moves/reorders a single Panel. In the exact
+    /// Photoshop 1/1/1 case, it carries the complete simple composition.
     PanelTab,
     /// A panel surface in a rail flyout; the source flyout remains visible during the gesture.
     ///
     /// A completed valid drop closes that source flyout; cancelled gestures leave it open.
     FlyoutPanel,
-    /// A group's grip/header; moves the whole Tabs node.
+    /// A group's grip/header; normally moves the whole Tabs node. In the
+    /// exact Photoshop 1/1/1 case, it carries the complete simple composition.
     GroupGrip,
     /// The shared header of a Main DockArea; detaches its complete composition.
     DockAreaHeader,
@@ -106,9 +108,11 @@ impl DragHandle {
 
 /// The semantic model object carried by a drag session.
 ///
-/// These identifiers are runtime handles. The command/layout layer must
-/// revalidate them when a drop is applied; this transient payload is not a
-/// persistent identity or a second copy of the layout tree.
+/// The payload preserves which UI object initiated a drag. In the Photoshop
+/// profile, the exact 1/1/1 shape (one Column, one Tabs group, one Panel) is
+/// promoted to whole-composition semantics by the resolver, without rewriting
+/// the original payload. These identifiers are runtime handles and are not
+/// persistent identities or a second copy of the layout tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DragPayload {
     /// One panel tab. The request carries only this panel's identity.

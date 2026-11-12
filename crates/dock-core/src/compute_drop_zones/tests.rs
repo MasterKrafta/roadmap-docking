@@ -3157,6 +3157,45 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
         zones, panel_zones,
         "Main→Floating PanelTab must use the same simple-composition zones"
     );
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::TabInsertion
+            && zone.target == DropTarget::GroupTabs {
+                group: first_group,
+                index: 1,
+            }
+    }), "the simple composition must be able to merge into another Floating group");
+    assert!(zones.iter().any(|zone| {
+        zone.zone == DropZone::FloatingCenter
+            && zone.target == DropTarget::GroupTabs {
+                group: first_group,
+                index: 1,
+            }
+    }), "the simple composition must expose Floating group-center docking");
+    let main_rects = layout
+        .compute_rects(
+            Rect::new(Point::ZERO, Size::new(1200.0, 800.0)),
+            &metrics,
+        )
+        .unwrap();
+    let main_zones = layout
+        .compute_drop_zones(source, &main_rects, &metrics)
+        .unwrap();
+    let main_group_zones = layout
+        .compute_drop_zones(DropSource::Group { group: source_group }, &main_rects, &metrics)
+        .unwrap();
+    let main_panel_zones = layout
+        .compute_drop_zones(DropSource::Panel { panel: source_panel }, &main_rects, &metrics)
+        .unwrap();
+    assert_eq!(main_zones, main_group_zones);
+    assert_eq!(main_zones, main_panel_zones);
+    assert!(main_zones.iter().any(|zone| {
+        zone.zone == DropZone::Center
+            && zone.target == DropTarget::GroupTabs {
+                group: first_group,
+                index: 1,
+            }
+    }), "the simple composition must expose Main group-center docking");
+
     let target_column_rect = rects
         .columns
         .iter()
