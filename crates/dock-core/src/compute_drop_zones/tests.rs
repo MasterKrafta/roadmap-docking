@@ -3201,7 +3201,7 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
                 group: first_group,
                 index: 1,
             }
-    }), "the simple composition must expose Floating group-center docking");
+    }), "the simple composition must expose Main group-center docking");
 
     let target_column_rect = rects
         .columns
