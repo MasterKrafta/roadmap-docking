@@ -6,9 +6,9 @@
 use slotmap::SlotMap;
 
 use crate::{
-    CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockSide, FloatingGroup,
-    FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId, PanelInstance,
-    PanelKey, Profile, Rect, Split, Tabs,
+    CanvasState, ChromeMode, Column, ColumnMode, DockArea, DockAreaId, DockMetrics, DockSide,
+    FloatingGroup, FloatingGroupId, Layout, Node, NodeId, Panel, PanelConstraints, PanelId,
+    PanelInstance, PanelKey, Profile, Rect, Split, Tabs,
 };
 
 pub(crate) struct LayoutBuilder {
@@ -118,12 +118,70 @@ impl LayoutBuilder {
         id
     }
 
+    fn minimum_panel_width_in_subtree(&self, root: NodeId) -> f32 {
+        let mut pending = vec![root];
+        let mut minimum_width = 0.0_f32;
+        while let Some(node_id) = pending.pop() {
+            match self.nodes.get(node_id) {
+                Some(Node::Panel(panel)) => {
+                    if let Some(instance) = self.panel_instances.get(panel.panel_id) {
+                        minimum_width = minimum_width.max(instance.constraints.min_size.width);
+                    }
+                }
+                Some(Node::Tabs(tabs)) => pending.extend(tabs.children.iter().copied()),
+                Some(Node::Split(split)) => pending.extend(split.children.iter().copied()),
+                Some(Node::Column(column)) => pending.extend(column.groups.iter().copied()),
+                None => {}
+            }
+        }
+        minimum_width
+    }
+
+    fn canonical_floating_root(&mut self, root: NodeId, requested_width: f32) -> NodeId {
+        if self.profile != Profile::Photoshop {
+            return root;
+        }
+
+        let metrics = DockMetrics::default();
+        let width = requested_width
+            .max(metrics.min_column_width)
+            .max(self.minimum_panel_width_in_subtree(root));
+        match self.nodes.get(root).cloned() {
+            Some(Node::Panel(_)) => {
+                let group = self.tabs(vec![root], 0, false);
+                self.column(width, ColumnMode::Expanded, vec![group], vec![1.0])
+            }
+            Some(Node::Tabs(_)) => {
+                self.column(width, ColumnMode::Expanded, vec![root], vec![1.0])
+            }
+            Some(Node::Split(split))
+                if split.axis == crate::Axis::Y
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Tabs(_)))
+                    }) =>
+            {
+                if let Some(node) = self.nodes.get_mut(root) {
+                    *node = Node::Column(Column {
+                        width,
+                        mode: ColumnMode::Expanded,
+                        groups: split.children,
+                        group_ratios: split.ratios,
+                        last_expanded_width: Some(width),
+                    });
+                }
+                root
+            }
+            _ => root,
+        }
+    }
+
     pub(crate) fn floating_group(
         &mut self,
         root: NodeId,
         bounds: Rect,
         z_order: i32,
     ) -> FloatingGroupId {
+        let root = self.canonical_floating_root(root, bounds.size.width);
         let area = self.dock_areas.insert(DockArea::floating(root));
         self.floating_groups
             .insert(FloatingGroup::new(area, bounds, z_order))

@@ -269,7 +269,7 @@ fn photoshop_floating_roots_accept_columns_and_horizontal_compositions() {
 }
 
 #[test]
-fn float_group_uses_existing_tabs_as_floating_root() {
+fn float_group_wraps_existing_tabs_in_floating_column() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
 
@@ -311,6 +311,101 @@ fn float_group_uses_existing_tabs_as_floating_root() {
                 && column.width >= metrics.min_column_width
     ));
     assert!(matches!(layout.node(floating_tabs), Some(Node::Tabs(_))));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn legacy_floating_tabs_root_is_wrapped_in_a_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel) = builder.panel(
+        PanelKey::new("legacy-floating-tabs-root").unwrap(),
+        descriptors()[0].1,
+    );
+    let group = builder.tabs(vec![panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    let floating = builder.floating_group(
+        column,
+        Rect::new(Point::new(80.0, 60.0), Size::new(360.0, 260.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let area = layout.floating_group(floating).unwrap().area;
+    layout.nodes.remove(column);
+    layout.dock_areas.get_mut(area).unwrap().root = group;
+
+    assert!(layout.validate(&metrics).unwrap_err().iter().any(|error| {
+        matches!(error, crate::ValidationError::InvalidFloatingRoot { group: actual, .. }
+            if *actual == floating)
+    }));
+
+    layout.normalize_for_test(&metrics).unwrap();
+
+    let root = layout.dock_area(area).unwrap().root;
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Column(column)) if column.groups == vec![group]
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn legacy_floating_vertical_group_stack_becomes_one_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, first_panel) = builder.panel(
+        PanelKey::new("legacy-floating-stack-first").unwrap(),
+        descriptors()[0].1,
+    );
+    let first_group = builder.tabs(vec![first_panel], 0, false);
+    let (_, second_panel) = builder.panel(
+        PanelKey::new("legacy-floating-stack-second").unwrap(),
+        descriptors()[0].1,
+    );
+    let second_group = builder.tabs(vec![second_panel], 0, false);
+    let split = builder.split(
+        Axis::Y,
+        vec![first_group, second_group],
+        vec![0.25, 0.75],
+    );
+    let placeholder_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.25, 0.75],
+    );
+    let floating = builder.floating_group(
+        placeholder_column,
+        Rect::new(Point::new(80.0, 60.0), Size::new(420.0, 360.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let area = layout.floating_group(floating).unwrap().area;
+    layout.nodes.remove(placeholder_column);
+    layout.dock_areas.get_mut(area).unwrap().root = split;
+
+    assert!(layout.validate(&metrics).unwrap_err().iter().any(|error| {
+        matches!(error, crate::ValidationError::InvalidFloatingRoot { group: actual, .. }
+            if *actual == floating)
+    }));
+
+    layout.normalize_for_test(&metrics).unwrap();
+
+    let root = layout.dock_area(area).unwrap().root;
+    assert_eq!(root, split);
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Column(column))
+            if column.groups == vec![first_group, second_group]
+                && column.group_ratios == vec![0.25, 0.75]
+    ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 

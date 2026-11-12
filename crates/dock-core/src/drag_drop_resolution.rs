@@ -690,11 +690,10 @@ fn floating_group_can_split_against_another_floating_window_edge() {
     assert!(layout.floating_group(target_float).is_some());
     let target_area = layout.floating_group(target_float).unwrap().area;
     let root = layout.dock_area(target_area).unwrap().root;
-    let Some(Node::Split(split)) = layout.node(root) else {
-        panic!("the destination floating window now owns a vertical split");
+    let Some(Node::Column(column)) = layout.node(root) else {
+        panic!("the destination floating window must retain its Column root");
     };
-    assert_eq!(split.axis, Axis::Y);
-    assert_eq!(split.children, vec![target_root, source_root]);
+    assert_eq!(column.groups, vec![target_root, source_root]);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 

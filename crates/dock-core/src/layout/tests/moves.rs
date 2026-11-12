@@ -363,12 +363,11 @@ fn c44_split_group_moves_whole_tabs_into_an_existing_floating_stack() {
 
     let floating = layout.floating_group(floating_id).unwrap();
     let root = layout.dock_area(floating.area).unwrap().root;
-    let Node::Split(split) = layout.node(root).unwrap() else {
-        panic!("dropping below the floating root should create Split(Y)");
+    let Node::Column(column) = layout.node(root).unwrap() else {
+        panic!("dropping below a floating group should insert into its Column");
     };
-    assert_eq!(split.axis, Axis::Y);
-    assert_eq!(split.children, vec![target_group, source_group]);
-    assert_eq!(split.ratios, vec![0.65, 0.35]);
+    assert_eq!(column.groups, vec![target_group, source_group]);
+    assert_eq!(column.group_ratios, vec![0.65, 0.35]);
     assert!(layout.main_area(DockSide::Left).is_none());
     assert!(matches!(
         layout.node(source_group),
@@ -445,16 +444,16 @@ fn c44_split_group_preserves_existing_floating_stack_ratios_when_inserting_sibli
 
     let floating = layout.floating_group(floating_id).unwrap();
     let root = layout.dock_area(floating.area).unwrap().root;
-    let Node::Split(split) = layout.node(root).unwrap() else {
-        panic!("inserting beside an existing floating group should retain Split(Y)");
+    let Node::Column(column) = layout.node(root).unwrap() else {
+        panic!("inserting beside an existing floating group must retain its Column");
     };
     assert_eq!(
-        split.children,
+        column.groups,
         vec![top_group, middle_group, source_group, bottom_group]
     );
     let expected_ratios = [0.2, 0.225, 0.075, 0.5];
-    assert_eq!(split.ratios.len(), expected_ratios.len());
-    for (actual, expected) in split.ratios.iter().zip(expected_ratios) {
+    assert_eq!(column.group_ratios.len(), expected_ratios.len());
+    for (actual, expected) in column.group_ratios.iter().zip(expected_ratios) {
         assert!((actual - expected).abs() < 1.0e-5);
     }
     assert!(layout.main_area(DockSide::Left).is_none());

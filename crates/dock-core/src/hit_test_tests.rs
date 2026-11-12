@@ -190,7 +190,9 @@ fn floating_root_tab_header_is_not_a_separate_window_title_hit() {
     let layout = builder.build();
     let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
-    let tab_header_y = metrics.header_height + metrics.tab_strip_height * 0.5;
+    let tab_header_y = metrics.column_header_height
+        + metrics.header_height
+        + metrics.tab_strip_height * 0.5;
     assert_eq!(
         layout
             .hit_test(Point::new(80.0, tab_header_y), &rects, &metrics)

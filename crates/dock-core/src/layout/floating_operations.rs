@@ -138,7 +138,7 @@ impl Layout {
         if self.profile == Profile::Photoshop && !supports_photoshop_floating_root {
             return Err(CommandError::UnsupportedForProfile {
                 profile: self.profile,
-                reason: "Photoshop floating roots must be Panel, Tabs, Column, or Split(X) of Columns",
+                reason: "Photoshop floating compositions must be rooted at a Column or Split(X) of Columns",
             });
         }
         let next_z = self.next_floating_z_order()?;
@@ -287,6 +287,61 @@ impl Layout {
                 && self.floating_group_is_in_column_composition(target_group) =>
             {
                 self.dock_floating_composition_to_edge(group_id, root, target_group, zone)
+            }
+            (
+                Some(Node::Column(column)),
+                DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: zone @ (DropZone::Left | DropZone::Right),
+                },
+            ) if self.profile == Profile::Photoshop
+                && column.groups.len() == 1
+                && self
+                    .find_owner_column(target_group)
+                    .is_some_and(|target_column| self.main_column_position(target_column).is_some()) =>
+            {
+                let moving_group = column.groups[0];
+                self.detach_node(moving_group)?;
+                self.insert_group_edge(moving_group, target_group, zone, Some(0.5), metrics)
+            }
+            (
+                Some(Node::Column(column)),
+                DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: zone @ (DropZone::Top | DropZone::Bottom),
+                },
+            ) if self.profile == Profile::Photoshop && column.groups.len() == 1 => {
+                let moving_group = column.groups[0];
+                self.detach_node(moving_group)?;
+                self.insert_group_edge(moving_group, target_group, zone, Some(0.5), metrics)
+            }
+            (
+                Some(Node::Column(column)),
+                DropTarget::ColumnSlot {
+                    column: target_column,
+                    index,
+                },
+            ) if self.profile == Profile::Photoshop && !column.groups.is_empty() => {
+                self.dock_floating_column_to_column_slot(
+                    root,
+                    column,
+                    target_column,
+                    index,
+                )
+            }
+            (
+                Some(Node::Column(column)),
+                DropTarget::RailSlot {
+                    column: target_column,
+                    index,
+                },
+            ) if self.profile == Profile::Photoshop && !column.groups.is_empty() => {
+                self.dock_floating_column_to_rail_slot(
+                    root,
+                    column,
+                    target_column,
+                    index,
+                )
             }
             (Some(Node::Split(_)), _) => Err(CommandError::InvalidTarget {
                 reason: "floating split stacks can only be docked into a main column or icon rail",
@@ -467,6 +522,36 @@ impl Layout {
         }
 
         Ok(())
+    }
+
+    pub(super) fn dock_floating_column_to_column_slot(
+        &mut self,
+        root: NodeId,
+        column: Column,
+        target_column: NodeId,
+        index: usize,
+    ) -> Result<(), CommandError> {
+        let split = Split {
+            axis: Axis::Y,
+            children: column.groups,
+            ratios: column.group_ratios,
+        };
+        self.dock_floating_stack_to_column_slot(root, split, target_column, index)
+    }
+
+    pub(super) fn dock_floating_column_to_rail_slot(
+        &mut self,
+        root: NodeId,
+        column: Column,
+        target_column: NodeId,
+        index: usize,
+    ) -> Result<(), CommandError> {
+        let split = Split {
+            axis: Axis::Y,
+            children: column.groups,
+            ratios: column.group_ratios,
+        };
+        self.dock_floating_stack_to_rail_slot(root, split, target_column, index)
     }
 
     pub(super) fn dock_floating_stack_to_rail_slot(

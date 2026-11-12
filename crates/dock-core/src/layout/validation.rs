@@ -126,20 +126,7 @@ pub(super) fn validate_photoshop_floating_root(
     errors: &mut Vec<ValidationError>,
 ) {
     match nodes.get(root) {
-        Some(Node::Tabs(_)) | Some(Node::Column(_)) => {}
-        Some(Node::Split(split)) if split.axis == Axis::Y => {
-            if split
-                .children
-                .iter()
-                .any(|child| !matches!(nodes.get(*child), Some(Node::Tabs(_))))
-            {
-                errors.push(ValidationError::InvalidFloatingRoot {
-                    group,
-                    root,
-                    reason: "floating Split(Y) children must all be Tabs nodes",
-                });
-            }
-        }
+        Some(Node::Column(_)) => {}
         Some(Node::Split(split)) if split.axis == Axis::X => {
             if split
                 .children
@@ -156,7 +143,7 @@ pub(super) fn validate_photoshop_floating_root(
         Some(_) => errors.push(ValidationError::InvalidFloatingRoot {
             group,
             root,
-            reason: "floating root must be Tabs, Column, Split(Y) of Tabs, or Split(X) of Columns",
+            reason: "floating root must be a Column or Split(X) of Columns",
         }),
         None => {}
     }
@@ -793,7 +780,7 @@ impl Layout {
 
         self.normalize_main_areas()?;
 
-        self.normalize_photoshop_floating_roots()?;
+        self.normalize_photoshop_floating_roots(metrics)?;
 
         self.normalize_floating_areas()?;
 
@@ -844,12 +831,14 @@ impl Layout {
         Ok(())
     }
 
-    /// Preserves complete horizontal DockArea compositions in Photoshop floating windows.
+    /// Ensures every Photoshop floating composition is rooted at a Column.
     ///
-    /// A Split(X) whose children are Columns keeps its horizontal arrangement and every
-    /// Column node. Standalone Columns and vertical Split(Y) group stacks are also retained.
+    /// Legacy direct Tabs roots are wrapped in a one-group Column. Legacy
+    /// vertical Split(Y) stacks of Tabs become one Column with the same groups
+    /// and ratios. Horizontal Split(X) compositions of Columns are preserved.
     pub(super) fn normalize_photoshop_floating_roots(
         &mut self,
+        metrics: &DockMetrics,
     ) -> Result<(), Vec<ValidationError>> {
         if self.profile != Profile::Photoshop {
             return Ok(());
@@ -875,14 +864,8 @@ impl Layout {
                 }]);
             };
 
-            let (groups, ratios, wrappers) = match root_node {
-                Node::Tabs(_) => continue,
-                Node::Split(split) if split.axis == Axis::Y => continue,
-                // Column roots are now the canonical single-column representation.
-                // Do not unwrap them: the shared ColumnView owns their header and groups.
+            let (groups, group_ratios, reuse_root) = match root_node {
                 Node::Column(_) => continue,
-                // A horizontal Split(X) of Columns is a detached DockArea composition.
-                // Keep its Columns intact so one FloatingHost can render the whole area.
                 Node::Split(split)
                     if split.axis == Axis::X
                         && split.children.iter().all(|child| {
@@ -891,87 +874,79 @@ impl Layout {
                 {
                     continue;
                 }
-                Node::Split(split) if split.axis == Axis::X => {
-                    let column_ratios = normalized_ratios(
-                        split
-                            .children
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| split.ratios.get(index).copied())
-                            .collect(),
+                Node::Tabs(_) => (vec![root], vec![1.0], false),
+                Node::Panel(_) => {
+                    let tabs = self.nodes.insert(Node::Tabs(Tabs {
+                        children: vec![root],
+                        active_index: 0,
+                        collapsed: false,
+                    }));
+                    (vec![tabs], vec![1.0], false)
+                }
+                Node::Split(split)
+                    if split.axis == Axis::Y
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Tabs(_)))
+                        }) =>
+                {
+                    let ratios = normalized_ratios(
+                        split.ratios.into_iter().map(Some).collect(),
                     );
-                    let mut groups = Vec::new();
-                    let mut weights = Vec::new();
-                    let mut wrappers = vec![root];
-
-                    for (column_index, column_id) in split.children.iter().copied().enumerate() {
-                        let Some(Node::Column(column)) = self.nodes.get(column_id) else {
-                            return Err(vec![ValidationError::InvalidFloatingRoot {
-                                group: group_id,
-                                root,
-                                reason: "legacy floating Split(X) must contain only Columns",
-                            }]);
-                        };
-                        let group_ratios = normalized_ratios(
-                            column
-                                .groups
-                                .iter()
-                                .enumerate()
-                                .map(|(index, _)| column.group_ratios.get(index).copied())
-                                .collect(),
-                        );
-                        for (group_index, tab_group) in column.groups.iter().copied().enumerate() {
-                            if !matches!(self.nodes.get(tab_group), Some(Node::Tabs(_))) {
-                                return Err(vec![ValidationError::InvalidFloatingRoot {
-                                    group: group_id,
-                                    root,
-                                    reason: "legacy floating Columns must contain only Tabs groups",
-                                }]);
-                            }
-                            groups.push(tab_group);
-                            weights.push(column_ratios[column_index] * group_ratios[group_index]);
-                        }
-                        wrappers.push(column_id);
-                    }
-
-                    let ratios = normalized_ratios(weights.into_iter().map(Some).collect());
-                    (groups, ratios, wrappers)
+                    (split.children, ratios, true)
                 }
                 _ => {
                     return Err(vec![ValidationError::InvalidFloatingRoot {
                         group: group_id,
                         root,
-                        reason: "floating root must be a Column with its own ColumnHeader",
+                        reason: "floating root must be a Column or Split(X) of Columns",
                     }]);
                 }
             };
-            if groups.is_empty() {
-                self.remove_subtree(root);
-                self.floating_groups.remove(group_id);
-                self.dock_areas.remove(floating.area);
-                continue;
-            }
 
-            let new_root = if groups.len() == 1 {
-                groups[0]
-            } else {
-                self.nodes.insert(Node::Split(Split {
-                    axis: Axis::Y,
-                    children: groups,
-                    ratios,
-                }))
+            let minimum_width = self
+                .minimum_node_size(root, metrics)
+                .map_err(|_| {
+                    vec![ValidationError::InvalidFloatingRoot {
+                        group: group_id,
+                        root,
+                        reason: "cannot compute the minimum width for a floating Column",
+                    }]
+                })?
+                .width;
+            let width = floating
+                .bounds
+                .size
+                .width
+                .max(metrics.min_column_width)
+                .max(minimum_width);
+            let column = Column {
+                width,
+                mode: ColumnMode::Expanded,
+                groups,
+                group_ratios,
+                last_expanded_width: Some(width),
             };
 
-            for wrapper in wrappers {
-                self.nodes.remove(wrapper);
-            }
+            let canonical_root = if reuse_root {
+                let Some(node) = self.nodes.get_mut(root) else {
+                    return Err(vec![ValidationError::MissingNode {
+                        owner: None,
+                        missing: root,
+                    }]);
+                };
+                *node = Node::Column(column);
+                root
+            } else {
+                self.nodes.insert(Node::Column(column))
+            };
+
             let Some(area) = self.dock_areas.get_mut(floating.area) else {
                 return Err(vec![ValidationError::InvalidFloatingGroup {
                     group: group_id,
                     reason: "references a missing DockAreaId",
                 }]);
             };
-            area.root = new_root;
+            area.root = canonical_root;
         }
 
         Ok(())

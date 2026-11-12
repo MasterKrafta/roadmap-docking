@@ -285,8 +285,12 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
         Rect::new(Point::new(44.0, 55.0), Size::new(420.0, 320.0))
     );
     let floating_area = restored.dock_area(floating[0].1.area).unwrap();
-    let Some(crate::Node::Tabs(floating_tabs)) = restored.node(floating_area.root) else {
-        panic!("restored floating root must be tabs");
+    let Some(crate::Node::Column(floating_column)) = restored.node(floating_area.root) else {
+        panic!("restored floating root must be a Column");
+    };
+    assert_eq!(floating_column.groups.len(), 1);
+    let Some(crate::Node::Tabs(floating_tabs)) = restored.node(floating_column.groups[0]) else {
+        panic!("restored floating Column group must be Tabs");
     };
     let Some(crate::Node::Panel(floating_panel_leaf)) = restored.node(floating_tabs.children[0])
     else {
@@ -300,6 +304,41 @@ fn versioned_json_round_trip_preserves_structure_without_runtime_keys() {
             .as_str(),
         "history"
     );
+}
+
+#[test]
+fn workspace_load_migrates_legacy_floating_tabs_root_to_column() {
+    let metrics = DockMetrics::default();
+    let (layout, descriptors) = sample_layout();
+    let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
+    let legacy_group = match &file.layout.floating_groups[0].root {
+        WorkspaceNode::Column { groups, .. } => groups[0].clone(),
+        other => panic!("sample floating root must be a Column, got {other:?}"),
+    };
+    file.layout.floating_groups[0].root = legacy_group;
+
+    let report = WorkspaceFile::load_json(
+        &file.to_json_pretty().unwrap(),
+        &descriptors,
+        &metrics,
+        WorkspaceLoadOptions::default(),
+    )
+    .expect("legacy floating Tabs root should be normalized during workspace loading");
+
+    let floating = report.layout.floating_groups_in_paint_order();
+    let area = report.layout.dock_area(floating[0].1.area).unwrap();
+    let Some(crate::Node::Column(column)) = report.layout.node(area.root) else {
+        panic!("legacy floating Tabs root must load as a Column");
+    };
+    assert_eq!(column.groups.len(), 1);
+    assert!(matches!(
+        report.layout.node(column.groups[0]),
+        Some(crate::Node::Tabs(tabs)) if tabs.children.len() == 1
+    ));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(diagnostic, WorkspaceDiagnostic::LayoutNormalized { issues }
+            if issues.iter().any(|issue| issue.contains("floating root must be a Column")))
+    }));
 }
 
 #[test]
@@ -1284,13 +1323,15 @@ fn workspace_migrates_legacy_floating_composition_before_clamping_bounds() {
     let metrics = DockMetrics::default();
     let (layout, descriptors) = sample_layout();
     let mut file = WorkspaceFile::from_layout(&layout, &metrics).unwrap();
-    let floating_tabs = file
+    let floating_group = file
         .layout
         .floating_groups
         .first()
-        .expect("sample has a floating group")
-        .root
-        .clone();
+        .expect("sample has a floating group");
+    let floating_tabs = match &floating_group.root {
+        WorkspaceNode::Column { groups, .. } => groups[0].clone(),
+        other => panic!("sample floating root must be a Column, got {other:?}"),
+    };
 
     file.layout.floating_groups[0].root = WorkspaceNode::Split {
         axis: Axis::X,

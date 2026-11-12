@@ -327,7 +327,7 @@ fn floating_geometry_preserves_bounds_and_z_order() {
     assert_eq!(rects.panels[0].rect.origin.x, 0.0);
     assert_eq!(
         rects.panels[0].rect.origin.y,
-        metrics.header_height + metrics.tab_strip_height
+        metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
     );
     assert_eq!(layout.floating_group(floating).unwrap().bounds, model_bounds);
 }
@@ -534,7 +534,7 @@ fn floating_multi_group_column_minimum_allows_compact_group_strips() {
 }
 
 #[test]
-fn floating_vertical_split_minimum_has_no_generic_title_row() {
+fn floating_vertical_group_stack_reserves_its_column_header() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, collapsed_panel) = builder.panel(key("floating-y-min-collapsed"), constraints());
@@ -558,15 +558,17 @@ fn floating_vertical_split_minimum_has_no_generic_title_row() {
     let expanded_minimum = metrics
         .min_group_height
         .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
-    let required_without_title =
-        metrics.effective_collapsed_group_height() + expanded_minimum + metrics.splitter_thickness;
+    let required_with_column_header = metrics.column_header_height
+        + metrics.effective_collapsed_group_height()
+        + expanded_minimum
+        + metrics.splitter_thickness;
 
     assert_eq!(
         actual_bounds.size.height,
-        required_without_title
+        required_with_column_header
     );
     assert_eq!(actual_bounds.origin, Point::ZERO);
-    assert_eq!(collapsed_rect.origin.y, 0.0);
+    assert_eq!(collapsed_rect.origin.y, metrics.column_header_height);
     assert_eq!(
         collapsed_rect.size.height,
         metrics.effective_collapsed_group_height()
@@ -596,8 +598,14 @@ fn floating_collapsed_group_stays_strip_sized_inside_window_bounds() {
     let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
 
     assert_eq!(rects.floating_groups[0].rect, Rect::new(Point::ZERO, bounds.size));
-    assert_eq!(rects.groups[0].rect.origin, Point::ZERO);
-    assert_eq!(rects.tab_strips[0].rect.origin, Point::ZERO);
+    assert_eq!(
+        rects.groups[0].rect.origin.y,
+        metrics.column_header_height
+    );
+    assert_eq!(
+        rects.tab_strips[0].rect.origin.y,
+        metrics.column_header_height
+    );
     assert_eq!(rects.groups[0].rect.size.height, metrics.collapsed_group_height);
     assert_eq!(rects.tab_strips[0].rect.size.height, metrics.collapsed_group_height);
     assert!(rects.panels.is_empty());
