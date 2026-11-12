@@ -439,19 +439,21 @@ fn floating_group_edge_rect(
     }) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
-    // Divide the inter-Group hit band into two non-overlapping halves:
+    // Divide the physical splitter into two non-overlapping halves:
     // the upper half means Top of the lower Group, the lower half means
-    // Bottom of the upper Group. This keeps both targets clear of tab strips.
-    let height = (metrics.edge_drop_width * 0.5).min(splitter.rect.size.height);
+    // Bottom of the upper Group. Keeping this within the physical splitter
+    // prevents either edge target from reaching the next Group's tab strip.
+    let half_thickness =
+        (metrics.splitter_thickness * 0.5).min(splitter.rect.size.height * 0.5);
     let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
     let zone_y = if edge == DropZone::Top {
-        center_y - height
+        center_y - half_thickness
     } else {
         center_y
     };
     let rect = Rect::new(
         Point::new(group_rect.origin.x, zone_y),
-        Size::new(group_rect.size.width, height),
+        Size::new(group_rect.size.width, half_thickness),
     );
     rect.validate().map_err(ComputeRectsError::Geometry)?;
     Ok(rect)
