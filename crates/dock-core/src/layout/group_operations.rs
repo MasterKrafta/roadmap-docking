@@ -287,13 +287,6 @@ impl Layout {
         }
 
         if self.profile == Profile::Photoshop {
-            if self.find_floating_root_containing(target_group).is_some()
-                && matches!(zone, DropZone::Left | DropZone::Right)
-            {
-                return Err(CommandError::InvalidTarget {
-                    reason: "horizontal splits are not supported inside a floating composition",
-                });
-            }
             if let Some(column_id) = self.find_owner_column(target_group) {
                 self.insert_group_edge_in_photoshop_column(
                     new_group,

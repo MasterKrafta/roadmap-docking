@@ -750,26 +750,42 @@ impl Layout {
                 }
                 minimum
             }
-            Some(Node::Column(column))
-                if column.groups.len() == 1 && !column.mode.is_rail() =>
-            {
-                let base = self.minimum_node_size_with_cache(node_id, metrics, cache)?;
-                if matches!(
-                    self.nodes.get(column.groups[0]),
-                    Some(Node::Tabs(tabs)) if !tabs.collapsed
-                ) {
-                    let group_minimum = self.minimum_node_size_with_cache(
-                        column.groups[0],
-                        metrics,
-                        cache,
-                    )?;
-                    Size::new(
-                        base.width.max(group_minimum.width),
-                        base.height.max(metrics.column_header_height + group_minimum.height),
-                    )
-                } else {
-                    base
+            Some(Node::Column(column)) if !column.mode.is_rail() => {
+                let mut content_minimum = Size::ZERO;
+                for group in &column.groups {
+                    let group_minimum = match self.nodes.get(*group) {
+                        Some(Node::Tabs(tabs)) if tabs.collapsed => {
+                            let mut minimum = Size::ZERO;
+                            for child in &tabs.children {
+                                let child_size =
+                                    self.minimum_node_size_with_cache(*child, metrics, cache)?;
+                                minimum.width = minimum.width.max(child_size.width);
+                                minimum.height = minimum.height.max(child_size.height);
+                            }
+                            minimum
+                        }
+                        Some(_) => self.minimum_node_size_with_cache(*group, metrics, cache)?,
+                        None => return Err(CommandError::MissingNode { node: *group }),
+                    };
+                    content_minimum.width = content_minimum.width.max(group_minimum.width);
+                    content_minimum.height = content_minimum.height.max(group_minimum.height);
                 }
+
+                let height = match column.groups.as_slice() {
+                    [group] if matches!(
+                        self.nodes.get(*group),
+                        Some(Node::Tabs(tabs)) if tabs.collapsed
+                    ) => content_minimum.height,
+                    [_] => metrics.column_header_height
+                        + self.minimum_node_size_with_cache(
+                            column.groups[0],
+                            metrics,
+                            cache,
+                        )?.height,
+                    groups => metrics.column_header_height
+                        + metrics.effective_collapsed_group_height() * groups.len() as f32,
+                };
+                Size::new(content_minimum.width, height)
             }
             Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
             None => return Err(CommandError::MissingNode { node: node_id }),

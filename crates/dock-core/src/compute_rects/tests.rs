@@ -327,7 +327,7 @@ fn floating_geometry_preserves_bounds_and_z_order() {
     assert_eq!(rects.panels[0].rect.origin.x, 0.0);
     assert_eq!(
         rects.panels[0].rect.origin.y,
-        metrics.column_header_height + metrics.header_height + metrics.tab_strip_height
+        metrics.column_header_height + metrics.header_height.max(metrics.tab_strip_height)
     );
     assert_eq!(layout.floating_group(floating).unwrap().bounds, model_bounds);
 }
@@ -555,32 +555,18 @@ fn floating_vertical_group_stack_reserves_its_column_header() {
     };
     let collapsed_rect = group_rect(collapsed_group);
     let expanded_rect = group_rect(expanded_group);
-    let expanded_minimum = metrics
-        .min_group_height
-        .max(metrics.header_height + metrics.tab_strip_height + constraints().min_size.height);
-    let required_with_column_header = metrics.column_header_height
-        + metrics.effective_collapsed_group_height()
-        + expanded_minimum
-        + metrics.splitter_thickness;
+    let strip_height = metrics.effective_collapsed_group_height();
 
-    assert_eq!(
-        actual_bounds.size.height,
-        required_with_column_header
-    );
+    // The canonical Floating Column adapts to the requested viewport by
+    // collapsing every Group to a visible strip instead of growing the window.
+    assert_eq!(actual_bounds.size.height, requested_bounds.size.height);
     assert_eq!(actual_bounds.origin, Point::ZERO);
     assert_eq!(collapsed_rect.origin.y, metrics.column_header_height);
-    assert_eq!(
-        collapsed_rect.size.height,
-        metrics.effective_collapsed_group_height()
-    );
-    assert_eq!(
-        expanded_rect.origin.y,
-        collapsed_rect.origin.y + collapsed_rect.size.height + metrics.splitter_thickness
-    );
-    assert!(
-        ((expanded_rect.origin.y + expanded_rect.size.height) - actual_bounds.size.height).abs()
-            < PIXEL_TOLERANCE
-    );
+    assert_eq!(collapsed_rect.size.height, strip_height);
+    assert_eq!(expanded_rect.origin.y, collapsed_rect.origin.y + strip_height);
+    assert_eq!(expanded_rect.size.height, strip_height);
+    assert_eq!(rects.auto_collapsed_groups, vec![collapsed_group, expanded_group]);
+    assert!(rects.auto_expanded_groups.is_empty());
     assert_eq!(layout.floating_group(floating).unwrap().bounds, requested_bounds);
     assert!(rects.vertical_overflow.is_empty());
 }

@@ -2979,14 +2979,14 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
     let last_bottom = zones
         .iter()
         .find(|zone| {
-            zone.zone == DropZone::FloatingBottom
+            zone.zone == DropZone::ColumnEnd
                 && zone.target
-                    == DropTarget::GroupEdge {
-                        group: third_group,
-                        zone: DropZone::Bottom,
+                    == DropTarget::ColumnSlot {
+                        column: target_column,
+                        index: 3,
                     }
         })
-        .expect("a Floating composition must expose the bottom edge of another Floating window");
+        .expect("a whole multi-group Column must expose the append-to-end target");
 
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Left

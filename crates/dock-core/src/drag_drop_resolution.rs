@@ -822,11 +822,21 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
     let (_, source_right_panel) = builder.panel(key("capture-split-right"), constraints());
     let source_right_group = builder.tabs(vec![source_right_panel], 0, false);
 
-    // Generic floating roots can be a horizontal Split of tabs directly.
-    // Docking this tree into Main Dock must wrap each branch in a Column.
+    let source_left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_left_group],
+        vec![1.0],
+    );
+    let source_right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_right_group],
+        vec![1.0],
+    );
     let source_root = builder.split(
         Axis::X,
-        vec![source_left_group, source_right_group],
+        vec![source_left_column, source_right_column],
         vec![0.5, 0.5],
     );
     let source_floating = builder.floating_group(source_root, bounds(80.0, 90.0), 1);
@@ -849,7 +859,7 @@ fn floating_composition_with_split_root_can_build_drop_zones_and_dock() {
         )
         .unwrap();
     let zones = layout
-        .compute_drop_zones(DropSource::Group { group: source_root }, &rects, &metrics)
+        .compute_drop_zones(DropSource::Composition { root: source_root }, &rects, &metrics)
         .unwrap();
     let target = zones
         .iter()
@@ -963,7 +973,19 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
     let left_group = builder.tabs(vec![left_panel], 0, false);
     let (_, right_panel) = builder.panel(key("empty-split-right"), constraints());
     let right_group = builder.tabs(vec![right_panel], 0, false);
-    let source_root = builder.split(Axis::X, vec![left_group, right_group], vec![0.4, 0.6]);
+    let left_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+    let right_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+    let source_root = builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
     let floating_group = builder.floating_group(source_root, bounds(120.0, 90.0), 1);
     let mut layout = builder.build();
 
@@ -974,7 +996,7 @@ fn split_root_floating_composition_can_create_first_main_dock_columns() {
         )
         .unwrap();
     let zones = layout
-        .compute_drop_zones(DropSource::Group { group: source_root }, &rects, &metrics)
+        .compute_drop_zones(DropSource::Composition { root: source_root }, &rects, &metrics)
         .unwrap();
     let target = zones
         .iter()

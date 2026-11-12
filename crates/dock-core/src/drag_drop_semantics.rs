@@ -350,8 +350,14 @@ fn panel_tab_can_move_between_floating_groups() {
         },
     );
     assert_eq!(layout.floating_groups().count(), 2);
-    assert_eq!(floating_root(&layout, source_float), source_group);
-    assert_eq!(floating_root(&layout, target_float), target_group);
+    assert!(matches!(
+        layout.node(floating_root(&layout, source_float)),
+        Some(Node::Column(column)) if column.groups == vec![source_group]
+    ));
+    assert!(matches!(
+        layout.node(floating_root(&layout, target_float)),
+        Some(Node::Column(column)) if column.groups == vec![target_group]
+    ));
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 

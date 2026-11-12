@@ -953,7 +953,7 @@ fn c46_move_one_panel_between_groups_inside_floating_stack() {
     let floating = layout.floating_group(floating_id).unwrap();
     assert!(matches!(
         layout.node(layout.dock_area(floating.area).unwrap().root),
-        Some(Node::Split(split)) if split.axis == Axis::Y && split.children == vec![source_group, target_group]
+        Some(Node::Column(column)) if column.groups == vec![source_group, target_group]
     ));
     assert_eq!(layout.panel_instances().count(), 3);
     assert_eq!(layout.validate(&metrics), Ok(()));

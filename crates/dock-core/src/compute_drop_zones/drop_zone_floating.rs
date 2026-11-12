@@ -218,19 +218,10 @@ impl FloatingZoneContext<'_> {
         &mut self,
         floating_root: NodeId,
     ) -> Result<(), ComputeRectsError> {
-        let source_can_enter_column = match self.source {
-            DropSource::Panel { .. } => true,
-            DropSource::Group { .. } => {
-                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
-                    || matches!(
-                        self.layout.node(self.source_root),
-                        Some(Node::Split(split)) if split.axis == crate::Axis::Y
-                    )
-            }
-            DropSource::Composition { .. } => {
-                matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
-            },
-        };
+        let source_can_enter_column = matches!(
+            self.source,
+            DropSource::Composition { .. }
+        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)));
         if !source_can_enter_column
             || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
         {
@@ -410,6 +401,12 @@ fn floating_group_edge_rect(
     edge: DropZone,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
+    // Keep a Group's Top target inside its own strip. This leaves a distinct
+    // hit area for the preceding Group's Bottom target at the splitter.
+    if edge == DropZone::Top {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    }
+
     let Some(column_id) = owner_column(layout, tree_index, group) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
@@ -419,41 +416,14 @@ fn floating_group_edge_rect(
     let Some(group_index) = column.groups.iter().position(|candidate| *candidate == group) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
-
-    let boundary_index = match edge {
-        DropZone::Top if group_index > 0 => group_index - 1,
-        DropZone::Bottom if group_index + 1 < column.groups.len() => group_index,
-        DropZone::Top => {
-            let Some(column_rect) = rects
-                .columns
-                .iter()
-                .find(|column_rect| column_rect.column == column_id)
-                .map(|column_rect| column_rect.rect)
-            else {
-                return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-            };
-            let header_height = (group_rect.origin.y - column_rect.origin.y).max(0.0);
-            let height = metrics.edge_drop_width.min(header_height);
-            if height <= 0.0 {
-                return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-            }
-            let rect = Rect::new(
-                Point::new(group_rect.origin.x, group_rect.origin.y - height),
-                Size::new(group_rect.size.width, height),
-            );
-            rect.validate().map_err(ComputeRectsError::Geometry)?;
-            return Ok(rect);
-        }
-        DropZone::Bottom => {
-            return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-        }
-        _ => return Err(ComputeRectsError::InvalidLayoutState),
-    };
+    if group_index + 1 >= column.groups.len() {
+        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
+    }
 
     let Some(splitter) = rects.splitters.iter().find(|splitter| {
         splitter.owner == column_id
             && splitter.axis == crate::Axis::Y
-            && splitter.boundary_index == boundary_index
+            && splitter.boundary_index == group_index
     }) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
@@ -492,11 +462,24 @@ impl FloatingZoneContext<'_> {
             self.layout.node(root),
             Some(Node::Split(split)) if split.axis == crate::Axis::X
         );
+        let whole_column_source = matches!(
+            self.source,
+            DropSource::Composition { .. }
+        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)));
 
         if horizontal_composition {
-            self.append_horizontal_edge_zones(floating_rect, target_groups)?;
+            self.append_horizontal_edge_zones(
+                floating_rect,
+                target_groups,
+                whole_column_source,
+            )?;
         } else {
-            self.append_vertical_edge_zones(top_rect, bottom_rect, target_groups)?;
+            self.append_vertical_edge_zones(
+                top_rect,
+                bottom_rect,
+                target_groups,
+                !whole_column_source,
+            )?;
         }
         Ok(())
     }
@@ -505,6 +488,7 @@ impl FloatingZoneContext<'_> {
         &mut self,
         floating_rect: FloatingGroupRect,
         target_groups: &[GroupRect],
+        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         // In a horizontal composition, top/bottom edge zones span each column
         // independently, so a drop over one branch targets that branch.
@@ -519,7 +503,7 @@ impl FloatingZoneContext<'_> {
             }
         }
         for column in columns {
-            self.append_column_edge_zones(floating_rect, column, target_groups)?;
+            self.append_column_edge_zones(floating_rect, column, target_groups, include_bottom)?;
         }
 
         // Generic-profile horizontal splits may contain Tabs nodes directly,
@@ -528,7 +512,11 @@ impl FloatingZoneContext<'_> {
             .iter()
             .filter(|group| owner_column(self.layout, self.tree_index, group.group).is_none())
         {
-            self.append_direct_branch_edge_zones(floating_rect.rect, *target_group)?;
+            self.append_direct_branch_edge_zones(
+                floating_rect.rect,
+                *target_group,
+                include_bottom,
+            )?;
         }
         Ok(())
     }
@@ -538,6 +526,7 @@ impl FloatingZoneContext<'_> {
         floating_rect: FloatingGroupRect,
         column: NodeId,
         target_groups: &[GroupRect],
+        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         let mut column_groups: Vec<GroupRect> = target_groups
             .iter()
@@ -584,12 +573,14 @@ impl FloatingZoneContext<'_> {
             DropZone::FloatingTop,
             column_top_rect,
         )?;
-        self.push_floating_edge_zone(
-            last_group.group,
-            DropZone::Bottom,
-            DropZone::FloatingBottom,
-            column_bottom_rect,
-        )?;
+        if include_bottom {
+            self.push_floating_edge_zone(
+                last_group.group,
+                DropZone::Bottom,
+                DropZone::FloatingBottom,
+                column_bottom_rect,
+            )?;
+        }
         Ok(())
     }
 
@@ -597,6 +588,7 @@ impl FloatingZoneContext<'_> {
         &mut self,
         floating_bounds: Rect,
         target_group: GroupRect,
+        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         let top_branch_rect = floating_edge_rect_for_branch(
             floating_bounds,
@@ -616,12 +608,14 @@ impl FloatingZoneContext<'_> {
             DropZone::FloatingTop,
             top_branch_rect,
         )?;
-        self.push_floating_edge_zone(
-            target_group.group,
-            DropZone::Bottom,
-            DropZone::FloatingBottom,
-            bottom_branch_rect,
-        )?;
+        if include_bottom {
+            self.push_floating_edge_zone(
+                target_group.group,
+                DropZone::Bottom,
+                DropZone::FloatingBottom,
+                bottom_branch_rect,
+            )?;
+        }
         Ok(())
     }
 
@@ -630,6 +624,7 @@ impl FloatingZoneContext<'_> {
         top_rect: Rect,
         bottom_rect: Rect,
         target_groups: &[GroupRect],
+        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         // A vertically stacked floating root has one outer top and bottom,
         // targeting its first and last groups respectively.
@@ -645,12 +640,14 @@ impl FloatingZoneContext<'_> {
             DropZone::FloatingTop,
             top_rect,
         )?;
-        self.push_floating_edge_zone(
-            last_group.group,
-            DropZone::Bottom,
-            DropZone::FloatingBottom,
-            bottom_rect,
-        )?;
+        if include_bottom {
+            self.push_floating_edge_zone(
+                last_group.group,
+                DropZone::Bottom,
+                DropZone::FloatingBottom,
+                bottom_rect,
+            )?;
+        }
         Ok(())
     }
 
