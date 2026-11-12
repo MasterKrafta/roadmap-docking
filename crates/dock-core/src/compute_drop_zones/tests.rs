@@ -1092,6 +1092,124 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
 }
 
 #[test]
+fn floating_top_zone_tracks_the_actual_header_for_column_and_tabs_roots() {
+    let mut metrics = DockMetrics::default();
+    metrics.column_header_height = 40.0;
+    metrics.edge_drop_width = 18.0;
+
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (source_panel, source_node) =
+        builder.panel(key("floating-top-zone-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column =
+        builder.column(280.0, ColumnMode::Expanded, vec![source_group], vec![1.0]);
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, first_column_panel) =
+        builder.panel(key("floating-top-column-first"), constraints());
+    let first_column_group = builder.tabs(vec![first_column_panel], 0, false);
+    let (_, second_column_panel) =
+        builder.panel(key("floating-top-column-second"), constraints());
+    let second_column_group = builder.tabs(vec![second_column_panel], 0, false);
+    let column_root = builder.column(
+        320.0,
+        ColumnMode::Expanded,
+        vec![first_column_group, second_column_group],
+        vec![0.5, 0.5],
+    );
+    let floating_column = builder.floating_group(
+        column_root,
+        Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 260.0)),
+        2,
+    );
+
+    let (_, tabs_panel) = builder.panel(key("floating-top-tabs-root"), constraints());
+    let tabs_root = builder.tabs(vec![tabs_panel], 0, false);
+    let floating_tabs = builder.floating_group(
+        tabs_root,
+        Rect::new(Point::new(980.0, 120.0), Size::new(680.0, 520.0)),
+        3,
+    );
+
+    let layout = builder.build();
+    let assert_top_zone = |floating| {
+        let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+        let bounds = rects
+            .floating_groups
+            .first()
+            .expect("the Floating window should have bounds")
+            .rect;
+        let first_group = rects
+            .groups
+            .first()
+            .expect("the Floating composition should have a first Group");
+        let tab_strip = rects
+            .tab_strips
+            .iter()
+            .find(|strip| strip.group == first_group.group)
+            .expect("the first Group should expose its tab strip");
+        let top_zone = layout
+            .compute_drop_zones(
+                DropSource::Panel { panel: source_panel },
+                &rects,
+                &metrics,
+            )
+            .unwrap()
+            .into_iter()
+            .find(|zone| {
+                zone.zone == DropZone::FloatingTop
+                    && zone.target
+                        == DropTarget::GroupEdge {
+                            group: first_group.group,
+                            zone: DropZone::Top,
+                        }
+            })
+            .expect("the Floating header should expose its lower top-drop band");
+
+        let actual_header_height = first_group.rect.origin.y - bounds.origin.y;
+        let expected_height = metrics.edge_drop_width.min(actual_header_height);
+        assert_eq!(actual_header_height, metrics.column_header_height);
+        assert_eq!(top_zone.rect.size.height, expected_height);
+        assert_eq!(
+            top_zone.rect.origin.y + top_zone.rect.size.height,
+            first_group.rect.origin.y,
+            "the top-drop band must end exactly where the first Group begins"
+        );
+        assert_eq!(
+            tab_strip.rect.origin.y,
+            first_group.rect.origin.y,
+            "the first tab strip starts at the first Group boundary"
+        );
+        assert!(
+            top_zone.rect.origin.y + top_zone.rect.size.height <= tab_strip.rect.origin.y,
+            "the Floating top-drop band must not overlap the tab strip"
+        );
+
+        let point = Point::new(
+            top_zone.rect.origin.x + top_zone.rect.size.width * 0.5,
+            top_zone.rect.origin.y + top_zone.rect.size.height * 0.5,
+        );
+        assert_eq!(
+            layout
+                .resolve_drop(
+                    point,
+                    DropSource::Panel { panel: source_panel },
+                    &rects,
+                    &metrics,
+                )
+                .unwrap(),
+            Some(DropTarget::GroupEdge {
+                group: first_group.group,
+                zone: DropZone::Top,
+            })
+        );
+    };
+
+    assert_top_zone(floating_column);
+    assert_top_zone(floating_tabs);
+}
+
+#[test]
 fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);

@@ -313,6 +313,68 @@ pub(super) fn floating_edge_rect_for_branch(
     Ok(result)
 }
 
+/// Builds the Floating top insertion band from the measured top edge of the
+/// first Group. The gap between the window top and that Group is the actual
+/// composition-header height for both Column and direct Tabs roots.
+pub(super) fn floating_top_edge_rect(
+    floating_bounds: Rect,
+    first_group_rect: Rect,
+    metrics: &DockMetrics,
+) -> Result<Option<Rect>, ComputeRectsError> {
+    let header_height = (first_group_rect.origin.y - floating_bounds.origin.y)
+        .max(0.0)
+        .min(floating_bounds.size.height);
+    let height = metrics.edge_drop_width.min(header_height);
+    if height <= 0.0 {
+        return Ok(None);
+    }
+
+    let inset_x = metrics.splitter_hit_zone.min(floating_bounds.size.width / 3.0);
+    let result = Rect::new(
+        Point::new(
+            floating_bounds.origin.x + inset_x,
+            first_group_rect.origin.y - height,
+        ),
+        Size::new(
+            (floating_bounds.size.width - 2.0 * inset_x).max(0.0),
+            height,
+        ),
+    );
+    result.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(Some(result))
+}
+
+/// Restricts a Floating top insertion band to one horizontal composition branch.
+pub(super) fn floating_top_edge_rect_for_branch(
+    floating_bounds: Rect,
+    branch_rect: Rect,
+    first_group_rect: Rect,
+    metrics: &DockMetrics,
+) -> Result<Option<Rect>, ComputeRectsError> {
+    let Some(edge_rect) = floating_top_edge_rect(floating_bounds, first_group_rect, metrics)?
+    else {
+        return Ok(None);
+    };
+    let edge_right = edge_rect
+        .checked_right()
+        .map_err(ComputeRectsError::Geometry)?;
+    let branch_right = branch_rect
+        .checked_right()
+        .map_err(ComputeRectsError::Geometry)?;
+    let left = edge_rect.origin.x.max(branch_rect.origin.x);
+    let right = edge_right.min(branch_right);
+    if right <= left {
+        return Ok(None);
+    }
+
+    let result = Rect::new(
+        Point::new(left, edge_rect.origin.y),
+        Size::new(right - left, edge_rect.size.height),
+    );
+    result.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(Some(result))
+}
+
 pub(super) fn floating_edge_rect(
     rect: Rect,
     edge: DropZone,

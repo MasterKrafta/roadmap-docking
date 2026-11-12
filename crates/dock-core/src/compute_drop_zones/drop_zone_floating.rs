@@ -488,7 +488,6 @@ impl FloatingZoneContext<'_> {
             return Ok(());
         }
 
-        let top_rect = floating_edge_rect(floating_rect.rect, DropZone::Top, self.metrics)?;
         let bottom_rect = floating_edge_rect(floating_rect.rect, DropZone::Bottom, self.metrics)?;
         let horizontal_composition = matches!(
             self.layout.node(root),
@@ -506,6 +505,11 @@ impl FloatingZoneContext<'_> {
                 !whole_column_source,
             )?;
         } else {
+            let top_rect = if let Some(first_group) = target_groups.first() {
+                floating_top_edge_rect(floating_rect.rect, first_group.rect, self.metrics)?
+            } else {
+                None
+            };
             self.append_vertical_edge_zones(
                 top_rect,
                 bottom_rect,
@@ -587,23 +591,24 @@ impl FloatingZoneContext<'_> {
             return Ok(());
         };
 
-        let column_top_rect = floating_edge_rect_for_branch(
+        if let Some(column_top_rect) = floating_top_edge_rect_for_branch(
             floating_rect.rect,
             column_rect.rect,
-            DropZone::Top,
+            first_group.rect,
             self.metrics,
-        )?;
+        )? {
+            self.push_floating_edge_zone(
+                first_group.group,
+                DropZone::Top,
+                DropZone::FloatingTop,
+                column_top_rect,
+            )?;
+        }
         let column_bottom_rect = floating_edge_rect_for_branch(
             floating_rect.rect,
             column_rect.rect,
             DropZone::Bottom,
             self.metrics,
-        )?;
-        self.push_floating_edge_zone(
-            first_group.group,
-            DropZone::Top,
-            DropZone::FloatingTop,
-            column_top_rect,
         )?;
         if include_bottom {
             self.push_floating_edge_zone(
@@ -622,23 +627,24 @@ impl FloatingZoneContext<'_> {
         target_group: GroupRect,
         include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
-        let top_branch_rect = floating_edge_rect_for_branch(
+        if let Some(top_branch_rect) = floating_top_edge_rect_for_branch(
             floating_bounds,
             target_group.rect,
-            DropZone::Top,
+            target_group.rect,
             self.metrics,
-        )?;
+        )? {
+            self.push_floating_edge_zone(
+                target_group.group,
+                DropZone::Top,
+                DropZone::FloatingTop,
+                top_branch_rect,
+            )?;
+        }
         let bottom_branch_rect = floating_edge_rect_for_branch(
             floating_bounds,
             target_group.rect,
             DropZone::Bottom,
             self.metrics,
-        )?;
-        self.push_floating_edge_zone(
-            target_group.group,
-            DropZone::Top,
-            DropZone::FloatingTop,
-            top_branch_rect,
         )?;
         if include_bottom {
             self.push_floating_edge_zone(
@@ -653,7 +659,7 @@ impl FloatingZoneContext<'_> {
 
     fn append_vertical_edge_zones(
         &mut self,
-        top_rect: Rect,
+        top_rect: Option<Rect>,
         bottom_rect: Rect,
         target_groups: &[GroupRect],
         include_bottom: bool,
@@ -666,12 +672,14 @@ impl FloatingZoneContext<'_> {
         let Some(last_group) = target_groups.last().copied() else {
             return Ok(());
         };
-        self.push_floating_edge_zone(
-            first_group.group,
-            DropZone::Top,
-            DropZone::FloatingTop,
-            top_rect,
-        )?;
+        if let Some(top_rect) = top_rect {
+            self.push_floating_edge_zone(
+                first_group.group,
+                DropZone::Top,
+                DropZone::FloatingTop,
+                top_rect,
+            )?;
+        }
         if include_bottom {
             self.push_floating_edge_zone(
                 last_group.group,
