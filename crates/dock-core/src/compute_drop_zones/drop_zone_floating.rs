@@ -337,6 +337,19 @@ impl FloatingZoneContext<'_> {
             {
                 continue;
             }
+            // Photoshop only supports a Group/Panel side drop against a
+            // single-Group Floating Column. Adding a sibling Column beside
+            // one Group in a vertical stack would make the drop target ambiguous;
+            // whole-Composition drops use the column-level transfer path instead.
+            if self.layout.profile() == Profile::Photoshop
+                && !matches!(self.source, DropSource::Composition { .. })
+                && let Some(target_column) =
+                    owner_column(self.layout, self.tree_index, target_group.group)
+                && let Some(Node::Column(column)) = self.layout.node(target_column)
+                && column.groups.len() > 1
+            {
+                continue;
+            }
 
             let (allow_left, allow_right) = if matches!(self.source, DropSource::Composition { .. }) {
                 let Some(target_column) =
@@ -404,12 +417,6 @@ fn floating_group_edge_rect(
     edge: DropZone,
     metrics: &DockMetrics,
 ) -> Result<Rect, ComputeRectsError> {
-    // Keep a Group's Top target inside its own strip. This leaves a distinct
-    // hit area for the preceding Group's Bottom target at the splitter.
-    if edge == DropZone::Top {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    }
-
     let Some(column_id) = owner_column(layout, tree_index, group) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
@@ -419,23 +426,31 @@ fn floating_group_edge_rect(
     let Some(group_index) = column.groups.iter().position(|candidate| *candidate == group) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
-    if group_index + 1 >= column.groups.len() {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    }
+    let boundary_index = match edge {
+        DropZone::Top if group_index > 0 => group_index - 1,
+        DropZone::Bottom if group_index + 1 < column.groups.len() => group_index,
+        _ => return group_edge_rect(group_rect, edge, metrics.edge_drop_width),
+    };
 
     let Some(splitter) = rects.splitters.iter().find(|splitter| {
         splitter.owner == column_id
             && splitter.axis == crate::Axis::Y
-            && splitter.boundary_index == group_index
+            && splitter.boundary_index == boundary_index
     }) else {
         return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
     };
-    // Keep the lower Group's Top zone separate: the Bottom zone occupies
-    // only the physical splitter thickness while remaining centred on it.
-    let height = metrics.splitter_thickness.min(splitter.rect.size.height);
+    // Divide the inter-Group hit band into two non-overlapping halves:
+    // the upper half means Top of the lower Group, the lower half means
+    // Bottom of the upper Group. This keeps both targets clear of tab strips.
+    let height = (metrics.edge_drop_width * 0.5).min(splitter.rect.size.height);
     let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
+    let zone_y = if edge == DropZone::Top {
+        center_y - height
+    } else {
+        center_y
+    };
     let rect = Rect::new(
-        Point::new(group_rect.origin.x, center_y - height * 0.5),
+        Point::new(group_rect.origin.x, zone_y),
         Size::new(group_rect.size.width, height),
     );
     rect.validate().map_err(ComputeRectsError::Geometry)?;
@@ -476,7 +491,7 @@ impl FloatingZoneContext<'_> {
             self.append_horizontal_edge_zones(
                 floating_rect,
                 target_groups,
-                whole_column_source,
+                !whole_column_source,
             )?;
         } else {
             self.append_vertical_edge_zones(

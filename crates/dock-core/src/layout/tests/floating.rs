@@ -1005,10 +1005,11 @@ fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
     let root = layout.dock_area(floating.area).unwrap().root;
     assert!(matches!(
         layout.node(root),
-        Some(Node::Split(split))
-            if split.axis == Axis::Y
-                && split.children == vec![moving_group, target_group]
-                && split.ratios == vec![0.3, 0.7]
+        Some(Node::Column(column))
+            if column.groups == vec![moving_group, target_group]
+                && column.group_ratios.len() == 2
+                && (column.group_ratios[0] - 0.3).abs() < 1.0e-4
+                && (column.group_ratios[1] - 0.7).abs() < 1.0e-4
     ));
     assert!(matches!(
         layout.node(moving_group),
@@ -1756,13 +1757,17 @@ fn floating_geometry_commands_report_the_affected_root_for_ui_invalidation() {
         PanelKey::new("changed-node-floating").unwrap(),
         descriptors()[0].1,
     );
-    let floating_root = builder.tabs(vec![floating_panel], 0, false);
+    let floating_tabs = builder.tabs(vec![floating_panel], 0, false);
     let floating = builder.floating_group(
-        floating_root,
+        floating_tabs,
         Rect::new(Point::new(10.0, 20.0), Size::new(400.0, 300.0)),
         1,
     );
     let mut layout = builder.build();
+    let floating_root = layout
+        .dock_area(layout.floating_group(floating).unwrap().area)
+        .unwrap()
+        .root;
 
     let moved = layout
         .apply(

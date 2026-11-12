@@ -34,9 +34,8 @@ impl Layout {
             let Some(area) = target_area(self, tree_index, group_rect.group) else {
                 continue;
             };
-            if area == AllowedArea::FLOATING
-                || matches!(source, DropSource::Composition { .. })
-            {
+            if area == AllowedArea::FLOATING {
+
                 continue;
             }
 

@@ -1349,8 +1349,17 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
 
     let (source_panel, source_node) = builder.panel(key("profile-source"), constraints());
     let source_group = builder.tabs(vec![source_node], 0, false);
+    let (_, second_source_node) =
+        builder.panel(key("profile-source-second"), constraints());
+    let second_source_group = builder.tabs(vec![second_source_node], 0, false);
+    let source_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![source_group, second_source_group],
+        vec![0.5, 0.5],
+    );
     let source_float = builder.floating_group(
-        source_group,
+        source_column,
         Rect::new(Point::new(500.0, 120.0), Size::new(420.0, 320.0)),
         2,
     );
@@ -1370,7 +1379,7 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
             DropTarget::GroupEdge {
                 group,
                 zone: DropZone::Left | DropZone::Right
-            } if group == source_group
+            } if group == source_group || group == second_source_group
         )
     }));
 
