@@ -1167,7 +1167,7 @@ fn dock_area_header_uses_column_semantics_for_simple_composition() {
     let DragDropAction::Command(command) =
         layout.resolve_drag_drop(&request, &metrics).unwrap()
     else {
-        panic!("the single-group composition should use normal Group docking");
+        panic!("the simple composition should preserve its Column wrapper");
     };
     layout.apply(command, &metrics).unwrap();
     assert!(layout.main_area(DockSide::Left).is_none());
@@ -1302,9 +1302,12 @@ fn simple_composition_drag_handles_share_main_and_free_area_commands() {
     let DragDropAction::Command(float_command) = expected_float_action else {
         unreachable!()
     };
-    floating_layout.apply(float_command, &metrics).unwrap();
+    let float_outcome = floating_layout.apply(float_command, &metrics).unwrap();
+    let Some(crate::CommandValue::FloatingGroup(floating_id)) = float_outcome.actual_value else {
+        panic!("floating the simple composition must return its FloatingGroup id");
+    };
     assert!(floating_layout.main_area(DockSide::Left).is_none());
-    let floating = floating_layout.floating_groups().next().unwrap().1;
+    let floating = floating_layout.floating_group(floating_id).unwrap();
     assert_eq!(
         floating_layout.dock_area(floating.area).unwrap().root,
         source_column
@@ -1391,14 +1394,16 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
     );
 
     let mut main_layout = layout.clone();
-    main_layout.apply(
-        DockCommand::MoveColumnToMainColumn {
-            column: source_column,
-            side: DockSide::Right,
-            index: 0,
-        },
-        &metrics,
-    ).unwrap();
+    main_layout
+        .apply(
+            DockCommand::MoveColumnToMainColumn {
+                column: source_column,
+                side: DockSide::Right,
+                index: 0,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(main_layout.floating_group(source_float).is_none());
     assert_eq!(
         main_layout.main_columns(DockSide::Right).unwrap(),
@@ -1424,7 +1429,11 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         group: target_group,
         zone: crate::DropZone::Left,
     };
-    assert!(floating_zones.iter().any(|zone| zone.target == floating_target));
+    assert!(
+        floating_zones
+            .iter()
+            .any(|zone| zone.target == floating_target)
+    );
     let floating_request = DragDropRequest {
         target: Some(floating_target),
         point: Point::new(510.0, 260.0),
@@ -1438,13 +1447,15 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         })
     );
 
-    layout.apply(
-        DockCommand::MoveColumnToTarget {
-            column: source_column,
-            target: floating_target,
-        },
-        &metrics,
-    ).unwrap();
+    layout
+        .apply(
+            DockCommand::MoveColumnToTarget {
+                column: source_column,
+                target: floating_target,
+            },
+            &metrics,
+        )
+        .unwrap();
     assert!(layout.floating_group(source_float).is_none());
     assert!(layout.floating_group(target_float).is_some());
     let new_root = layout
