@@ -14,7 +14,7 @@ pub mod tab_overflow;
 
 pub use canvas_slot::CanvasSlot;
 pub use context_menu::{ContextMenu, ContextMenuCallbacks, ContextMenuEntry, ContextMenuItem};
-pub use drop_overlay::{DragGhost, DropOverlay};
+pub use drop_overlay::DropOverlay;
 pub use floating::FloatingHost;
 pub use flyout::FlyoutView;
 pub use main_dock::MainDockView;
