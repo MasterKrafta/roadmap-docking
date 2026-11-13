@@ -1704,7 +1704,11 @@ impl FloatingWindowManager {
     /// Closing the owned DragHost can restore Main as the foreground window.
     /// Only reclaim focus from Main; never steal it back after the user has
     /// already moved to another application or another floating window.
-    pub(crate) fn activate_handoff_target(&self, group: FloatingGroupId) -> bool {
+    pub(crate) fn activate_handoff_target(
+        &self,
+        group: FloatingGroupId,
+        closing_drag_host: NativeWindowId,
+    ) -> bool {
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
         };
@@ -1720,7 +1724,10 @@ impl FloatingWindowManager {
 
         match self.native_ops.foreground_window() {
             Ok(Some(foreground)) if foreground == native_window => return true,
+            Ok(Some(foreground)) if foreground == closing_drag_host => return false,
             Ok(Some(foreground)) if Some(foreground) != self.main_native_window => {
+                // Respect a different app window or another FloatingHost that
+                // the user activated after releasing the drag.
                 return true;
             }
             Ok(_) => {}
