@@ -65,8 +65,8 @@ impl Layout {
 
             // Whole Floating compositions can be inserted above or below any
             // eligible Main Group, including a Group in a single-Group Column.
-            // Internal shared boundaries are represented once by the preceding
-            // Group's Bottom target in the shared Main/Floating geometry helper.
+            // Splitter-aligned internal boundaries are represented by the
+            // preceding Group's Bottom target. Each Group also exposes its own Top edge.
 
             for (edge, kind) in [
                 (DropZone::Top, DropZone::Top),
@@ -270,10 +270,9 @@ fn main_column_boundary_drop_rect(
 
 /// Returns the vertical edge band for a Main group.
 ///
-/// On Photoshop layouts, the boundary between two stacked groups is one
-/// shared drop strip aligned to the Column's Y splitter. It is represented
-/// only as the Bottom edge of the group above the splitter; the lower
-/// group's matching Top zone is omitted to avoid overlapping targets.
+/// On Photoshop layouts, the boundary between two stacked groups has one
+/// splitter-aligned drop strip represented by the upper Group's Bottom edge.
+/// The lower Group still exposes its own Top header edge as a separate target.
 /// Uses the splitter-aligned horizontal band while preserving a group's own
 /// vertical extent, so stacked groups keep independent drop targets.
 fn preserve_vertical_span(boundary: Rect, group_edge: Rect) -> Rect {
