@@ -1699,6 +1699,36 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Makes the handoff destination the temporary DragHost owner before it closes.
+    ///
+    /// Windows activates an owned window's owner when the owned window is hidden.
+    /// Reparenting only this short-lived DragHost ensures that focus returns to the
+    /// destination FloatingHost instead of Main.
+    pub(crate) fn redirect_drag_host_owner_to_handoff_target(
+        &self,
+        group: FloatingGroupId,
+        drag_host_window: NativeWindowId,
+    ) -> Result<(), String> {
+        let panel = self
+            .host_registry
+            .panel_for_group(group)
+            .ok_or_else(|| format!("Floating group {group:?} has no host panel"))?;
+        let entry = self
+            .registry
+            .windows
+            .get(&panel)
+            .ok_or_else(|| format!("Floating host panel {panel:?} has no native window entry"))?;
+        if entry.host_group != Some(group) || entry.visibility != PanelWindowVisibility::Visible {
+            return Err(format!("Floating group {group:?} is not hosted by a visible window"));
+        }
+        let target_window = entry
+            .native_window
+            .ok_or_else(|| format!("Floating group {group:?} has no native HWND"))?;
+        self.native_ops
+            .set_owner(drag_host_window, target_window)
+            .map_err(|error| error.to_string())
+    }
+
     /// Activates the persistent destination after its temporary DragHost has closed.
     ///
     /// Closing the owned DragHost can restore Main as the foreground window.
