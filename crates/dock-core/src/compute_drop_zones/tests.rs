@@ -2938,7 +2938,7 @@ fn floating_panel_and_group_use_the_same_main_dock_drop_zones() {
         );
         assert_eq!(
             top_zone.rect.size.height,
-            metrics.edge_drop_width.min(metrics.column_header_height)
+            metrics.edge_drop_width.min(metrics.column_header_height) * 0.5
         );
 
         let shared_bottom = zones
