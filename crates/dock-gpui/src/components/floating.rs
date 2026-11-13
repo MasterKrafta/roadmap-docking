@@ -1764,6 +1764,7 @@ impl Render for FloatingHost {
                 snapshot.active_drop_zone,
                 Some(preview),
                 &snapshot.rects.groups,
+                &snapshot.rects.columns,
                 &snapshot.rects.tab_headers,
                 &snapshot.rects.tab_strips,
                 None,
