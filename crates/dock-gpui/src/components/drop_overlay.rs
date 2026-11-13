@@ -15,7 +15,8 @@ use crate::dock_components::GroupPresentation;
 use super::drop_overlay_geometry::{
     canonical_group_edge_zone, centered_vertical_split_guide_rect, column_end_guide_rect,
     composition_edge_highlight_rect, floating_side_edge_guide_rect, group_edge_visual_rect,
-    main_dock_edge_guide_rect, main_group_edge_guide_rect, rail_insertion_rect,
+    main_dock_edge_guide_rect, main_group_edge_guide_rect, main_group_edge_highlight_rect,
+    rail_insertion_rect,
     same_group_panel_tab_insertion_rect, tab_strip_group_highlight_rect, target_group,
 };
 
