@@ -1292,6 +1292,9 @@ impl Layout {
                 persistent: true,
             });
         }
+
+        self.resize_floating_split_edge_column(root, floating.bounds, actual_bounds, metrics)?;
+
         if let Some(value) = self.floating_groups.get_mut(group) {
             value.bounds = actual_bounds;
         }
@@ -1303,6 +1306,124 @@ impl Layout {
             }),
             persistent: true,
         })
+    }
+
+    /// Keeps the internal horizontal Split stationary when a native Floating
+    /// window is resized from one outer edge. Only the Column touching that
+    /// edge absorbs the width change; translating the whole window is ignored.
+    fn resize_floating_split_edge_column(
+        &mut self,
+        root: NodeId,
+        previous_bounds: Rect,
+        next_bounds: Rect,
+        metrics: &DockMetrics,
+    ) -> Result<(), CommandError> {
+        let children = match self.nodes.get(root) {
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.len() >= 2
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) =>
+            {
+                split.children.clone()
+            }
+            _ => return Ok(()),
+        };
+
+        let previous_right = previous_bounds.origin.x + previous_bounds.size.width;
+        let next_right = next_bounds.origin.x + next_bounds.size.width;
+        if !previous_right.is_finite() || !next_right.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "bounds",
+                reason: "floating horizontal bounds overflowed",
+            });
+        }
+
+        let left_edge_delta = previous_bounds.origin.x - next_bounds.origin.x;
+        let right_edge_delta = next_right - previous_right;
+        const EDGE_TOLERANCE: f32 = 1.0e-3;
+        let left_edge_moved = left_edge_delta.abs() > EDGE_TOLERANCE;
+        let right_edge_moved = right_edge_delta.abs() > EDGE_TOLERANCE;
+
+        // A normal title-bar move changes both outer edges by the same amount.
+        // Only a resize with exactly one stationary outer edge changes a Column.
+        let edge_column = match (left_edge_moved, right_edge_moved) {
+            (true, false) => Some((children[0], left_edge_delta)),
+            (false, true) => Some((*children.last().expect("Split has at least two children"), right_edge_delta)),
+            _ => None,
+        };
+        let Some((column_id, width_delta)) = edge_column else {
+            return Ok(());
+        };
+
+        let column = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column.clone(),
+            _ => return Ok(()),
+        };
+        if column.mode.is_rail() {
+            return Ok(());
+        }
+
+        let minimum = self.minimum_column_width(column_id, metrics)?;
+        let maximum = self.maximum_column_width(column_id)?.unwrap_or(f32::INFINITY);
+        let requested_width = column.width + width_delta;
+        if !requested_width.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "resized floating edge column width is not finite",
+            });
+        }
+        let actual_width = Self::effective_column_width(
+            requested_width,
+            column.mode,
+            minimum,
+            maximum,
+            metrics,
+        )?;
+        if actual_width == column.width {
+            return Ok(());
+        }
+
+        if let Some(Node::Column(value)) = self.nodes.get_mut(column_id) {
+            value.width = actual_width;
+            value.last_expanded_width = Some(actual_width);
+        }
+
+        // Split(X) with direct Columns is laid out from each Column's width.
+        // Keep its ratios in sync for later splitter resizing and persistence.
+        let widths = children
+            .iter()
+            .map(|child| match self.nodes.get(*child) {
+                Some(Node::Column(column)) => Ok(match column.mode {
+                    ColumnMode::Expanded => column.width,
+                    ColumnMode::IconsAndLabels => metrics.min_column_width,
+                    ColumnMode::IconsOnly => metrics.rail_width,
+                }),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split contains a non-Column child",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let total_width = widths.iter().sum::<f32>();
+        if !total_width.is_finite() || total_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "floating horizontal Split width total is invalid",
+            });
+        }
+        if let Some(Node::Split(split)) = self.nodes.get_mut(root) {
+            if split.ratios.len() != widths.len() {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split ratios do not match its Columns",
+                });
+            }
+            for (ratio, width) in split.ratios.iter_mut().zip(widths) {
+                *ratio = width / total_width;
+            }
+        }
+
+        Ok(())
     }
 
     pub(super) fn next_floating_z_order(&self) -> Result<i32, CommandError> {
