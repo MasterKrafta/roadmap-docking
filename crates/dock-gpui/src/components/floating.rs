@@ -275,7 +275,6 @@ struct FloatingHostSnapshot {
     rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
     metrics: DockMetrics,
     drag_preview: Option<DragPreview>,
-    drag_handle: Option<DragHandle>,
     drag_zones: Vec<DropZoneRect>,
     active_drop_zone: Option<dock_core::DropZoneRect>,
 }
@@ -441,7 +440,6 @@ fn floating_host_snapshot(
         })
         .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
     let drag_preview = controller.floating_window_drag_preview(window_id, group);
-    let drag_handle = controller.drag().session().handle();
     let drag_resolver = controller.floating_window_drop_resolver(window_id, group);
     let drag_zones = drag_resolver
         .map(|resolver| resolver.zones().to_vec())
@@ -459,7 +457,6 @@ fn floating_host_snapshot(
         rail_display_orders,
         metrics,
         drag_preview,
-        drag_handle,
         drag_zones,
         active_drop_zone,
     }))
