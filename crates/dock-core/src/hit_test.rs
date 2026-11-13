@@ -509,14 +509,16 @@ fn target_in_scope(target: DropTarget, scope_nodes: &HashSet<NodeId>, include_on
 
 fn drop_zone_priority(zone: DropZone) -> u8 {
     match zone {
-        DropZone::RailInsertion => 0,
+        DropZone::RailInsertion
+        | DropZone::Left
+        | DropZone::Right
+        | DropZone::FloatingColumnInsertion => 0,
         DropZone::TabInsertion => 1,
         DropZone::DockEdge => 2,
         DropZone::ColumnLeft | DropZone::ColumnRight => 3,
         DropZone::FloatingTop | DropZone::FloatingBottom => 4,
         DropZone::Top | DropZone::Bottom => 5,
         DropZone::ColumnEnd => 6,
-        DropZone::Left | DropZone::Right => 7,
         DropZone::FloatingCenter => 8,
         DropZone::Center => 9,
         DropZone::FreeArea => 10,

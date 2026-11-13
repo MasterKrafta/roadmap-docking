@@ -412,7 +412,7 @@ impl Layout {
                 );
                 if let DropTarget::GroupEdge {
                     group: target_group,
-                    zone: zone @ DropZone::FloatingColumnInsertion,
+                    zone: DropZone::FloatingColumnInsertion,
                 } = target
                     && source_group_has_only_panel
                     && source_group == target_group

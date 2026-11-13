@@ -4138,7 +4138,12 @@ fn photoshop_group_and_panel_drops_create_columns_at_floating_splitters() {
     ));
     assert!(matches!(
         panel_layout.node(source_groups[0]),
-        Some(crate::Node::Tabs(tabs)) if tabs.children == vec![source_panels[1]]
+        Some(crate::Node::Tabs(tabs))
+            if tabs.children.len() == 1
+                && matches!(
+                    panel_layout.node(tabs.children[0]),
+                    Some(crate::Node::Panel(panel)) if panel.panel_id == source_panels[1]
+                )
     ));
     assert_eq!(panel_layout.validate(&metrics), Ok(()));
 }
@@ -4162,7 +4167,7 @@ fn photoshop_docks_a_floating_column_at_an_internal_splitter() {
 
     let (left_column, _, _) =
         add_test_column(&mut builder, "floating-target-left", &[1]);
-    let (middle_column, middle_groups, _) =
+    let (middle_column, _, _) =
         add_test_column(&mut builder, "floating-target-middle", &[1]);
     let (right_column, _, _) =
         add_test_column(&mut builder, "floating-target-right", &[1]);
