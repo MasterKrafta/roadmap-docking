@@ -275,6 +275,9 @@ struct NativeMoveSession {
     threshold_crossed: bool,
     high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
+    /// Floating target currently raised above the dragged native window so
+    /// its drop affordance remains visible while the windows overlap.
+    front_target: Option<NativeWindowId>,
 }
 
 #[derive(Clone)]
@@ -867,6 +870,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
+            front_target: None,
         });
         self.schedule_native_move(cx, group, window_id);
         if hide_header {
@@ -979,6 +983,7 @@ impl FloatingWindowManager {
             }
         });
         let Some(source) = source else {
+            self.restore_dragged_window_z_order(state);
             state.drop_target = None;
             self.clear_native_drag_target(cx);
             return;
@@ -993,12 +998,14 @@ impl FloatingWindowManager {
         ) {
             Ok(NativeWindowAtPoint::Known(window)) => window,
             Ok(NativeWindowAtPoint::Foreign | NativeWindowAtPoint::Empty) | Err(_) => {
+                self.restore_dragged_window_z_order(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             }
         };
         let resolved = if Some(target_window) == self.main_native_window {
+            self.restore_dragged_window_z_order(state);
             let Some(point) = self.core_point_for_main(cursor) else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
@@ -1027,10 +1034,16 @@ impl FloatingWindowManager {
                 (entry.native_window == Some(target_window) && *group != state.group)
                     .then_some((*group, entry.window_id))
             }) else {
+                self.restore_dragged_window_z_order(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             };
+            // Both source and target are native Floating windows. Keep the
+            // destination above the dragged source while they overlap so the
+            // target's own DropOverlay remains visible instead of being covered
+            // by the opaque source window.
+            self.raise_floating_drop_target(state, target_window);
             let Some(point) = self.core_point_for_floating(target_window, cursor) else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
@@ -1056,6 +1069,55 @@ impl FloatingWindowManager {
             })
         };
         state.drop_target = resolved;
+    }
+
+    fn raise_floating_drop_target(
+        &self,
+        state: &mut NativeMoveSession,
+        target_window: NativeWindowId,
+    ) {
+        if state.front_target == Some(target_window) {
+            return;
+        }
+        let Ok(bounds) = self.native_ops.window_rect(target_window) else {
+            return;
+        };
+        match self.native_ops.move_window_to_top(
+            target_window,
+            PhysicalPoint {
+                x: bounds.left,
+                y: bounds.top,
+            },
+        ) {
+            Ok(()) => state.front_target = Some(target_window),
+            Err(error) => tracing::debug!(
+                ?target_window,
+                %error,
+                "could not raise Floating drop target above the dragged window"
+            ),
+        }
+    }
+
+    fn restore_dragged_window_z_order(&self, state: &mut NativeMoveSession) {
+        if state.front_target.take().is_none() {
+            return;
+        }
+        let Ok(bounds) = self.native_ops.window_rect(state.native_window) else {
+            return;
+        };
+        if let Err(error) = self.native_ops.move_window_to_top(
+            state.native_window,
+            PhysicalPoint {
+                x: bounds.left,
+                y: bounds.top,
+            },
+        ) {
+            tracing::debug!(
+                ?state.group,
+                %error,
+                "could not restore the dragged Floating window to the front"
+            );
+        }
     }
 
 
@@ -1251,6 +1313,16 @@ impl FloatingWindowManager {
             self.cancel_controller_move(cx);
         }
 
+        // A rejected/no-op drop leaves the source as a Floating composition;
+        // make it visible above the target again. A successful dock removes
+        // its floating root, so the destination remains in front.
+        let source_still_floating = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(state.group).is_some()
+        });
+        if source_still_floating {
+            self.restore_dragged_window_z_order(&mut state);
+        }
+
         self.redraw_visible_hosts(cx);
         cx.notify();
     }
@@ -1266,10 +1338,15 @@ impl FloatingWindowManager {
             controller_cx.notify();
             result
         });
-        if let Some(position) = self.physical_origin_for_bounds(state.start_bounds)
-            && let Err(error) = self.native_ops.move_window(state.native_window, position)
-        {
-            tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
+        if let Some(position) = self.physical_origin_for_bounds(state.start_bounds) {
+            let move_result = if state.front_target.is_some() {
+                self.native_ops.move_window_to_top(state.native_window, position)
+            } else {
+                self.native_ops.move_window(state.native_window, position)
+            };
+            if let Err(error) = move_result {
+                tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
+            }
         }
         cx.notify();
     }
