@@ -971,6 +971,7 @@ impl Render for DockHost {
                 active_drop_zone,
                 drag_preview,
                 &rects.groups,
+                &rects.columns,
                 &rects.tab_headers,
                 &rects.tab_strips,
                 Some((&main_area_bounds, &main_node_sides)),
