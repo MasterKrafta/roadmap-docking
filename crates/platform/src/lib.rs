@@ -178,6 +178,12 @@ pub trait NativeWindowOps {
     fn foreground_window(&self) -> Result<Option<NativeWindowId>, NativeError>;
     fn hide(&self, window: NativeWindowId) -> Result<(), NativeError>;
 
+    /// Invalidates a native window so the platform message loop schedules a paint.
+    /// The default keeps non-Windows adapters and test doubles platform-neutral.
+    fn request_redraw(&self, _window: NativeWindowId) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Assigns the native owner of a top-level floating window.
     ///
     /// On Windows this is an application-lifecycle relationship: the owned window
@@ -920,6 +926,18 @@ mod windows_impl {
         fn hide(&self, window: NativeWindowId) -> Result<(), NativeError> {
             // SAFETY: window is a GPUI-owned HWND.
             let _ = unsafe { ShowWindowAsync(hwnd(window), SW_HIDE) };
+            Ok(())
+        }
+
+        fn request_redraw(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            // Queue a normal WM_PAINT for the live GPUI window. Do not use
+            // GPUI's private force-update message: it requires an internal
+            // per-process validation token that this platform adapter cannot access.
+            // SAFETY: window is a GPUI-owned HWND.
+            let invalidated = unsafe { InvalidateRect(Some(hwnd(window)), None, false) };
+            if !invalidated.as_bool() {
+                return Err(last_error("InvalidateRect"));
+            }
             Ok(())
         }
 
