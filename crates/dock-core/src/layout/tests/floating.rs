@@ -2242,7 +2242,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
 
         let (_, left_panel) = builder.panel(
             PanelKey::new("floating-edge-resize-left").unwrap(),
-            constraints,
+            constraints.clone(),
         );
         let left_group = builder.tabs(vec![left_panel], 0, false);
         let left_column = builder.column(
