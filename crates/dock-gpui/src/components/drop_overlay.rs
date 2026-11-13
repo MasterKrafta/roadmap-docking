@@ -121,26 +121,14 @@ impl DropOverlay {
                     // the guide across the corresponding Main DockArea's full height.
                     let visual_rect =
                         composition_edge_highlight_rect(zone, target, main_dock_bounds);
-                    let edge = match zone.zone {
-                        DropZone::ColumnLeft => DropZone::Left,
-                        DropZone::ColumnRight => DropZone::Right,
-                        _ => unreachable!("only ColumnLeft/ColumnRight reach this branch"),
-                    };
-                    let line = group_edge_guide_rect(visual_rect, edge);
+                    let line = centered_vertical_split_guide_rect(visual_rect);
                     layer = layer.child(highlight_rect(visual_rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
                 }
                 DropZone::FloatingColumnInsertion => {
                     // The zone follows one internal Split(X) boundary, not the
                     // outer composition edge. Keep the marker inside that splitter.
-                    let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
-                    let line = Rect::new(
-                        Point::new(x - DROP_EDGE_GUIDE_THICKNESS * 0.5, zone.rect.origin.y),
-                        dock_core::Size::new(
-                            DROP_EDGE_GUIDE_THICKNESS,
-                            zone.rect.size.height,
-                        ),
-                    );
+                    let line = centered_vertical_split_guide_rect(zone.rect);
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.18, false));
                     layer = layer.child(guide_rect(line, theme));
                 }
@@ -159,7 +147,7 @@ impl DropOverlay {
                     let line = Rect::new(
                         Point::new(
                             zone.rect.origin.x,
-                            y - DROP_EDGE_GUIDE_THICKNESS,
+                            y - DROP_EDGE_GUIDE_THICKNESS * 0.5,
                         ),
                         dock_core::Size::new(
                             zone.rect.size.width,
@@ -408,7 +396,18 @@ fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
 }
 
 
-const DROP_EDGE_GUIDE_THICKNESS: f32 = 2.0;
+const DROP_EDGE_GUIDE_THICKNESS: f32 = 4.0;
+
+fn centered_vertical_split_guide_rect(rect: Rect) -> Rect {
+    let center_x = rect.origin.x + rect.size.width * 0.5;
+    Rect::new(
+        Point::new(
+            center_x - DROP_EDGE_GUIDE_THICKNESS * 0.5,
+            rect.origin.y,
+        ),
+        dock_core::Size::new(DROP_EDGE_GUIDE_THICKNESS, rect.size.height),
+    )
+}
 
 fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     let right = rect.origin.x + rect.size.width;
@@ -693,21 +692,21 @@ mod tests {
 
         assert_eq!(
             group_edge_guide_rect(rect, DropZone::Top),
-            Rect::new(Point::new(10.0, 31.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
         );
         assert_eq!(
             group_edge_guide_rect(rect, DropZone::Bottom),
-            Rect::new(Point::new(10.0, 31.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
         );
 
         let side_rect = Rect::new(Point::new(10.0, 20.0), Size::new(24.0, 100.0));
         assert_eq!(
             group_edge_guide_rect(side_rect, DropZone::Left),
-            Rect::new(Point::new(10.0, 20.0), Size::new(2.0, 100.0))
+            Rect::new(Point::new(10.0, 20.0), Size::new(4.0, 100.0))
         );
         assert_eq!(
             group_edge_guide_rect(side_rect, DropZone::Right),
-            Rect::new(Point::new(32.0, 20.0), Size::new(2.0, 100.0))
+            Rect::new(Point::new(30.0, 20.0), Size::new(4.0, 100.0))
         );
     }
 
@@ -732,7 +731,7 @@ mod tests {
         let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
         assert_eq!(
             main_group_edge_guide_rect(top_zone, DropZone::Top, Some(target_group)),
-            Rect::new(Point::new(10.0, 59.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 58.0), Size::new(200.0, 4.0))
         );
 
         let bottom_zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
@@ -743,7 +742,7 @@ mod tests {
                 DropZone::Bottom,
                 Some(target_group),
             ),
-            Rect::new(Point::new(10.0, 358.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 356.0), Size::new(200.0, 4.0))
         );
 
         let internal_zone = Rect::new(Point::new(10.0, 196.0), Size::new(200.0, 24.0));
@@ -754,7 +753,7 @@ mod tests {
                 DropZone::Bottom,
                 Some(upper_group),
             ),
-            Rect::new(Point::new(10.0, 207.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 206.0), Size::new(200.0, 4.0))
         );
     }
 
@@ -809,7 +808,7 @@ mod tests {
                 DropZone::FloatingBottom,
                 Some(target_group),
             ),
-            Rect::new(Point::new(10.0, 358.0), Size::new(200.0, 2.0))
+            Rect::new(Point::new(10.0, 356.0), Size::new(200.0, 4.0))
         );
     }
 
@@ -896,17 +895,26 @@ mod tests {
     }
 
     #[test]
+    fn column_splitter_guides_stay_centered_between_the_two_edges() {
+        let splitter = Rect::new(Point::new(100.0, 20.0), Size::new(18.0, 300.0));
+        assert_eq!(
+            super::centered_vertical_split_guide_rect(splitter),
+            Rect::new(Point::new(107.0, 20.0), Size::new(4.0, 300.0))
+        );
+    }
+
+    #[test]
     fn main_dock_edge_guides_stay_close_to_the_outer_window_border() {
         let left = Rect::new(Point::new(100.0, 20.0), Size::new(24.0, 300.0));
         let right = Rect::new(Point::new(976.0, 20.0), Size::new(24.0, 300.0));
 
         assert_eq!(
             main_dock_edge_guide_rect(left, DockSide::Left),
-            Rect::new(Point::new(100.0, 20.0), Size::new(2.0, 300.0))
+            Rect::new(Point::new(100.0, 20.0), Size::new(4.0, 300.0))
         );
         assert_eq!(
             main_dock_edge_guide_rect(right, DockSide::Right),
-            Rect::new(Point::new(998.0, 20.0), Size::new(2.0, 300.0))
+            Rect::new(Point::new(996.0, 20.0), Size::new(4.0, 300.0))
         );
     }
 }
