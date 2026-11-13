@@ -1367,6 +1367,16 @@ impl DragHostManager {
             );
         }
 
+        let foreground_before_close = self.native_ops.foreground_window();
+        tracing::info!(
+            ?id,
+            ?target_group,
+            ?closing_drag_host,
+            ?main_native_window = self.main_native_window,
+            ?foreground_before_close,
+            owner_redirected,
+            "starting Floating handoff DragHost close"
+        );
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
@@ -1466,13 +1476,28 @@ impl DragHostManager {
         }
         drop(active.source_detach_subscription.take());
 
+        let foreground_before_hide = self.native_ops.foreground_window();
+        tracing::info!(
+            ?id,
+            ?drag_host = active.native_window,
+            ?foreground_before_hide,
+            "requesting DragHost hide"
+        );
         if let Err(error) = self.native_ops.hide(active.native_window) {
-            tracing::debug!(
+            tracing::warn!(
                 ?id,
+                ?drag_host = active.native_window,
                 %error,
-                "DragHost could not be confirmed hidden during close"
+                "DragHost hide request failed during close"
             );
         }
+        let foreground_after_hide = self.native_ops.foreground_window();
+        tracing::info!(
+            ?id,
+            ?drag_host = active.native_window,
+            ?foreground_after_hide,
+            "foreground HWND immediately after DragHost hide request"
+        );
 
         // GPUI may already have disposed the window (for example after a native
         // close). In either case the manager must release its runtime entry;
@@ -1489,6 +1514,16 @@ impl DragHostManager {
                 "DragHost window was already unavailable during close"
             );
         }
+        let foreground_after_remove = self.native_ops.foreground_window();
+        tracing::info!(
+            ?id,
+            ?drag_host = active.native_window,
+            ?foreground_before_hide,
+            ?foreground_after_hide,
+            ?foreground_after_remove,
+            window_remove_failed = window_update_error.is_some(),
+            "DragHost close foreground snapshot"
+        );
 
         self.controller.update(cx, |controller, controller_cx| {
             controller.drag_mut().clear_transport_host(id);
