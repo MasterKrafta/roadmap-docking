@@ -1061,7 +1061,7 @@ fn c46_move_whole_tabs_group_to_top_of_floating_stack_preserves_tabs_state() {
 }
 
 #[test]
-fn c46_photoshop_rejects_horizontal_split_inside_floating_stack_atomically() {
+fn c46_photoshop_allows_horizontal_split_at_floating_column_outer_edge() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let (_, source_panel) = builder.panel(
@@ -1088,16 +1088,15 @@ fn c46_photoshop_rejects_horizontal_split_inside_floating_stack_atomically() {
     );
     let bottom_group = builder.tabs(vec![bottom_panel], 0, false);
     let stack = builder.split(Axis::Y, vec![top_group, bottom_group], vec![0.5, 0.5]);
-    builder.floating_group(
+    let floating_id = builder.floating_group(
         stack,
         Rect::new(Point::new(60.0, 70.0), Size::new(440.0, 340.0)),
         1,
     );
     let mut layout = builder.build();
     assert_eq!(layout.validate(&metrics), Ok(()));
-    let before = format!("{layout:?}");
 
-    let error = layout
+    layout
         .apply(
             DockCommand::SplitGroup {
                 group: source_group,
@@ -1107,17 +1106,26 @@ fn c46_photoshop_rejects_horizontal_split_inside_floating_stack_atomically() {
             },
             &metrics,
         )
-        .unwrap_err();
+        .unwrap();
 
-    assert!(matches!(
-        error,
-        CommandError::InvalidTarget {
-            reason: "horizontal splits are not supported inside a floating stack"
-        }
-    ));
-    assert_eq!(format!("{layout:?}"), before);
-    assert_eq!(layout.version(), 0);
+    assert_eq!(layout.version(), 1);
     assert_eq!(layout.validate(&metrics), Ok(()));
+    let floating_area = layout.floating_group(floating_id).unwrap().area;
+    let floating_root = layout.dock_area(floating_area).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(floating_root) else {
+        panic!("horizontal docking must create a Split(X) Floating composition");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children.len(), 2);
+    assert!(matches!(
+        layout.node(split.children[0]),
+        Some(Node::Column(column)) if column.groups == vec![source_group]
+    ));
+    assert_eq!(split.children[1], stack);
+    assert!(matches!(
+        layout.node(stack),
+        Some(Node::Column(column)) if column.groups == vec![top_group, bottom_group]
+    ));
 }
 
 #[test]

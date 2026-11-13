@@ -1476,7 +1476,7 @@ fn resolver_uses_only_the_supplied_floating_window_snapshot() {
 }
 
 #[test]
-fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
+fn photoshop_suppresses_own_floating_side_targets_but_accepts_external_column_docking() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
     let (_, main_node) = builder.panel(key("profile-main"), constraints());
@@ -1537,24 +1537,35 @@ fn photoshop_suppresses_horizontal_group_splits_inside_a_floating_stack() {
             )
     }));
 
-    let before = format!("{layout:?}");
     let version = layout.version();
-    assert!(
-        layout
-            .apply(
-                DockCommand::SplitGroup {
-                    group: main_group,
-                    target_group: source_group,
-                    zone: DropZone::Left,
-                    ratio: 0.5,
-                },
-                &metrics,
-            )
-            .is_err()
-    );
-    assert_eq!(format!("{layout:?}"), before);
-    assert_eq!(layout.version(), version);
+    layout
+        .apply(
+            DockCommand::SplitGroup {
+                group: main_group,
+                target_group: source_group,
+                zone: DropZone::Left,
+                ratio: 0.5,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(layout.version(), version + 1);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let floating_area = layout.floating_group(source_float).unwrap().area;
+    let floating_root = layout.dock_area(floating_area).unwrap().root;
+    let Some(Node::Split(split)) = layout.node(floating_root) else {
+        panic!("external side docking must create a horizontal Floating composition");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children.len(), 2);
+    assert_eq!(split.children[1], source_column);
+    assert!(matches!(
+        layout.node(split.children[0]),
+        Some(Node::Column(column)) if column.groups == vec![main_group]
+    ));
 }
+
 #[test]
 fn group_center_merge_resolves_and_preserves_panel_instances() {
     let metrics = DockMetrics::default();
