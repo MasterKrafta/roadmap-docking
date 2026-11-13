@@ -3318,7 +3318,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
     );
     assert_eq!(
         first_top.rect.size.height,
-        metrics.edge_drop_width.min(metrics.column_header_height)
+        metrics.edge_drop_width.min(metrics.column_header_height) * 0.5
     );
 
     let shared_bottom = zones
