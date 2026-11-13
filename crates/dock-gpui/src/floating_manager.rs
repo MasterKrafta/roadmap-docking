@@ -1734,7 +1734,7 @@ impl FloatingWindowManager {
             ?panel,
             ?drag_host_window,
             ?target_window,
-            ?main_native_window = self.main_native_window,
+            main_native_window = ?self.main_native_window,
             ?foreground_before,
             ?foreground_after,
             "redirected DragHost native owner to Floating handoff target"
@@ -1807,7 +1807,7 @@ impl FloatingWindowManager {
                 ?group,
                 ?panel,
                 ?native_window,
-                ?main_native_window = self.main_native_window,
+                main_native_window = ?self.main_native_window,
                 ?foreground,
                 "foreground is neither Main nor the handoff target; preserving current focus"
             );
@@ -1819,7 +1819,7 @@ impl FloatingWindowManager {
             ?panel,
             ?native_window,
             ?closing_drag_host,
-            ?main_native_window = self.main_native_window,
+            main_native_window = ?self.main_native_window,
             ?foreground,
             "Main is foreground after DragHost close; requesting FloatingHost activation"
         );
