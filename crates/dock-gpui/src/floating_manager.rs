@@ -1219,6 +1219,7 @@ impl FloatingWindowManager {
             self.cancel_controller_move(cx);
         }
 
+        self.redraw_visible_hosts(cx);
         cx.notify();
     }
 
@@ -1685,6 +1686,7 @@ impl FloatingWindowManager {
         // Request a redraw now; foreground activation is deferred until
         // DragHost has actually been closed, otherwise Windows can activate
         // its owner (Main) again while destroying the owned DragHost.
+        self.request_native_redraw(panel);
         if let Err(error) = window.notify_host(cx) {
             tracing::warn!(
                 ?group,
@@ -1697,6 +1699,39 @@ impl FloatingWindowManager {
 
         cx.notify();
         true
+    }
+
+    /// Requests a native paint for the persistent window hosting this panel.
+    pub(crate) fn request_native_redraw(&self, panel: PanelId) {
+        if let Some(native_window) = self
+            .registry
+            .windows
+            .get(&panel)
+            .and_then(|entry| entry.native_window)
+            && let Err(error) = self.native_ops.request_redraw(native_window)
+        {
+            tracing::debug!(?panel, %error, "could not request a native redraw");
+        }
+    }
+
+    /// Notifies and invalidates all currently visible floating composition hosts.
+    pub(crate) fn redraw_visible_hosts(&self, cx: &mut Context<Self>) {
+        let hosts = self
+            .registry
+            .windows
+            .iter()
+            .filter(|(_, entry)| {
+                entry.host_group.is_some() && entry.visibility == PanelWindowVisibility::Visible
+            })
+            .map(|(panel, entry)| (*panel, entry.window))
+            .collect::<Vec<_>>();
+
+        for (panel, window) in hosts {
+            if let Err(error) = window.notify_host(cx) {
+                tracing::debug!(?panel, %error, "could not notify a visible FloatingHost");
+            }
+            self.request_native_redraw(panel);
+        }
     }
 
     /// Activates the persistent destination after its temporary DragHost has closed.
@@ -1806,6 +1841,10 @@ impl FloatingWindowManager {
                 manager.complete_floating_handoff(group, rendered_panels, manager_cx);
             });
         }
+
+        // The destination frame was rendered before DragHost closed. Queue one
+        // more native paint after the source surface stops covering the target.
+        self.request_native_redraw(host_panel);
     }
 
     fn initial_panel_window_bounds(
