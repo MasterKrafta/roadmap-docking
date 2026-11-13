@@ -1682,20 +1682,9 @@ impl FloatingWindowManager {
             }
         }
 
-        // The DragHost is non-activating and owned by Main. When it closes,
-        // Windows can restore Main as the foreground window unless the actual
-        // dock destination is explicitly activated during this handoff.
-        if let Err(error) = self.native_ops.activate(native_window) {
-            tracing::warn!(
-                ?group,
-                ?panel,
-                %error,
-                "could not activate the FloatingHost after panel handoff"
-            );
-        }
-
-        // Activation and rendering are separate: notify the exact destination
-        // GPUI host so it mounts the PanelViews released from DragHost.
+        // Request a redraw now; foreground activation is deferred until
+        // DragHost has actually been closed, otherwise Windows can activate
+        // its owner (Main) again while destroying the owned DragHost.
         if let Err(error) = window.notify_host(cx) {
             tracing::warn!(
                 ?group,
@@ -1708,6 +1697,57 @@ impl FloatingWindowManager {
 
         cx.notify();
         true
+    }
+
+    /// Activates the persistent destination after its temporary DragHost has closed.
+    ///
+    /// Closing the owned DragHost can restore Main as the foreground window.
+    /// Only reclaim focus from Main; never steal it back after the user has
+    /// already moved to another application or another floating window.
+    pub(crate) fn activate_handoff_target(&self, group: FloatingGroupId) -> bool {
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return false;
+        };
+        let Some(entry) = self.registry.windows.get(&panel) else {
+            return false;
+        };
+        if entry.host_group != Some(group) || entry.visibility != PanelWindowVisibility::Visible {
+            return false;
+        }
+        let Some(native_window) = entry.native_window else {
+            return false;
+        };
+
+        match self.native_ops.foreground_window() {
+            Ok(Some(foreground)) if foreground == native_window => return true,
+            Ok(Some(foreground)) if Some(foreground) != self.main_native_window => {
+                return true;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::debug!(
+                    ?group,
+                    %error,
+                    "could not inspect foreground window after DragHost close"
+                );
+                return false;
+            }
+        }
+
+        if let Err(error) = self.native_ops.activate(native_window) {
+            tracing::warn!(
+                ?group,
+                ?panel,
+                %error,
+                "could not activate FloatingHost after DragHost close"
+            );
+            return false;
+        }
+
+        matches!(
+            self.native_ops.foreground_window(),
+            Ok(Some(foreground)) if foreground == native_window
+        )
     }
 
     /// Returns the transferred panels whose destination FloatingHost is ready
