@@ -15,6 +15,7 @@ impl Layout {
             DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
+            | DockCommand::ResizeFloatingBoundsFromEdge { .. }
             | DockCommand::RaiseFloating { .. } => {
                 self.apply_floating_window_command(command, metrics)
             }
@@ -72,6 +73,18 @@ impl Layout {
             DockCommand::ResizeFloatingBounds { group, bounds } => {
                 self.apply_resize_floating_bounds_command(*group, *bounds, metrics)
             }
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group,
+                bounds,
+                edge,
+                scale_factor,
+            } => self.apply_resize_floating_bounds_from_edge_command(
+                *group,
+                *bounds,
+                *edge,
+                *scale_factor,
+                metrics,
+            ),
             DockCommand::RaiseFloating { group } => self.apply_raise_floating_command(*group),
             _ => Err(CommandError::InvalidTarget {
                 reason: "floating window dispatcher received a non-floating-window command",
@@ -1308,16 +1321,42 @@ impl Layout {
         })
     }
 
-    /// Keeps the internal horizontal Split stationary when a native Floating
-    /// window is resized from one outer edge. Only the Column touching that
-    /// edge absorbs the width change; translating the whole window is ignored.
-    fn resize_floating_split_edge_column(
+
+
+    pub(super) fn apply_resize_floating_bounds_from_edge_command(
         &mut self,
-        root: NodeId,
-        previous_bounds: Rect,
-        next_bounds: Rect,
+        group: FloatingGroupId,
+        bounds: Rect,
+        edge: crate::FloatingResizeEdge,
+        scale_factor: f32,
         metrics: &DockMetrics,
-    ) -> Result<(), CommandError> {
+    ) -> Result<CommandApplication, CommandError> {
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "scale_factor",
+                reason: "floating resize scale factor must be finite and positive",
+            });
+        }
+        bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "bounds",
+                reason: geometry_error_reason(error),
+            })?;
+
+        let floating = self
+            .floating_groups
+            .get(group)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group })?;
+        let root = self
+            .dock_areas
+            .get(floating.area)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?
+            .root;
+
         let children = match self.nodes.get(root) {
             Some(Node::Split(split))
                 if split.axis == Axis::X
@@ -1328,46 +1367,36 @@ impl Layout {
             {
                 split.children.clone()
             }
-            _ => return Ok(()),
+            _ => return self.apply_resize_floating_bounds_command(group, bounds, metrics),
         };
-
-        let previous_right = previous_bounds.origin.x + previous_bounds.size.width;
-        let next_right = next_bounds.origin.x + next_bounds.size.width;
-        if !previous_right.is_finite() || !next_right.is_finite() {
-            return Err(CommandError::InvalidValue {
-                field: "bounds",
-                reason: "floating horizontal bounds overflowed",
-            });
-        }
-
-        let left_edge_delta = previous_bounds.origin.x - next_bounds.origin.x;
-        let right_edge_delta = next_right - previous_right;
-        const EDGE_TOLERANCE: f32 = 1.0e-3;
-        let left_edge_moved = left_edge_delta.abs() > EDGE_TOLERANCE;
-        let right_edge_moved = right_edge_delta.abs() > EDGE_TOLERANCE;
-
-        // A normal title-bar move changes both outer edges by the same amount.
-        // Only a resize with exactly one stationary outer edge changes a Column.
-        let edge_column = match (left_edge_moved, right_edge_moved) {
-            (true, false) => Some((children[0], left_edge_delta)),
-            (false, true) => Some((*children.last().expect("Split has at least two children"), right_edge_delta)),
-            _ => None,
+        let column_id = match edge {
+            crate::FloatingResizeEdge::Left => children[0],
+            crate::FloatingResizeEdge::Right => *children
+                .last()
+                .expect("horizontal Split has at least two Columns"),
         };
-        let Some((column_id, width_delta)) = edge_column else {
-            return Ok(());
-        };
-
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column.clone(),
-            _ => return Ok(()),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split edge does not reference a Column",
+                });
+            }
         };
         if column.mode.is_rail() {
-            return Ok(());
+            return self.apply_resize_floating_bounds_command(group, bounds, metrics);
         }
 
-        let minimum = self.minimum_column_width(column_id, metrics)?;
-        let maximum = self.maximum_column_width(column_id)?.unwrap_or(f32::INFINITY);
-        let requested_width = column.width + width_delta;
+        let requested_delta = bounds.size.width - floating.bounds.size.width;
+        if !requested_delta.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "bounds",
+                reason: "floating horizontal resize delta is not finite",
+            });
+        }
+        let minimum_column_width = self.minimum_column_width(column_id, metrics)?;
+        let maximum_column_width = self.maximum_column_width(column_id)?.unwrap_or(f32::INFINITY);
+        let requested_width = column.width + requested_delta;
         if !requested_width.is_finite() {
             return Err(CommandError::InvalidValue {
                 field: "width",
@@ -1377,17 +1406,15 @@ impl Layout {
         let actual_width = Self::effective_column_width(
             requested_width,
             column.mode,
-            minimum,
-            maximum,
+            minimum_column_width,
+            maximum_column_width,
             metrics,
         )?;
-        if actual_width == column.width {
-            return Ok(());
-        }
+        let actual_delta = actual_width - column.width;
 
-        // Split(X) with direct Columns is laid out from each Column's width.
-        // Calculate the complete ratio update before mutating the model so an
-        // invalid Split can never leave a partially-applied edge resize.
+        // The saved Column widths are the current split positions, not the
+        // structural minimum. Compute ratios and the new mixed-unit window
+        // bounds before mutating the Layout.
         let ratios_match = matches!(
             self.nodes.get(root),
             Some(Node::Split(split)) if split.ratios.len() == children.len()
@@ -1400,9 +1427,9 @@ impl Layout {
         let widths = children
             .iter()
             .map(|child| match self.nodes.get(*child) {
-                Some(Node::Column(column)) if *child == column_id => Ok(actual_width),
-                Some(Node::Column(column)) => Ok(match column.mode {
-                    ColumnMode::Expanded => column.width,
+                Some(Node::Column(value)) if *child == column_id => Ok(actual_width),
+                Some(Node::Column(value)) => Ok(match value.mode {
+                    ColumnMode::Expanded => value.width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
                     ColumnMode::IconsOnly => metrics.rail_width,
                 }),
@@ -1411,11 +1438,43 @@ impl Layout {
                 }),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let total_width = widths.iter().sum::<f32>();
+        let total_width = widths.iter().sum::<f32>()
+            + metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
         if !total_width.is_finite() || total_width <= 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "floating horizontal Split width total is invalid",
+            });
+        }
+        let column_width_total = total_width
+            - metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
+        let next_width = floating.bounds.size.width + actual_delta;
+        let next_origin_x = match edge {
+            crate::FloatingResizeEdge::Left => {
+                floating.bounds.origin.x - actual_delta * scale_factor
+            }
+            crate::FloatingResizeEdge::Right => floating.bounds.origin.x,
+        };
+        let minimum = self.minimum_floating_size(root, metrics)?;
+        let actual_bounds = Rect::new(
+            Point::new(next_origin_x, bounds.origin.y),
+            Size::new(
+                next_width.max(minimum.width),
+                bounds.size.height.max(minimum.height),
+            ),
+        );
+        actual_bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "bounds",
+                reason: geometry_error_reason(error),
+            })?;
+
+        if actual_bounds == floating.bounds && actual_width == column.width {
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
+                inverse: None,
+                persistent: true,
             });
         }
 
@@ -1425,11 +1484,23 @@ impl Layout {
         }
         if let Some(Node::Split(split)) = self.nodes.get_mut(root) {
             for (ratio, width) in split.ratios.iter_mut().zip(widths) {
-                *ratio = width / total_width;
+                *ratio = width / column_width_total;
             }
         }
+        if let Some(value) = self.floating_groups.get_mut(group) {
+            value.bounds = actual_bounds;
+        }
 
-        Ok(())
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
+            inverse: Some(DockCommand::ResizeFloatingBoundsFromEdge {
+                group,
+                bounds: floating.bounds,
+                edge,
+                scale_factor,
+            }),
+            persistent: true,
+        })
     }
 
     pub(super) fn next_floating_z_order(&self) -> Result<i32, CommandError> {
