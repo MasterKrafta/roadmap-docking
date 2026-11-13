@@ -153,14 +153,14 @@ pub(super) fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     }
 }
 
-pub(super) fn group_edge_visual_rect(rect: Rect, target_group: Option<Rect>) -> Rect {
-    let Some(group) = target_group else {
+pub(super) fn group_edge_visual_rect(rect: Rect, target_bounds: Option<Rect>) -> Rect {
+    let Some(bounds) = target_bounds else {
         return rect;
     };
 
-    let left = rect.origin.x.min(group.origin.x);
+    let left = rect.origin.x.min(bounds.origin.x);
     let right = (rect.origin.x + rect.size.width)
-        .max(group.origin.x + group.size.width);
+        .max(bounds.origin.x + bounds.size.width);
     Rect::new(
         Point::new(left, rect.origin.y),
         dock_core::Size::new(right - left, rect.size.height),
