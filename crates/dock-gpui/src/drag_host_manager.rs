@@ -1336,6 +1336,46 @@ impl DragHostManager {
 
         let id = active.id;
         let closing_drag_host = active.native_window;
+
+        // Windows normally restores focus to an owned window's owner when that
+        // window is hidden. Redirect the temporary DragHost owner to the target
+        // FloatingHost before closing it, so focus returns to B rather than Main.
+        let owner_redirected = match self.floating_manager.clone() {
+            Some(manager) => match manager.update(cx, |manager, _| {
+                manager.redirect_drag_host_owner_to_handoff_target(
+                    target_group,
+                    closing_drag_host,
+                )
+            }) {
+                Ok(Ok(())) => true,
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        ?target_group,
+                        ?closing_drag_host,
+                        %error,
+                        "could not redirect DragHost ownership to the Floating handoff target"
+                    );
+                    false
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        ?target_group,
+                        ?closing_drag_host,
+                        %error,
+                        "could not access FloatingWindowManager to redirect DragHost ownership"
+                    );
+                    false
+                }
+            },
+            None => false,
+        };
+        if !owner_redirected {
+            tracing::debug!(
+                ?target_group,
+                "DragHost will close with its original Main owner; foreground activation fallback remains enabled"
+            );
+        }
+
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
