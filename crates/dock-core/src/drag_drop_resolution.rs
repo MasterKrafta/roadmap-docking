@@ -1987,7 +1987,11 @@ fn main_multi_group_dock_area_can_dock_into_a_floating_stack() {
         vec![target_top, target_bottom],
         vec![0.5, 0.5],
     );
-    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(620.0, 140.0), Size::new(420.0, 720.0)),
+        1,
+    );
     let mut layout = builder.build();
 
     let target = DropTarget::GroupEdge {
@@ -2043,7 +2047,11 @@ fn floating_multi_group_composition_can_stack_into_another_floating_column() {
         vec![source_top, source_bottom],
         vec![0.4, 0.6],
     );
-    let source_floating = builder.floating_group(source_column, bounds(100.0, 100.0), 1);
+    let source_floating = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(100.0, 100.0), Size::new(420.0, 720.0)),
+        1,
+    );
 
     let (_, target_top_panel) = builder.panel(key("floating-stack-target-top"), constraints());
     let target_top = builder.tabs(vec![target_top_panel], 0, false);
@@ -2055,7 +2063,11 @@ fn floating_multi_group_composition_can_stack_into_another_floating_column() {
         vec![target_top, target_bottom],
         vec![0.5, 0.5],
     );
-    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 2);
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(620.0, 140.0), Size::new(420.0, 720.0)),
+        2,
+    );
     let mut layout = builder.build();
 
     let target = DropTarget::GroupEdge {
