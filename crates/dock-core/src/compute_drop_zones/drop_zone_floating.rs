@@ -112,7 +112,6 @@ impl FloatingZoneContext<'_> {
             return Ok(());
         }
 
-        self.append_group_tab_strip_zones(&target_groups, area.root)?;
         self.append_center_zones(&target_groups)?;
         self.append_group_edge_zones(&target_groups)?;
         self.append_column_slot_zones(area.root)?;
@@ -126,121 +125,22 @@ impl FloatingZoneContext<'_> {
 }
 
 impl FloatingZoneContext<'_> {
-    /// A whole Group dropped on a Photoshop Floating tab strip is appended as
-    /// one operation. The single zone covers the full tab/control row; per-tab
-    /// insertion slots remain exclusive to individual Panel drags.
-    pub(super) fn append_group_tab_strip_zones(
-        &mut self,
-        target_groups: &[GroupRect],
-        floating_root: NodeId,
-    ) -> Result<(), ComputeRectsError> {
-        if self.layout.profile() != Profile::Photoshop {
-            return Ok(());
-        }
-
-        let source_group = match self.source {
-            DropSource::Group { group } => Some(group),
-            DropSource::Composition { .. }
-                if self.layout.is_simple_composition_root(self.source_root) =>
-            {
-                self.layout.simple_composition_group(self.source_root)
-            }
-            DropSource::Panel { .. } | DropSource::Composition { .. } => None,
-        };
-        let Some(source_group) = source_group else {
-            return Ok(());
-        };
-
-        for target_group in target_groups {
-            if !contains_node(self.tree_index, floating_root, target_group.group)
-                || contains_node(self.tree_index, source_group, target_group.group)
-                || contains_node(self.tree_index, target_group.group, source_group)
-            {
-                continue;
-            }
-
-            let Some(Node::Tabs(tabs)) = self.layout.node(target_group.group) else {
-                continue;
-            };
-            let Some(strip) = self
-                .rects
-                .tab_strips
-                .iter()
-                .find(|strip| strip.group == target_group.group)
-            else {
-                continue;
-            };
-
-            push_zone(
-                self.zones,
-                DropTarget::GroupTabs {
-                    group: target_group.group,
-                    index: tabs.children.len(),
-                },
-                DropZone::TabInsertion,
-                super::tab_strip_drop_rect(target_group.rect, strip.rect)?,
-            )?;
-        }
-
-        Ok(())
-    }
-
     pub(super) fn append_center_zones(
         &mut self,
         target_groups: &[GroupRect],
     ) -> Result<(), ComputeRectsError> {
-        // Multiple groups can share a vertical position in a horizontal floating
-        // composition, so center zones are emitted per group.
         for target_group in target_groups {
-            let tabs = match self.layout.node(target_group.group) {
-                Some(Node::Tabs(tabs)) if !tabs.collapsed => tabs,
-                _ => continue,
-            };
-            let is_self = matches!(
+            super::append_group_center_zone(
+                self.layout,
                 self.source,
-                DropSource::Group { .. } | DropSource::Composition { .. }
-            ) && contains_node(self.tree_index, self.source_root, target_group.group);
-            let panel_already_in_group = match self.source {
-                DropSource::Panel { panel } => {
-                    panel_node(self.tree_index, panel)
-                        .and_then(|node_id| direct_parent(self.tree_index, node_id))
-                        == Some(target_group.group)
-                }
-                DropSource::Group { .. } | DropSource::Composition { .. } => false,
-            };
-            if is_self || panel_already_in_group {
-                continue;
-            }
-
-            let target = match self.source {
-                DropSource::Panel { .. } => DropTarget::Tabs {
-                    group: target_group.group,
-                    index: tabs.children.len(),
-                },
-                DropSource::Group { .. }
-                    if matches!(self.layout.node(self.source_root), Some(Node::Tabs(_))) =>
-                {
-                    DropTarget::GroupTabs {
-                        group: target_group.group,
-                        index: tabs.children.len(),
-                    }
-                }
-                DropSource::Composition { .. }
-                    if self.layout.is_simple_composition_root(self.source_root) =>
-                {
-                    DropTarget::GroupTabs {
-                        group: target_group.group,
-                        index: tabs.children.len(),
-                    }
-                }
-                DropSource::Composition { .. } => continue,
-                _ => continue,
-            };
-            push_zone(
-                self.zones,
-                target,
+                self.source_root,
+                self.source_panels,
+                self.tree_index,
+                *target_group,
+                AllowedArea::FLOATING,
+                self.metrics,
                 DropZone::FloatingCenter,
-                group_center_rect(target_group.rect, self.metrics)?,
+                self.zones,
             )?;
         }
         Ok(())
@@ -292,6 +192,17 @@ impl FloatingZoneContext<'_> {
                     continue;
                 }
 
+                let Some(zone_rect) = super::shared_group_vertical_edge_rect(
+                    self.layout,
+                    self.rects,
+                    self.tree_index,
+                    target_group.group,
+                    target_group.rect,
+                    edge,
+                    self.metrics,
+                )? else {
+                    continue;
+                };
                 push_zone(
                     self.zones,
                     DropTarget::GroupEdge {
@@ -299,15 +210,7 @@ impl FloatingZoneContext<'_> {
                         zone: edge,
                     },
                     edge,
-                    floating_group_edge_rect(
-                        self.layout,
-                        self.rects,
-                        self.tree_index,
-                        target_group.group,
-                        target_group.rect,
-                        edge,
-                        self.metrics,
-                    )?,
+                    zone_rect,
                 )?;
             }
         }
@@ -662,57 +565,6 @@ impl FloatingZoneContext<'_> {
         }
         Ok(())
     }
-}
-
-fn floating_group_edge_rect(
-    layout: &Layout,
-    rects: &LayoutRects,
-    tree_index: &DropZoneTreeIndex,
-    group: NodeId,
-    group_rect: Rect,
-    edge: DropZone,
-    metrics: &DockMetrics,
-) -> Result<Rect, ComputeRectsError> {
-    let Some(column_id) = owner_column(layout, tree_index, group) else {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    };
-    let Some(Node::Column(column)) = layout.node(column_id) else {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    };
-    let Some(group_index) = column.groups.iter().position(|candidate| *candidate == group) else {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    };
-    let boundary_index = match edge {
-        DropZone::Top if group_index > 0 => group_index - 1,
-        DropZone::Bottom if group_index + 1 < column.groups.len() => group_index,
-        _ => return group_edge_rect(group_rect, edge, metrics.edge_drop_width),
-    };
-
-    let Some(splitter) = rects.splitters.iter().find(|splitter| {
-        splitter.owner == column_id
-            && splitter.axis == crate::Axis::Y
-            && splitter.boundary_index == boundary_index
-    }) else {
-        return group_edge_rect(group_rect, edge, metrics.edge_drop_width);
-    };
-    // Divide the physical splitter into two non-overlapping halves:
-    // the upper half means Top of the lower Group, the lower half means
-    // Bottom of the upper Group. Keeping this within the physical splitter
-    // prevents either edge target from reaching the next Group's tab strip.
-    let half_thickness =
-        (metrics.splitter_thickness * 0.5).min(splitter.rect.size.height * 0.5);
-    let center_y = splitter.rect.origin.y + splitter.rect.size.height * 0.5;
-    let zone_y = if edge == DropZone::Top {
-        center_y - half_thickness
-    } else {
-        center_y
-    };
-    let rect = Rect::new(
-        Point::new(group_rect.origin.x, zone_y),
-        Size::new(group_rect.size.width, half_thickness),
-    );
-    rect.validate().map_err(ComputeRectsError::Geometry)?;
-    Ok(rect)
 }
 
 impl FloatingZoneContext<'_> {

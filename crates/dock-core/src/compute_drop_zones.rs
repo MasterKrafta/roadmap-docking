@@ -9,6 +9,9 @@ pub(super) use drop_zone_tree::{
     source_allows, source_is_floating_root, source_root, target_area,
 };
 
+#[path = "compute_drop_zones/drop_zone_shared.rs"]
+mod drop_zone_shared;
+pub(super) use drop_zone_shared::{append_group_center_zone, shared_group_vertical_edge_rect};
 #[path = "compute_drop_zones/drop_zone_floating.rs"]
 mod drop_zone_floating;
 #[path = "compute_drop_zones/drop_zone_main.rs"]

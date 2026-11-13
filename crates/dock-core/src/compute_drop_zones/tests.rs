@@ -2480,7 +2480,7 @@ fn floating_group_tab_strip_uses_one_full_strip_append_zone_for_all_group_tabs()
 }
 
 #[test]
-fn floating_group_edges_resolve_above_and_below_each_group() {
+fn floating_group_edges_use_the_shared_main_column_boundary() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -2516,38 +2516,59 @@ fn floating_group_edges_resolve_above_and_below_each_group() {
         .compute_drop_zones(DropSource::Group { group: source_group }, &rects, &metrics)
         .unwrap();
 
-    let second_top = zones.iter().find(|zone| {
-        zone.zone == DropZone::Top
-            && zone.target
-                == (DropTarget::GroupEdge {
-                    group: second_group,
-                    zone: DropZone::Top,
-                })
-    }).expect("the second Floating group must expose its top edge");
-    let first_bottom = zones.iter().find(|zone| {
-        zone.zone == DropZone::Bottom
-            && zone.target
-                == (DropTarget::GroupEdge {
-                    group: first_group,
-                    zone: DropZone::Bottom,
-                })
-    }).expect("the first Floating group must expose its bottom edge");
+    assert!(
+        !zones.iter().any(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == (DropTarget::GroupEdge {
+                        group: second_group,
+                        zone: DropZone::Top,
+                    })
+        }),
+        "the shared inter-Group boundary is exposed only once, as the Bottom edge of the upper Group"
+    );
 
-    for zone in [second_top, first_bottom] {
-        let point = Point::new(
-            zone.rect.origin.x + zone.rect.size.width / 2.0,
-            zone.rect.origin.y + zone.rect.size.height / 2.0,
-        );
-        assert_eq!(
-            layout.resolve_drop(
+    let first_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == (DropTarget::GroupEdge {
+                        group: first_group,
+                        zone: DropZone::Bottom,
+                    })
+        })
+        .expect("the first Floating group must expose the shared bottom edge");
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|splitter| {
+            splitter.owner == target_column
+                && splitter.axis == Axis::Y
+                && splitter.boundary_index == 0
+        })
+        .expect("the target Floating Column should expose its shared Group splitter");
+    let splitter_center = Point::new(
+        splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+        splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+    );
+    assert!(first_bottom.rect.contains(splitter_center).unwrap());
+
+    let point = Point::new(
+        first_bottom.rect.origin.x + first_bottom.rect.size.width / 2.0,
+        first_bottom.rect.origin.y + first_bottom.rect.size.height / 2.0,
+    );
+    assert_eq!(
+        layout
+            .resolve_drop(
                 point,
                 DropSource::Group { group: source_group },
                 &rects,
                 &metrics,
-            ).unwrap(),
-            Some(zone.target)
-        );
-    }
+            )
+            .unwrap(),
+        Some(first_bottom.target)
+    );
 }
 
 #[test]
