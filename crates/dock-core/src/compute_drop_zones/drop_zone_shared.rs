@@ -237,11 +237,8 @@ pub(super) fn shared_group_vertical_edge_rect(
     };
 
     match edge {
-        // The previous Group owns the splitter-aligned Bottom target. Keep
-        // this Group's own Top header edge available as a separate target.
-        DropZone::Top if group_index > 0 => {
-            Ok(Some(group_edge_rect(group_rect, edge, metrics.edge_drop_width)?))
-        },
+        // The previous Group owns the shared splitter-aligned boundary.
+        DropZone::Top if group_index > 0 => Ok(None),
         DropZone::Top => {
             let Some(column_rect) = rects
                 .columns
