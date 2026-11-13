@@ -1760,14 +1760,12 @@ impl Render for FloatingHost {
         ));
 
         if let Some(preview) = snapshot.drag_preview {
-            let floating_rects = [snapshot.floating];
             root = root.child(DropOverlay::render(
                 snapshot.active_drop_zone,
                 Some(preview),
                 &snapshot.rects.groups,
                 &snapshot.rects.tab_headers,
                 &snapshot.rects.tab_strips,
-                &floating_rects,
                 None,
                 self.theme,
             ));

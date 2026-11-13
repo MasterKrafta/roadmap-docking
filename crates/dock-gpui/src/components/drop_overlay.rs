@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, FloatingGroupRect, GroupRect,
+    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, GroupRect,
     DockSide, NodeId, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
@@ -14,9 +14,8 @@ use crate::dock_components::GroupPresentation;
 
 /// Visual feedback for the current dock destination.
 ///
-/// Most targets are painted from the active DropZoneResolver snapshot.
-/// Floating same-group PanelTab reordering may use a geometry-only insertion
-/// marker; Main tab-strip drops are append-only and never show between-tab markers.
+/// Main and Floating use the same visual treatment for equivalent resolved zones.
+/// Floating same-group PanelTab reordering may use a geometry-only insertion marker.
 pub struct DropOverlay;
 
 /// A non-interactive visual card that follows the active drag pointer.
@@ -43,7 +42,6 @@ impl DropOverlay {
         groups: &[GroupRect],
         tab_headers: &[TabHeaderRect],
         tab_strips: &[TabStripRect],
-        floating_groups: &[FloatingGroupRect],
         main_dock_bounds: Option<(&HashMap<DockSide, Rect>, &HashMap<NodeId, DockSide>)>,
         theme: Theme,
     ) -> impl IntoElement {
@@ -70,15 +68,8 @@ impl DropOverlay {
 
         {
             match zone.zone {
-                DropZone::Center => {
-                    // Main content remains a valid append destination, but only
-                    // the explicit tab strip receives visual drop feedback.
-                    if main_dock_bounds.is_none()
-                        && let Some(group) = target_group(target)
-                            .and_then(|id| groups.iter().find(|group| group.group == id))
-                    {
-                        layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
-                    }
+                DropZone::Center | DropZone::FloatingCenter => {
+                    // The tab row is the visible affordance; don't shade the entire composition.
                 }
                 DropZone::TabInsertion => {
                     if let Some(strip_rect) =
@@ -89,34 +80,38 @@ impl DropOverlay {
                         // occupy the trailing part of the same header row.
                         layer = layer.child(highlight_rect(strip_rect, theme, 0.12, true));
                     }
-                    if main_dock_bounds.is_none()
-                        && should_show_tab_insertion_marker(preview)
-                        && let Some(line) =
-                            tab_insertion_rect(target, tab_headers, tab_strips)
-                    {
-                        // Only individual Panel drags need a precise insertion
-                        // marker. Whole Group/Composition drops append as one unit.
-                        layer = layer.child(guide_rect(line, theme));
-                    }
                 }
-                DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom => {
-                    // Highlight the actual hit strip and place a guide at its center;
-                    // do not shade half of the target group for an edge drop.
+                DropZone::Left | DropZone::Right => {
+                    // Floating outer sides already span the composition; Main
+                    // generic group sides use the same local strip and guide.
                     let target_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
-                    let highlight = if main_dock_bounds.is_some() {
-                        main_group_edge_highlight_rect(zone.rect, zone.zone)
-                    } else {
-                        zone.rect
-                    };
-                    layer = layer.child(highlight_rect(highlight, theme, 0.10, false));
-                    let guide = if main_dock_bounds.is_some() {
-                        main_group_edge_guide_rect(zone.rect, zone.zone, target_bounds)
-                    } else {
-                        group_edge_guide_rect(zone.rect, zone.zone)
-                    };
-                    layer = layer.child(guide_rect(guide, theme));
+                    layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
+                    layer = layer.child(guide_rect(
+                        main_group_edge_guide_rect(zone.rect, zone.zone, target_bounds),
+                        theme,
+                    ));
+                }
+                DropZone::Top
+                | DropZone::Bottom
+                | DropZone::FloatingTop
+                | DropZone::FloatingBottom => {
+                    // Use Main's header seam and outer-bottom treatment for both hosts.
+                    let edge = canonical_group_edge_zone(zone.zone);
+                    let target_bounds = target_group(target)
+                        .and_then(|id| groups.iter().find(|group| group.group == id))
+                        .map(|group| group.rect);
+                    layer = layer.child(highlight_rect(
+                        main_group_edge_highlight_rect(zone.rect, edge),
+                        theme,
+                        0.10,
+                        false,
+                    ));
+                    layer = layer.child(guide_rect(
+                        main_group_edge_guide_rect(zone.rect, edge, target_bounds),
+                        theme,
+                    ));
                 }
                 DropZone::ColumnLeft | DropZone::ColumnRight => {
                     // Core resolves Photoshop side docking at Column scope; paint
@@ -165,17 +160,6 @@ impl DropOverlay {
                     if let Some(line) = rail_insertion_rect(&zone, tab_headers) {
                         layer = layer.child(guide_rect(line, theme));
                     }
-                }
-                DropZone::FloatingCenter => {
-                    if let Some(floating) = floating_for_target(target, groups, floating_groups) {
-                        layer = layer.child(highlight_rect(floating.rect, theme, 0.20, true));
-                    }
-                }
-                DropZone::FloatingTop | DropZone::FloatingBottom => {
-                    if let Some(floating) = floating_for_target(target, groups, floating_groups) {
-                        layer = layer.child(highlight_rect(floating.rect, theme, 0.08, true));
-                    }
-                    layer = layer.child(highlight_rect(zone.rect, theme, 0.36, false));
                 }
                 // FreeArea moves/detaches a composition; CanvasSlot renders its bounds.
                 DropZone::FreeArea => {}
@@ -390,8 +374,12 @@ fn tab_strip_group_highlight_rect(
     ))
 }
 
-fn should_show_tab_insertion_marker(preview: DragPreview) -> bool {
-    matches!(preview.payload, DragPayload::Panel { .. })
+fn canonical_group_edge_zone(zone: DropZone) -> DropZone {
+    match zone {
+        DropZone::FloatingTop => DropZone::Top,
+        DropZone::FloatingBottom => DropZone::Bottom,
+        other => other,
+    }
 }
 
 fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
@@ -406,28 +394,6 @@ fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
     }
 }
 
-fn floating_for_target(
-    target: DropTarget,
-    groups: &[GroupRect],
-    floating_groups: &[FloatingGroupRect],
-) -> Option<FloatingGroupRect> {
-    let group_id = target_group(target)?;
-    let group = groups.iter().find(|group| group.group == group_id)?;
-    let center = Point::new(
-        group.rect.origin.x + group.rect.size.width * 0.5,
-        group.rect.origin.y + group.rect.size.height * 0.5,
-    );
-    floating_groups
-        .iter()
-        .filter(|floating| {
-            center.x >= floating.rect.origin.x
-                && center.x <= floating.rect.origin.x + floating.rect.size.width
-                && center.y >= floating.rect.origin.y
-                && center.y <= floating.rect.origin.y + floating.rect.size.height
-        })
-        .max_by_key(|floating| floating.z_order)
-        .copied()
-}
 
 fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     const GUIDE_THICKNESS: f32 = 4.0;
@@ -648,7 +614,7 @@ mod tests {
     use super::{
         composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
         main_group_edge_guide_rect, same_group_panel_tab_insertion_rect,
-        should_show_tab_insertion_marker, zone_matches_preview,
+        canonical_group_edge_zone, zone_matches_preview,
     };
 
     #[test]
@@ -780,26 +746,15 @@ mod tests {
     }
 
     #[test]
-    fn whole_group_and_composition_drops_do_not_show_tab_insertion_markers() {
-        let group_preview = DragPreview {
-            payload: DragPayload::Group { group: NodeId::null() },
-            point: Point::ZERO,
-            target: None,
-        };
-        let composition_preview = DragPreview {
-            payload: DragPayload::DockArea { side: DockSide::Left },
-            point: Point::ZERO,
-            target: None,
-        };
-        let panel_preview = DragPreview {
-            payload: DragPayload::Panel { panel: PanelId::null() },
-            point: Point::ZERO,
-            target: None,
-        };
-
-        assert!(!should_show_tab_insertion_marker(group_preview));
-        assert!(!should_show_tab_insertion_marker(composition_preview));
-        assert!(should_show_tab_insertion_marker(panel_preview));
+    fn floating_outer_edges_use_the_same_visual_semantics_as_main() {
+        assert_eq!(
+            canonical_group_edge_zone(DropZone::FloatingTop),
+            DropZone::Top
+        );
+        assert_eq!(
+            canonical_group_edge_zone(DropZone::FloatingBottom),
+            DropZone::Bottom
+        );
     }
 
     #[test]
