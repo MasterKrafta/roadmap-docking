@@ -1,8 +1,9 @@
 use super::*;
 use crate::layout_builder::LayoutBuilder;
 use crate::{
-    AllowedArea, ColumnMode, DockCommand, DockMetrics, DockSide, DropSource, DropTarget, DropZone,
-    Axis, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    AllowedArea, Axis, ColumnMode, DockCommand, DockMetrics, DockSide, DragDropAction,
+    DragDropRequest, DragHandle, DragPayload, DropSource, DropTarget, DropZone, PanelConstraints,
+    PanelKey, Point, Profile, Rect, Size,
 };
 
 fn key(name: &str) -> PanelKey {
@@ -2260,6 +2261,167 @@ fn floating_panel_tab_strip_uses_one_append_zone() {
 }
 
 #[test]
+fn floating_group_tab_strip_uses_one_full_strip_append_zone_for_all_group_tabs() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_first_node) =
+        builder.panel(key("floating-group-strip-source-first"), constraints());
+    let (_, source_second_node) =
+        builder.panel(key("floating-group-strip-source-second"), constraints());
+    let source_group = builder.tabs(vec![source_first_node, source_second_node], 1, true);
+    let (_, source_sibling_node) =
+        builder.panel(key("floating-group-strip-source-sibling"), constraints());
+    let source_sibling = builder.tabs(vec![source_sibling_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group, source_sibling],
+        vec![0.6, 0.4],
+    );
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(80.0, 100.0), Size::new(420.0, 520.0)),
+        2,
+    );
+
+    let (_, target_first_node) =
+        builder.panel(key("floating-group-strip-target-first"), constraints());
+    let (_, target_second_node) =
+        builder.panel(key("floating-group-strip-target-second"), constraints());
+    let (_, target_third_node) =
+        builder.panel(key("floating-group-strip-target-third"), constraints());
+    let target_group = builder.tabs(
+        vec![target_first_node, target_second_node, target_third_node],
+        0,
+        true,
+    );
+    let target_float = builder.floating_group(
+        target_group,
+        Rect::new(Point::new(560.0, 100.0), Size::new(520.0, 420.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    let source = DropSource::Group { group: source_group };
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == target_group)
+        .expect("the Floating target must have a tab strip");
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let expected_target = DropTarget::GroupTabs {
+        group: target_group,
+        index: 3,
+    };
+
+    let append_zones: Vec<_> = zones
+        .iter()
+        .filter(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && matches!(
+                    zone.target,
+                    DropTarget::GroupTabs { group, .. } if group == target_group
+                )
+        })
+        .collect();
+    assert_eq!(
+        append_zones.len(),
+        1,
+        "a whole Group drag must expose exactly one insertion zone for the target strip"
+    );
+    assert_eq!(append_zones[0].target, expected_target);
+    assert_eq!(append_zones[0].rect, strip.rect);
+    assert!(
+        !zones.iter().any(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && matches!(
+                    zone.target,
+                    DropTarget::GroupTabs { group, index }
+                        if group == target_group && index < 3
+                )
+        }),
+        "a whole Group drag must not expose intermediate tab insertion slots"
+    );
+    assert!(
+        !zones.iter().any(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && matches!(zone.target, DropTarget::Tabs { group, .. } if group == target_group)
+        }),
+        "a whole Group drag must not be converted into a single-Panel tab insertion"
+    );
+
+    let strip_y = strip.rect.origin.y + strip.rect.size.height * 0.5;
+    for x in [
+        strip.rect.origin.x + 1.0,
+        strip.rect.origin.x + strip.rect.size.width * 0.25,
+        strip.rect.origin.x + strip.rect.size.width * 0.5,
+        strip.rect.origin.x + strip.rect.size.width * 0.75,
+        strip.rect.origin.x + strip.rect.size.width - 1.0,
+    ] {
+        assert_eq!(
+            layout
+                .resolve_drop(Point::new(x, strip_y), source, &rects, &metrics)
+                .unwrap(),
+            Some(expected_target),
+            "every point across the Floating tab strip must resolve to the same append target"
+        );
+    }
+
+    let request = DragDropRequest {
+        payload: DragPayload::Group { group: source_group },
+        handle: DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point: Point::new(
+            strip.rect.origin.x + strip.rect.size.width * 0.5,
+            strip_y,
+        ),
+        target: Some(expected_target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::MergeGroup {
+            group: source_group,
+            target_group,
+            index: 3,
+        }),
+        "releasing a Group over the Floating strip must merge the complete group"
+    );
+
+    layout
+        .apply(
+            DockCommand::MergeGroup {
+                group: source_group,
+                target_group,
+                index: 3,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert!(layout.node(source_group).is_none());
+    assert!(layout.floating_group(source_float).is_some());
+    assert!(layout.floating_group(target_float).is_some());
+    assert!(matches!(
+        layout.node(source_column),
+        Some(crate::Node::Column(column)) if column.groups == vec![source_sibling]
+    ));
+    assert!(matches!(
+        layout.node(target_group),
+        Some(crate::Node::Tabs(tabs))
+            if tabs.children == vec![
+                target_first_node,
+                target_second_node,
+                target_third_node,
+                source_first_node,
+                source_second_node,
+            ] && tabs.active_index == 4
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_group_edges_resolve_above_and_below_each_group() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
@@ -3521,7 +3683,9 @@ fn a_single_group_with_multiple_tabs_keeps_panel_tab_drop_semantics() {
 
     let (_, target_node) =
         builder.panel(key("multi-tab-simple-target"), constraints());
-    let target_group = builder.tabs(vec![target_node], 0, false);
+    let (_, target_second_node) =
+        builder.panel(key("multi-tab-simple-target-second"), constraints());
+    let target_group = builder.tabs(vec![target_node, target_second_node], 0, false);
     let target_float = builder.floating_group(
         target_group,
         Rect::new(Point::new(520.0, 100.0), Size::new(420.0, 320.0)),
@@ -3542,7 +3706,7 @@ fn a_single_group_with_multiple_tabs_keeps_panel_tab_drop_semantics() {
         zone.zone == DropZone::TabInsertion
             && zone.target == (DropTarget::Tabs {
                 group: target_group,
-                index: 1,
+                index: 2,
             })
     }));
     assert!(!zones.iter().any(|zone| {

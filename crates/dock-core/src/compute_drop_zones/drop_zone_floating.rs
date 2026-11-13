@@ -112,6 +112,7 @@ impl FloatingZoneContext<'_> {
             return Ok(());
         }
 
+        self.append_group_tab_strip_zones(&target_groups, area.root)?;
         self.append_center_zones(&target_groups)?;
         self.append_group_edge_zones(&target_groups)?;
         self.append_column_slot_zones(area.root)?;
@@ -125,6 +126,65 @@ impl FloatingZoneContext<'_> {
 }
 
 impl FloatingZoneContext<'_> {
+    /// A whole Group dropped on a Photoshop Floating tab strip is appended as
+    /// one operation. The single zone covers the complete strip; per-tab
+    /// insertion slots remain exclusive to individual Panel drags.
+    pub(super) fn append_group_tab_strip_zones(
+        &mut self,
+        target_groups: &[GroupRect],
+        floating_root: NodeId,
+    ) -> Result<(), ComputeRectsError> {
+        if self.layout.profile() != Profile::Photoshop {
+            return Ok(());
+        }
+
+        let source_group = match self.source {
+            DropSource::Group { group } => Some(group),
+            DropSource::Composition { .. }
+                if self.layout.is_simple_composition_root(self.source_root) =>
+            {
+                self.layout.simple_composition_group(self.source_root)
+            }
+            DropSource::Panel { .. } | DropSource::Composition { .. } => None,
+        };
+        let Some(source_group) = source_group else {
+            return Ok(());
+        };
+
+        for target_group in target_groups {
+            if !contains_node(self.tree_index, floating_root, target_group.group)
+                || contains_node(self.tree_index, source_group, target_group.group)
+                || contains_node(self.tree_index, target_group.group, source_group)
+            {
+                continue;
+            }
+
+            let Some(Node::Tabs(tabs)) = self.layout.node(target_group.group) else {
+                continue;
+            };
+            let Some(strip) = self
+                .rects
+                .tab_strips
+                .iter()
+                .find(|strip| strip.group == target_group.group)
+            else {
+                continue;
+            };
+
+            push_zone(
+                self.zones,
+                DropTarget::GroupTabs {
+                    group: target_group.group,
+                    index: tabs.children.len(),
+                },
+                DropZone::TabInsertion,
+                strip.rect,
+            )?;
+        }
+
+        Ok(())
+    }
+
     pub(super) fn append_center_zones(
         &mut self,
         target_groups: &[GroupRect],

@@ -81,11 +81,10 @@ impl DropOverlay {
                     }
                 }
                 DropZone::TabInsertion => {
-                    if let Some(group) = target_group(target)
-                        .and_then(|id| groups.iter().find(|group| group.group == id))
-                    {
-                        // A tab-strip drop highlights the complete destination group.
-                        layer = layer.child(highlight_rect(group.rect, theme, 0.12, true));
+                    if let Some(group_rect) = tab_strip_group_highlight_rect(target, groups) {
+                        // A whole Group drop on a Floating strip highlights the
+                        // complete destination Group, not an individual tab.
+                        layer = layer.child(highlight_rect(group_rect, theme, 0.12, true));
                     }
                     if main_dock_bounds.is_none()
                         && let Some(line) =
@@ -362,6 +361,15 @@ fn composition_edge_highlight_rect(
         Point::new(zone.rect.origin.x, area.origin.y),
         dock_core::Size::new(zone.rect.size.width, area.size.height),
     )
+}
+
+fn tab_strip_group_highlight_rect(
+    target: DropTarget,
+    groups: &[GroupRect],
+) -> Option<Rect> {
+    target_group(target)
+        .and_then(|id| groups.iter().find(|group| group.group == id))
+        .map(|group| group.rect)
 }
 
 fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
@@ -728,6 +736,22 @@ mod tests {
             ),
             Rect::new(Point::new(10.0, 206.0), Size::new(200.0, 4.0))
         );
+    }
+
+    #[test]
+    fn floating_group_tab_insertion_highlights_the_entire_target_group() {
+        let group = NodeId::null();
+        let group_rect = Rect::new(Point::new(20.0, 40.0), Size::new(320.0, 280.0));
+        let strip_rect = Rect::new(Point::new(20.0, 68.0), Size::new(320.0, 24.0));
+        let groups = [dock_core::GroupRect::new(group, group_rect)];
+        let target = DropTarget::GroupTabs { group, index: 4 };
+
+        assert_eq!(
+            super::tab_strip_group_highlight_rect(target, &groups),
+            Some(group_rect),
+            "the Floating append zone must highlight the complete destination Group"
+        );
+        assert_ne!(strip_rect, group_rect);
     }
 
     #[test]

@@ -295,7 +295,7 @@ impl Layout {
                 let Some(area) = target_area(self, tree_index, strip.group) else {
                     continue;
                 };
-                if (area != AllowedArea::MAIN_DOCK && area != AllowedArea::FLOATING)
+                if area != AllowedArea::MAIN_DOCK
                     || !source_allows(self, source_panels, area)
                     || contains_node(tree_index, source_group, strip.group)
                     || contains_node(tree_index, strip.group, source_group)
