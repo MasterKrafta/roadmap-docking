@@ -1355,11 +1355,9 @@ impl DragHostManager {
                     app.background_executor()
                         .timer(Duration::from_millis(16))
                         .await;
-                    activated = floating_manager
-                        .update(app, |manager, _| {
-                            manager.activate_handoff_target(target_group, closing_drag_host)
-                        })
-                        .unwrap_or(false);
+                    activated = floating_manager.update(app, |manager, _| {
+                        manager.activate_handoff_target(target_group, closing_drag_host)
+                    });
                     if activated {
                         break;
                     }
