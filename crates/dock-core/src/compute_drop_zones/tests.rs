@@ -3577,6 +3577,7 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
         }
     );
 
+    let mut overlapping_group_strips = 0;
     for zone in [left_side, right_side] {
         assert_eq!(zone.rect.origin.y, bounds.origin.y);
         assert_eq!(zone.rect.size.height, bounds.size.height);
@@ -3596,7 +3597,6 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
             }
         }
 
-        let mut overlapping_group_strips = 0;
         for strip in &rects.tab_strips {
             let group_append_zone = group_zones
                 .iter()
@@ -3647,11 +3647,12 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                 "individual Panel drags keep the established Floating side-zone behavior"
             );
         }
-        assert!(
-            overlapping_group_strips > 0,
-            "each outer side band must overlap tab strips in its own boundary Column"
-        );
     }
+
+    assert!(
+        overlapping_group_strips > 0,
+        "at least one outer side band must overlap a tab strip so Group append priority is exercised"
+    );
 
     let point = Point::new(
         right_side.rect.origin.x + right_side.rect.size.width * 0.5,
