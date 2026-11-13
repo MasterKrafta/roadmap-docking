@@ -405,7 +405,6 @@ mod tests {
     #[test]
     fn floating_bottom_guide_is_pinned_to_the_window_edge() {
         let zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
-        let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 270.0));
         let floating_bounds = Rect::new(Point::new(10.0, 40.0), Size::new(200.0, 340.0));
 
         assert_eq!(
@@ -415,6 +414,24 @@ mod tests {
                 Some(floating_bounds),
             ),
             Rect::new(Point::new(10.0, 376.0), Size::new(200.0, 4.0))
+        );
+    }
+
+    #[test]
+    fn floating_bottom_guide_spans_the_full_target_group_width() {
+        let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(280.0, 270.0));
+        let zone = Rect::new(Point::new(30.0, 336.0), Size::new(240.0, 24.0));
+        let floating_bounds = Rect::new(Point::new(10.0, 40.0), Size::new(280.0, 340.0));
+        let visual = group_edge_visual_rect(zone, Some(target_group));
+
+        assert_eq!(visual.size.width, 280.0);
+        assert_eq!(
+            floating_group_edge_guide_rect(
+                visual,
+                DropZone::FloatingBottom,
+                Some(floating_bounds),
+            ),
+            Rect::new(Point::new(10.0, 376.0), Size::new(280.0, 4.0))
         );
     }
 
@@ -498,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn floating_left_and_right_guides_use_their_own_inner_window_edges() {
+    fn floating_left_and_right_guides_are_pinned_to_the_outer_window_edges() {
         let bounds = Rect::new(Point::new(100.0, 40.0), Size::new(300.0, 240.0));
         let left_zone = Rect::new(Point::new(100.5, 40.0), Size::new(16.0, 240.0));
         let right_zone = Rect::new(Point::new(384.5, 40.0), Size::new(16.0, 240.0));
