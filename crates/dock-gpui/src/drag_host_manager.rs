@@ -1372,7 +1372,7 @@ impl DragHostManager {
             ?id,
             ?target_group,
             ?closing_drag_host,
-            ?main_native_window = self.main_native_window,
+            main_native_window = ?self.main_native_window,
             ?foreground_before_close,
             owner_redirected,
             "starting Floating handoff DragHost close"
@@ -1479,14 +1479,14 @@ impl DragHostManager {
         let foreground_before_hide = self.native_ops.foreground_window();
         tracing::info!(
             ?id,
-            ?drag_host = active.native_window,
+            drag_host = ?active.native_window,
             ?foreground_before_hide,
             "requesting DragHost hide"
         );
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::warn!(
                 ?id,
-                ?drag_host = active.native_window,
+                drag_host = ?active.native_window,
                 %error,
                 "DragHost hide request failed during close"
             );
@@ -1494,7 +1494,7 @@ impl DragHostManager {
         let foreground_after_hide = self.native_ops.foreground_window();
         tracing::info!(
             ?id,
-            ?drag_host = active.native_window,
+            drag_host = ?active.native_window,
             ?foreground_after_hide,
             "foreground HWND immediately after DragHost hide request"
         );
@@ -1517,7 +1517,7 @@ impl DragHostManager {
         let foreground_after_remove = self.native_ops.foreground_window();
         tracing::info!(
             ?id,
-            ?drag_host = active.native_window,
+            drag_host = ?active.native_window,
             ?foreground_before_hide,
             ?foreground_after_hide,
             ?foreground_after_remove,
