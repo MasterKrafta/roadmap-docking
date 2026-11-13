@@ -363,6 +363,12 @@ mod tests {
                 group: FloatingGroupId::null(),
                 bounds: Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 400.0)),
             },
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: FloatingGroupId::null(),
+                bounds: Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 400.0)),
+                edge: FloatingResizeEdge::Left,
+                scale_factor: 1.5,
+            },
             DockCommand::RaiseFloating {
                 group: FloatingGroupId::null(),
             },
@@ -404,7 +410,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 39);
+        assert_eq!(commands.len(), 40);
     }
 
     #[cfg(feature = "serde")]
@@ -414,6 +420,22 @@ mod tests {
             side: DockSide::Left,
             boundary_index: 1,
             delta: -16.0,
+        };
+        let encoded = serde_json::to_string(&command).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DockCommand>(&encoded).unwrap(),
+            command
+        );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_round_trip_preserves_floating_resize_edge() {
+        let command = DockCommand::ResizeFloatingBoundsFromEdge {
+            group: FloatingGroupId::null(),
+            bounds: Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 400.0)),
+            edge: FloatingResizeEdge::Right,
+            scale_factor: 1.25,
         };
         let encoded = serde_json::to_string(&command).unwrap();
         assert_eq!(
