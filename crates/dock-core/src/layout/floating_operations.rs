@@ -1425,7 +1425,7 @@ impl Layout {
         let widths = children
             .iter()
             .map(|child| match self.nodes.get(*child) {
-                Some(Node::Column(value)) if *child == column_id => Ok(actual_width),
+                Some(Node::Column(_)) if *child == column_id => Ok(actual_width),
                 Some(Node::Column(value)) => Ok(match value.mode {
                     ColumnMode::Expanded => value.width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
