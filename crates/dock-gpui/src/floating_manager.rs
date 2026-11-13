@@ -8,15 +8,15 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    Node, NodeId, PanelId, Point, Rect, Size,
+    FloatingResizeEdge, Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId, NativeWindowOps, PhysicalPoint, PhysicalSize,
-    SystemNativeWindowOps,
+    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId, NativeWindowOps,
+    PhysicalPoint, PhysicalRect, PhysicalSize, SystemNativeWindowOps,
 };
 
 use crate::{
@@ -291,6 +291,8 @@ struct NativeResizeSession {
     group: FloatingGroupId,
     window_id: WindowId,
     transaction_started: bool,
+    last_native_bounds: PhysicalRect,
+    horizontal_edge: Option<FloatingResizeEdge>,
 }
 
 /// Reconciles the native-window registry with the current Core Layout.
@@ -636,11 +638,16 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return;
         }
+        let Ok(initial_native_bounds) = self.native_ops.window_rect(native_window) else {
+            return;
+        };
 
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
             transaction_started: false,
+            last_native_bounds: initial_native_bounds,
+            horizontal_edge: None,
         });
         self.schedule_native_resize(cx, group, window_id);
     }
@@ -688,6 +695,19 @@ impl FloatingWindowManager {
             return false;
         };
 
+        if let Ok(native_bounds) = self.native_ops.window_rect(native_window) {
+            if state.horizontal_edge.is_none() {
+                let left_edge_moved = native_bounds.left != state.last_native_bounds.left;
+                let right_edge_moved = native_bounds.right != state.last_native_bounds.right;
+                state.horizontal_edge = match (left_edge_moved, right_edge_moved) {
+                    (true, false) => Some(FloatingResizeEdge::Left),
+                    (false, true) => Some(FloatingResizeEdge::Right),
+                    _ => None,
+                };
+            }
+            state.last_native_bounds = native_bounds;
+        }
+
         let resizing = self.native_ops.is_resizing(native_window).unwrap_or(false);
         if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
             let current = self.controller.update(cx, |controller, _| {
@@ -702,11 +722,23 @@ impl FloatingWindowManager {
                     });
                 }
                 if state.transaction_started {
+                    let scale_factor = self
+                        .native_ops
+                        .scale_factor(native_window)
+                        .ok()
+                        .filter(|scale| scale.is_finite() && *scale > 0.0)
+                        .unwrap_or(1.0);
+                    let command = match state.horizontal_edge {
+                        Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
+                            group,
+                            bounds,
+                            edge,
+                            scale_factor,
+                        },
+                        None => DockCommand::ResizeFloatingBounds { group, bounds },
+                    };
                     let result = self.controller.update(cx, |controller, controller_cx| {
-                        controller.dispatch_in(
-                            DockCommand::ResizeFloatingBounds { group, bounds },
-                            controller_cx,
-                        )
+                        controller.dispatch_in(command, controller_cx)
                     });
                     if let Err(error) = result {
                         tracing::warn!(
