@@ -74,13 +74,6 @@ impl Layout {
                 let root = self.main_area(side)?.root;
                 self.simple_composition_root_for_source(DropSource::Composition { root })
             }
-            (DragHandle::FloatingCapture, DragPayload::FloatingGroup { group }) => {
-                let root = self
-                    .floating_group(group)
-                    .and_then(|floating| self.dock_area(floating.area))
-                    .map(|area| area.root)?;
-                self.simple_composition_root_for_source(DropSource::Composition { root })
-            }
             _ => None,
         }
     }
