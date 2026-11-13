@@ -86,19 +86,10 @@ impl Layout {
                 continue;
             }
 
-            // A whole Floating composition should dock beside a single-Group
-            // Main Column as one Column (MainColumn/FreeArea). Vertical GroupEdge
-            // targets are useful when the Main target is already a multi-Group
-            // stack, where they insert the composition into that stack.
-            if matches!(source, DropSource::Composition { .. })
-                && let Some(column_id) = owner_column(self, tree_index, group_rect.group)
-                && matches!(
-                    self.node(column_id),
-                    Some(Node::Column(column)) if column.groups.len() <= 1
-                )
-            {
-                continue;
-            }
+            // Whole Floating compositions can be inserted above or below any
+            // eligible Main Group, including a Group in a single-Group Column.
+            // Internal shared boundaries are represented once by the preceding
+            // Group's Bottom target in main_group_vertical_edge_rect.
 
             for (edge, kind) in [
                 (DropZone::Top, DropZone::Top),

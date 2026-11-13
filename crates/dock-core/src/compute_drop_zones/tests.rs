@@ -3025,6 +3025,105 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
 
 
 #[test]
+fn floating_simple_composition_exposes_main_vertical_edges_for_single_group_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_node) = builder.panel(
+        key("floating-single-main-vertical-source"),
+        constraints(),
+    );
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(820.0, 100.0), Size::new(420.0, 520.0)),
+        1,
+    );
+
+    let (_, target_node) = builder.panel(
+        key("floating-single-main-vertical-target"),
+        constraints(),
+    );
+    let target_group = builder.tabs(vec![target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, target_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let source = DropSource::Composition {
+        root: source_column,
+    };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+
+    let top = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Top
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: target_group,
+                        zone: DropZone::Top,
+                    }
+        })
+        .copied()
+        .expect("a Floating composition must expose the top edge of a single-Group Main Column");
+
+    let bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: target_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .copied()
+        .expect("a Floating composition must expose the bottom edge of a single-Group Main Column");
+
+    let resolver = layout.prepare_drop_resolver(source, &rects, &metrics).unwrap();
+    for zone in [top, bottom] {
+        let point = Point::new(
+            zone.rect.origin.x + zone.rect.size.width * 0.5,
+            zone.rect.origin.y + zone.rect.size.height * 0.5,
+        );
+        let resolved = resolver
+            .resolve_zone(point)
+            .unwrap()
+            .expect("each single-Group Main vertical target must resolve");
+        assert_eq!(resolved.target, zone.target);
+        assert_eq!(resolved.zone, zone.zone);
+
+        let request = DragDropRequest {
+            payload: DragPayload::FloatingGroup { group: source_float },
+            handle: DragHandle::FloatingCapture,
+            origin: Point::ZERO,
+            point,
+            target: Some(zone.target),
+            floating_bounds: None,
+        };
+        assert_eq!(
+            layout.resolve_drag_drop(&request, &metrics).unwrap(),
+            DragDropAction::Command(DockCommand::DockFloating {
+                group: source_float,
+                target: zone.target,
+            })
+        );
+    }
+}
+
+#[test]
 fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
