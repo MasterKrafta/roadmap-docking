@@ -192,7 +192,7 @@ impl FloatingZoneContext<'_> {
                     continue;
                 }
 
-                let Some(zone_rect) = super::shared_group_vertical_edge_rect(
+                let zone_rect = match super::shared_group_vertical_edge_rect(
                     self.layout,
                     self.rects,
                     self.tree_index,
@@ -200,8 +200,21 @@ impl FloatingZoneContext<'_> {
                     target_group.rect,
                     edge,
                     self.metrics,
-                )? else {
-                    continue;
+                )? {
+                    Some(rect) => rect,
+                    None
+                        if edge == DropZone::Top
+                            && matches!(self.source, DropSource::Composition { .. })
+                            && target_area(self.layout, self.tree_index, target_group.group)
+                                == Some(AllowedArea::FLOATING) =>
+                    {
+                        group_edge_rect(
+                            target_group.rect,
+                            edge,
+                            self.metrics.edge_drop_width,
+                        )?
+                    }
+                    None => continue,
                 };
 
                 push_zone(
