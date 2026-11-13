@@ -3740,3 +3740,499 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
         assert_eq!(resolved.zone, zone.zone);
     }
 }
+
+
+fn add_test_column(
+    builder: &mut LayoutBuilder,
+    prefix: &str,
+    group_sizes: &[usize],
+) -> (crate::NodeId, Vec<crate::NodeId>, Vec<crate::PanelId>) {
+    let mut groups = Vec::with_capacity(group_sizes.len());
+    let mut panels = Vec::new();
+    for (group_index, panel_count) in group_sizes.iter().copied().enumerate() {
+        let mut panel_nodes = Vec::with_capacity(panel_count);
+        for panel_index in 0..panel_count {
+            let (panel, node) = builder.panel(
+                key(&format!("{prefix}-{group_index}-{panel_index}")),
+                constraints(),
+            );
+            panels.push(panel);
+            panel_nodes.push(node);
+        }
+        groups.push(builder.tabs(panel_nodes, 0, false));
+    }
+    let ratios = if groups.is_empty() {
+        Vec::new()
+    } else {
+        vec![1.0 / groups.len() as f32; groups.len()]
+    };
+    let column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        groups.clone(),
+        ratios,
+    );
+    (column, groups, panels)
+}
+
+#[test]
+fn photoshop_floating_internal_splitters_expose_a_zone_for_every_column_boundary() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_column, source_groups, source_panels) =
+        add_test_column(&mut builder, "internal-boundary-source", &[1]);
+    builder.main_area(DockSide::Left, source_column);
+
+    let (left_column, left_groups, _) =
+        add_test_column(&mut builder, "internal-boundary-left", &[1, 1]);
+    let (middle_column, middle_groups, _) =
+        add_test_column(&mut builder, "internal-boundary-middle", &[1, 1]);
+    let (right_column, right_groups, _) =
+        add_test_column(&mut builder, "internal-boundary-right", &[1, 1]);
+    let target_root = builder.split(
+        Axis::X,
+        vec![left_column, middle_column, right_column],
+        vec![0.2, 0.3, 0.5],
+    );
+    let target_float = builder.floating_group(
+        target_root,
+        Rect::new(Point::new(500.0, 80.0), Size::new(900.0, 620.0)),
+        2,
+    );
+    let layout = builder.build();
+
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let splitters: Vec<_> = rects
+        .splitters
+        .iter()
+        .filter(|splitter| splitter.owner == target_root && splitter.axis == Axis::X)
+        .collect();
+    assert_eq!(splitters.len(), 2, "each adjacent Column pair has one splitter");
+
+    let sources = [
+        DropSource::Composition {
+            root: source_column,
+        },
+        DropSource::Group {
+            group: source_groups[0],
+        },
+        DropSource::Panel {
+            panel: source_panels[0],
+        },
+    ];
+    let expected_groups = [middle_groups[0], right_groups[0]];
+    let mut reference_zones = None;
+
+    for source in sources {
+        let zones = layout
+            .compute_drop_zones(source, &rects, &metrics)
+            .unwrap();
+        let mut internal_zones: Vec<_> = zones
+            .iter()
+            .copied()
+            .filter(|zone| zone.zone == DropZone::FloatingColumnInsertion)
+            .collect();
+        internal_zones.sort_by(|left, right| {
+            left.rect
+                .origin
+                .x
+                .partial_cmp(&right.rect.origin.x)
+                .unwrap()
+        });
+        assert_eq!(
+            internal_zones.len(),
+            2,
+            "there must be one internal zone per Split(X) boundary"
+        );
+
+        if let Some(reference) = &reference_zones {
+            assert_eq!(
+                &internal_zones, reference,
+                "Panel, Group and Composition sources share the same internal boundary geometry"
+            );
+        } else {
+            reference_zones = Some(internal_zones.clone());
+        }
+
+        for (boundary_index, zone) in internal_zones.iter().enumerate() {
+            assert_eq!(
+                zone.target,
+                DropTarget::GroupEdge {
+                    group: expected_groups[boundary_index],
+                    zone: DropZone::FloatingColumnInsertion,
+                }
+            );
+            let splitter = splitters
+                .iter()
+                .find(|splitter| splitter.boundary_index == boundary_index)
+                .unwrap();
+            let splitter_center = Point::new(
+                splitter.rect.origin.x + splitter.rect.size.width * 0.5,
+                splitter.rect.origin.y + splitter.rect.size.height * 0.5,
+            );
+            assert!(zone.rect.contains(splitter_center).unwrap());
+            assert_eq!(zone.rect.origin.y, splitter.rect.origin.y);
+            assert_eq!(zone.rect.size.height, splitter.rect.size.height);
+            assert!(zone.rect.size.width >= metrics.edge_drop_width);
+
+            assert_eq!(
+                layout
+                    .resolve_drop(splitter_center, source, &rects, &metrics)
+                    .unwrap(),
+                Some(zone.target),
+                "hovering the physical splitter must resolve to its insertion target"
+            );
+        }
+    }
+
+    assert_eq!(left_groups.len(), 2);
+    assert_eq!(middle_groups.len(), 2);
+}
+
+#[test]
+fn photoshop_inserts_a_column_between_floating_columns_and_preserves_other_ratios() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_column, _, _) =
+        add_test_column(&mut builder, "insert-column-source", &[1]);
+    builder.main_area(DockSide::Left, source_column);
+
+    let (left_column, _, _) = add_test_column(&mut builder, "insert-column-left", &[1]);
+    let (middle_column, middle_groups, _) =
+        add_test_column(&mut builder, "insert-column-middle", &[1]);
+    let (right_column, _, _) = add_test_column(&mut builder, "insert-column-right", &[1]);
+    let target_root = builder.split(
+        Axis::X,
+        vec![left_column, middle_column, right_column],
+        vec![0.2, 0.3, 0.5],
+    );
+    let target_float = builder.floating_group(
+        target_root,
+        Rect::new(Point::new(500.0, 80.0), Size::new(900.0, 620.0)),
+        2,
+    );
+    let mut layout = builder.build();
+
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Composition {
+                root: source_column,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    let zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingColumnInsertion
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: middle_groups[0],
+                        zone: DropZone::FloatingColumnInsertion,
+                    }
+        })
+        .copied()
+        .expect("the splitter before the middle Column must expose an insertion zone");
+    let point = Point::new(
+        zone.rect.origin.x + zone.rect.size.width * 0.5,
+        zone.rect.origin.y + zone.rect.size.height * 0.5,
+    );
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::DockArea {
+            side: DockSide::Left,
+        },
+        handle: crate::DragHandle::DockAreaHeader,
+        origin: Point::ZERO,
+        point,
+        target: Some(zone.target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        crate::DragDropAction::Command(DockCommand::MoveColumnToTarget {
+            column: source_column,
+            target: zone.target,
+        })
+    );
+
+    layout
+        .apply(
+            DockCommand::MoveColumnToTarget {
+                column: source_column,
+                target: zone.target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let floating_area = layout.floating_group(target_float).unwrap().area;
+    let floating_root = layout.dock_area(floating_area).unwrap().root;
+    let Some(crate::Node::Split(split)) = layout.node(floating_root) else {
+        panic!("the Floating composition must remain a horizontal Split(X)");
+    };
+    assert_eq!(
+        split.children,
+        vec![left_column, source_column, middle_column, right_column]
+    );
+    assert!((split.ratios[0] - 0.2).abs() < 1.0e-5);
+    assert!((split.ratios[1] - 0.15).abs() < 1.0e-5);
+    assert!((split.ratios[2] - 0.15).abs() < 1.0e-5);
+    assert!((split.ratios[3] - 0.5).abs() < 1.0e-5);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn photoshop_group_and_panel_drops_create_columns_at_floating_splitters() {
+    let metrics = DockMetrics::default();
+
+    let mut group_builder = LayoutBuilder::new(Profile::Photoshop);
+    let (source_column, source_groups, _) =
+        add_test_column(&mut group_builder, "group-internal-source", &[2]);
+    builder_main_area(&mut group_builder, source_column);
+    let (left_column, _, _) =
+        add_test_column(&mut group_builder, "group-internal-left", &[1]);
+    let (right_column, right_groups, _) =
+        add_test_column(&mut group_builder, "group-internal-right", &[1]);
+    let group_target_root = group_builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
+    let group_target_float = group_builder.floating_group(
+        group_target_root,
+        Rect::new(Point::new(520.0, 90.0), Size::new(620.0, 500.0)),
+        2,
+    );
+    let mut group_layout = group_builder.build();
+    let group_rects = group_layout
+        .compute_floating_rects(group_target_float, &metrics)
+        .unwrap();
+    let group_zones = group_layout
+        .compute_drop_zones(
+            DropSource::Group {
+                group: source_groups[0],
+            },
+            &group_rects,
+            &metrics,
+        )
+        .unwrap();
+    let group_zone = group_zones
+        .iter()
+        .find(|zone| zone.zone == DropZone::FloatingColumnInsertion)
+        .copied()
+        .expect("a Group drag must expose the internal Floating splitter");
+    let group_point = Point::new(
+        group_zone.rect.origin.x + group_zone.rect.size.width * 0.5,
+        group_zone.rect.origin.y + group_zone.rect.size.height * 0.5,
+    );
+    let group_request = crate::DragDropRequest {
+        payload: crate::DragPayload::Group {
+            group: source_groups[0],
+        },
+        handle: crate::DragHandle::GroupGrip,
+        origin: Point::ZERO,
+        point: group_point,
+        target: Some(group_zone.target),
+        floating_bounds: None,
+    };
+    let group_command = DockCommand::SplitGroup {
+        group: source_groups[0],
+        target_group: right_groups[0],
+        zone: DropZone::FloatingColumnInsertion,
+        ratio: 0.5,
+    };
+    assert_eq!(
+        group_layout.resolve_drag_drop(&group_request, &metrics).unwrap(),
+        crate::DragDropAction::Command(group_command.clone())
+    );
+    group_layout.apply(group_command, &metrics).unwrap();
+    let group_target_area = group_layout.floating_group(group_target_float).unwrap().area;
+    let group_root = group_layout.dock_area(group_target_area).unwrap().root;
+    let Some(crate::Node::Split(group_split)) = group_layout.node(group_root) else {
+        panic!("the Group drop must preserve a horizontal Floating composition");
+    };
+    assert_eq!(group_split.children.len(), 3);
+    let Some(crate::Node::Column(inserted_group_column)) =
+        group_layout.node(group_split.children[1])
+    else {
+        panic!("the dropped Group must be wrapped in a new Column");
+    };
+    assert_eq!(inserted_group_column.groups, vec![source_groups[0]]);
+    assert_eq!(group_layout.validate(&metrics), Ok(()));
+
+    let mut panel_builder = LayoutBuilder::new(Profile::Photoshop);
+    let (source_column, source_groups, source_panels) =
+        add_test_column(&mut panel_builder, "panel-internal-source", &[2]);
+    builder_main_area(&mut panel_builder, source_column);
+    let (left_column, _, _) =
+        add_test_column(&mut panel_builder, "panel-internal-left", &[1]);
+    let (right_column, right_groups, _) =
+        add_test_column(&mut panel_builder, "panel-internal-right", &[1]);
+    let panel_target_root =
+        panel_builder.split(Axis::X, vec![left_column, right_column], vec![0.4, 0.6]);
+    let panel_target_float = panel_builder.floating_group(
+        panel_target_root,
+        Rect::new(Point::new(520.0, 90.0), Size::new(620.0, 500.0)),
+        2,
+    );
+    let mut panel_layout = panel_builder.build();
+    let panel_rects = panel_layout
+        .compute_floating_rects(panel_target_float, &metrics)
+        .unwrap();
+    let panel_zones = panel_layout
+        .compute_drop_zones(
+            DropSource::Panel {
+                panel: source_panels[0],
+            },
+            &panel_rects,
+            &metrics,
+        )
+        .unwrap();
+    let panel_zone = panel_zones
+        .iter()
+        .find(|zone| zone.zone == DropZone::FloatingColumnInsertion)
+        .copied()
+        .expect("a Panel drag must expose the internal Floating splitter");
+    let panel_point = Point::new(
+        panel_zone.rect.origin.x + panel_zone.rect.size.width * 0.5,
+        panel_zone.rect.origin.y + panel_zone.rect.size.height * 0.5,
+    );
+    let panel_request = crate::DragDropRequest {
+        payload: crate::DragPayload::Panel {
+            panel: source_panels[0],
+        },
+        handle: crate::DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point: panel_point,
+        target: Some(panel_zone.target),
+        floating_bounds: None,
+    };
+    let panel_target = DropTarget::GroupEdge {
+        group: right_groups[0],
+        zone: DropZone::FloatingColumnInsertion,
+    };
+    let panel_command = DockCommand::MovePanel {
+        panel: source_panels[0],
+        target: panel_target,
+    };
+    assert_eq!(
+        panel_layout.resolve_drag_drop(&panel_request, &metrics).unwrap(),
+        crate::DragDropAction::Command(panel_command.clone())
+    );
+    panel_layout.apply(panel_command, &metrics).unwrap();
+    let panel_target_area = panel_layout.floating_group(panel_target_float).unwrap().area;
+    let panel_root = panel_layout.dock_area(panel_target_area).unwrap().root;
+    let Some(crate::Node::Split(panel_split)) = panel_layout.node(panel_root) else {
+        panic!("the Panel drop must preserve a horizontal Floating composition");
+    };
+    assert_eq!(panel_split.children.len(), 3);
+    let Some(crate::Node::Column(inserted_panel_column)) =
+        panel_layout.node(panel_split.children[1])
+    else {
+        panic!("the dropped Panel must be wrapped in a new Column");
+    };
+    assert_eq!(inserted_panel_column.groups.len(), 1);
+    assert!(matches!(
+        panel_layout.node(inserted_panel_column.groups[0]),
+        Some(crate::Node::Tabs(tabs)) if tabs.children.len() == 1
+    ));
+    assert!(matches!(
+        panel_layout.node(source_groups[0]),
+        Some(crate::Node::Tabs(tabs)) if tabs.children == vec![source_panels[1]]
+    ));
+    assert_eq!(panel_layout.validate(&metrics), Ok(()));
+}
+
+fn builder_main_area(builder: &mut LayoutBuilder, column: crate::NodeId) {
+    builder.main_area(DockSide::Left, column);
+}
+
+#[test]
+fn photoshop_docks_a_floating_column_at_an_internal_splitter() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_column, _, _) =
+        add_test_column(&mut builder, "floating-source-column", &[1, 1]);
+    let source_float = builder.floating_group(
+        source_column,
+        Rect::new(Point::new(40.0, 80.0), Size::new(320.0, 520.0)),
+        1,
+    );
+
+    let (left_column, _, _) =
+        add_test_column(&mut builder, "floating-target-left", &[1]);
+    let (middle_column, middle_groups, _) =
+        add_test_column(&mut builder, "floating-target-middle", &[1]);
+    let (right_column, _, _) =
+        add_test_column(&mut builder, "floating-target-right", &[1]);
+    let target_root = builder.split(
+        Axis::X,
+        vec![left_column, middle_column, right_column],
+        vec![0.2, 0.3, 0.5],
+    );
+    let target_float = builder.floating_group(
+        target_root,
+        Rect::new(Point::new(500.0, 80.0), Size::new(900.0, 620.0)),
+        2,
+    );
+    let mut layout = builder.build();
+
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Composition {
+                root: source_column,
+            },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    let zone = zones
+        .iter()
+        .find(|zone| zone.zone == DropZone::FloatingColumnInsertion)
+        .copied()
+        .expect("the target Floating composition must expose its internal splitter");
+    let point = Point::new(
+        zone.rect.origin.x + zone.rect.size.width * 0.5,
+        zone.rect.origin.y + zone.rect.size.height * 0.5,
+    );
+    let request = crate::DragDropRequest {
+        payload: crate::DragPayload::FloatingGroup { group: source_float },
+        handle: crate::DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point,
+        target: Some(zone.target),
+        floating_bounds: None,
+    };
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        crate::DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: zone.target,
+        })
+    );
+    layout
+        .apply(
+            DockCommand::DockFloating {
+                group: source_float,
+                target: zone.target,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.floating_group(source_float).is_none());
+    assert!(layout.floating_group(target_float).is_some());
+    let target_area = layout.floating_group(target_float).unwrap().area;
+    let floating_root = layout.dock_area(target_area).unwrap().root;
+    let Some(crate::Node::Split(split)) = layout.node(floating_root) else {
+        panic!("the merged Floating composition must remain Split(X)");
+    };
+    assert_eq!(
+        split.children,
+        vec![left_column, source_column, middle_column, right_column]
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}

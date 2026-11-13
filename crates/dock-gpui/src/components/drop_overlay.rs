@@ -126,6 +126,17 @@ impl DropOverlay {
                     layer = layer.child(highlight_rect(visual_rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
                 }
+                DropZone::FloatingColumnInsertion => {
+                    // The zone follows one internal Split(X) boundary, not the
+                    // outer composition edge. Keep the marker inside that splitter.
+                    let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
+                    let line = Rect::new(
+                        Point::new(x - 2.0, zone.rect.origin.y),
+                        dock_core::Size::new(4.0, zone.rect.size.height),
+                    );
+                    layer = layer.child(highlight_rect(zone.rect, theme, 0.18, false));
+                    layer = layer.child(guide_rect(line, theme));
+                }
                 DropZone::DockEdge => {
                     // Keep the full edge hit target, but place its visible guide
                     // close to the actual outer window border instead of centering

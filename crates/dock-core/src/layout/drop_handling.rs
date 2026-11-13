@@ -163,7 +163,9 @@ impl Layout {
             }
             DropTarget::GroupEdge {
                 group: target_group,
-                zone: zone @ (DropZone::Left | DropZone::Right),
+                zone: zone @ (
+                    DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
+                ),
             } => {
                 if self.group_edge_is_same_position(group, target_group, zone) {
                     return Ok(DragDropAction::NoOp);
@@ -408,6 +410,22 @@ impl Layout {
                     self.node(source_column),
                     Some(Node::Column(column)) if column.groups.len() == 1 && column.groups[0] == source_group
                 );
+                if let DropTarget::GroupEdge {
+                    group: target_group,
+                    zone: zone @ DropZone::FloatingColumnInsertion,
+                } = target
+                    && source_group_has_only_panel
+                    && source_group == target_group
+                {
+                    return Some(if request.handle == DragHandle::FlyoutPanel {
+                        DragDropAction::Command(DockCommand::MovePanelFromFlyout {
+                            panel,
+                            target,
+                        })
+                    } else {
+                        DragDropAction::NoOp
+                    });
+                }
                 if source_column_has_only_group
                     && let Some((source_side, source_index)) =
                         self.main_column_position(source_column)
@@ -457,10 +475,11 @@ impl Layout {
             Some((source_group, _)),
             DropTarget::GroupEdge {
                 group: target_group,
-                ..
+                zone,
             },
         ) = (self.tab_parent_index(panel_node), target)
             && source_group == target_group
+            && zone != DropZone::FloatingColumnInsertion
         {
             return Some(if request.handle == DragHandle::FlyoutPanel {
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
@@ -666,6 +685,49 @@ impl Layout {
             target_parent,
         ) {
             return true;
+        }
+        if zone == DropZone::FloatingColumnInsertion {
+            let Some(source_column) = self.find_owner_column(source_group) else {
+                return false;
+            };
+            let Some(target_column) = self.find_owner_column(target_group) else {
+                return false;
+            };
+            if source_column == target_column {
+                return false;
+            }
+            let source_is_sole_group = matches!(
+                self.node(source_column),
+                Some(Node::Column(column))
+                    if column.groups.len() == 1 && column.groups[0] == source_group
+            );
+            if !source_is_sole_group {
+                return false;
+            }
+            let Some(target_root) = self.find_floating_root_containing(target_column) else {
+                return false;
+            };
+            if self.find_floating_root_containing(source_column) != Some(target_root) {
+                return false;
+            }
+            let Some(Node::Split(split)) = self.node(target_root) else {
+                return false;
+            };
+            if split.axis != Axis::X
+                || !split
+                    .children
+                    .iter()
+                    .all(|child| matches!(self.node(*child), Some(Node::Column(_))))
+            {
+                return false;
+            }
+            let (Some(source_index), Some(target_index)) = (
+                split.children.iter().position(|child| *child == source_column),
+                split.children.iter().position(|child| *child == target_column),
+            ) else {
+                return false;
+            };
+            return source_index.checked_add(1) == Some(target_index);
         }
         if matches!(zone, DropZone::Left | DropZone::Right) {
             let Some(source_column) = self.find_owner_column(source_group) else {
@@ -964,6 +1026,45 @@ impl Layout {
         }
     }
 
+    fn floating_column_insertion_boundary_is_valid(
+        &self,
+        group: NodeId,
+    ) -> bool {
+        let Some(column) = self.find_owner_column(group) else {
+            return false;
+        };
+        let Some(Node::Column(column_data)) = self.node(column) else {
+            return false;
+        };
+        if column_data.mode.is_rail() || column_data.groups.first() != Some(&group) {
+            return false;
+        }
+        let Some(root) = self.find_floating_root_containing(column) else {
+            return false;
+        };
+        let Some(Node::Split(split)) = self.node(root) else {
+            return false;
+        };
+        if split.axis != Axis::X
+            || !split
+                .children
+                .iter()
+                .all(|child| matches!(self.node(*child), Some(Node::Column(_))))
+        {
+            return false;
+        }
+        let Some(index) = split.children.iter().position(|child| *child == column) else {
+            return false;
+        };
+        if index == 0 {
+            return false;
+        }
+        !matches!(
+            split.children.get(index - 1).and_then(|id| self.node(*id)),
+            Some(Node::Column(previous)) if previous.mode.is_rail()
+        )
+    }
+
     pub(super) fn validate_drop_target(
         &self,
         target: DropTarget,
@@ -1005,10 +1106,19 @@ impl Layout {
             DropTarget::GroupEdge { group, zone } => {
                 if !matches!(
                     zone,
-                    DropZone::Left | DropZone::Right | DropZone::Top | DropZone::Bottom
+                    DropZone::Left
+                        | DropZone::Right
+                        | DropZone::Top
+                        | DropZone::Bottom
+                        | DropZone::FloatingColumnInsertion
                 ) {
                     return Err(CommandError::InvalidTarget {
-                        reason: "group-edge target requires a cardinal edge zone",
+                        reason: "group-edge target requires a cardinal edge or Floating column insertion zone",
+                    });
+                }
+                if zone == DropZone::FloatingColumnInsertion && self.profile != Profile::Photoshop {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Floating column insertion is available only in the Photoshop profile",
                     });
                 }
                 if self.is_group_in_icon_rail(group) {
@@ -1027,6 +1137,13 @@ impl Layout {
                 }
                 if self.profile == Profile::Photoshop {
                     match zone {
+                        DropZone::FloatingColumnInsertion => {
+                            if !self.floating_column_insertion_boundary_is_valid(group) {
+                                return Err(CommandError::InvalidTarget {
+                                    reason: "Floating column insertion requires an internal boundary of a Split(X) composition",
+                                });
+                            }
+                        }
                         DropZone::Left | DropZone::Right => {
                             let Some(column) = self.find_owner_column(group) else {
                                 return Err(CommandError::InvalidTarget {

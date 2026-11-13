@@ -12,6 +12,20 @@ struct FloatingZoneContext<'a> {
     zones: &'a mut Vec<DropZoneRect>,
 }
 
+fn floating_column_splitter_drop_rect(
+    splitter: Rect,
+    metrics: &DockMetrics,
+) -> Result<Rect, ComputeRectsError> {
+    let width = metrics.edge_drop_width.max(splitter.size.width);
+    let center_x = splitter.origin.x + splitter.size.width * 0.5;
+    let rect = Rect::new(
+        Point::new(center_x - width * 0.5, splitter.origin.y),
+        Size::new(width, splitter.size.height),
+    );
+    rect.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(rect)
+}
+
 fn floating_side_edge_rect(
     floating_bounds: Rect,
     edge: DropZone,
@@ -101,6 +115,7 @@ impl FloatingZoneContext<'_> {
         self.append_center_zones(&target_groups)?;
         self.append_group_edge_zones(&target_groups)?;
         self.append_column_slot_zones(area.root)?;
+        self.append_column_boundary_zones(&target_groups, area.root)?;
         self.append_edge_zones(floating_rect, area.root, &target_groups)?;
         // Side targets are source-aware: Photoshop uses composition-wide edges,
         // while Generic retains its flexible per-Group horizontal split zones.
@@ -298,6 +313,107 @@ impl FloatingZoneContext<'_> {
                 },
                 DropZone::ColumnEnd,
                 end_rect,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Exposes one insertion zone for every physical splitter between
+    /// sibling Columns in a Floating horizontal composition.
+    ///
+    /// The zone is intentionally distinct from the outer Left/Right side zones:
+    /// it inserts before the Column on the right side of the selected splitter.
+    pub(super) fn append_column_boundary_zones(
+        &mut self,
+        target_groups: &[GroupRect],
+        floating_root: NodeId,
+    ) -> Result<(), ComputeRectsError> {
+        if self.layout.profile() != Profile::Photoshop
+            || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
+        {
+            return Ok(());
+        }
+
+        let source_can_create_column = match self.source {
+            DropSource::Panel { .. } => true,
+            DropSource::Group { .. } => {
+                matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
+            }
+            DropSource::Composition { .. } => match self.layout.node(self.source_root) {
+                Some(Node::Column(_)) => true,
+                Some(Node::Split(split)) => {
+                    split.axis == crate::Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(self.layout.node(*child), Some(Node::Column(_)))
+                        })
+                }
+                _ => false,
+            },
+        };
+        if !source_can_create_column {
+            return Ok(());
+        }
+
+        let Some(Node::Split(split)) = self.layout.node(floating_root) else {
+            return Ok(());
+        };
+        if split.axis != crate::Axis::X
+            || split.children.len() < 2
+            || !split.children.iter().all(|child| {
+                matches!(self.layout.node(*child), Some(Node::Column(_)))
+            })
+        {
+            return Ok(());
+        }
+
+        for splitter in self.rects.splitters.iter().filter(|splitter| {
+            splitter.owner == floating_root && splitter.axis == crate::Axis::X
+        }) {
+            let Some(right_index) = splitter.boundary_index.checked_add(1) else {
+                continue;
+            };
+            let (Some(left_column), Some(right_column)) = (
+                split.children.get(splitter.boundary_index).copied(),
+                split.children.get(right_index).copied(),
+            ) else {
+                continue;
+            };
+            let left_is_rail = matches!(
+                self.layout.node(left_column),
+                Some(Node::Column(column)) if column.mode.is_rail()
+            );
+            let right_is_rail = matches!(
+                self.layout.node(right_column),
+                Some(Node::Column(column)) if column.mode.is_rail()
+            );
+            if left_is_rail || right_is_rail {
+                continue;
+            }
+
+            let Some(target_group) = target_groups
+                .iter()
+                .filter(|group| {
+                    owner_column(self.layout, self.tree_index, group.group) == Some(right_column)
+                })
+                .min_by(|left, right| {
+                    left.rect
+                        .origin
+                        .y
+                        .partial_cmp(&right.rect.origin.y)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            else {
+                continue;
+            };
+
+            push_zone(
+                self.zones,
+                DropTarget::GroupEdge {
+                    group: target_group.group,
+                    zone: DropZone::FloatingColumnInsertion,
+                },
+                DropZone::FloatingColumnInsertion,
+                floating_column_splitter_drop_rect(splitter.rect, self.metrics)?,
             )?;
         }
         Ok(())

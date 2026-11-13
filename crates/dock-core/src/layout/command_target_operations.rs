@@ -111,7 +111,8 @@ impl Layout {
             }
             DropTarget::GroupEdge {
                 group,
-                zone: zone @ (DropZone::Left | DropZone::Right),
+                zone:
+                    zone @ (DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion),
             } => {
                 self.validate_drop_target(*target, metrics)?;
                 if self.is_descendant_or_same(*column, group) {
@@ -131,10 +132,15 @@ impl Layout {
                 self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
 
                 if let Some((side, target_index)) = self.main_column_position(target_column) {
-                    let index = if zone == DropZone::Left {
-                        target_index
-                    } else {
-                        target_index + 1
+                    let index = match zone {
+                        DropZone::Left => target_index,
+                        DropZone::Right => target_index + 1,
+                        DropZone::FloatingColumnInsertion => {
+                            return Err(CommandError::InvalidTarget {
+                                reason: "Floating column insertion target must belong to a Floating composition",
+                            });
+                        }
+                        _ => unreachable!("column transfer accepts only horizontal insertion zones"),
                     };
                     self.apply_move_column_to_main_column_command(
                         column, &side, &index, metrics,
@@ -178,9 +184,12 @@ impl Layout {
                 reason: "inserted node must be a Column",
             });
         }
-        if !matches!(zone, DropZone::Left | DropZone::Right) {
+        if !matches!(
+            zone,
+            DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
+        ) {
             return Err(CommandError::InvalidTarget {
-                reason: "column insertion requires a left or right edge",
+                reason: "column insertion requires an outer edge or an internal Floating splitter",
             });
         }
         if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
@@ -211,7 +220,10 @@ impl Layout {
             },
         )?;
         match self.nodes.get(floating_root).cloned() {
-            Some(Node::Column(_)) if floating_root == target_column => {
+            Some(Node::Column(_))
+                if floating_root == target_column
+                    && matches!(zone, DropZone::Left | DropZone::Right) =>
+            {
                 let (children, ratios) = if zone == DropZone::Left {
                     (vec![new_column, target_column], vec![ratio, 1.0 - ratio])
                 } else {
@@ -238,20 +250,21 @@ impl Layout {
                     .ok_or(CommandError::InvalidTarget {
                         reason: "target Column is absent from its Floating composition",
                     })?;
-                let is_outer_edge = if zone == DropZone::Left {
-                    target_index == 0
-                } else {
-                    target_index + 1 == split.children.len()
+                let is_valid_boundary = match zone {
+                    DropZone::Left => target_index == 0,
+                    DropZone::Right => target_index + 1 == split.children.len(),
+                    DropZone::FloatingColumnInsertion => target_index > 0,
+                    _ => false,
                 };
-                if !is_outer_edge {
+                if !is_valid_boundary {
                     return Err(CommandError::InvalidTarget {
-                        reason: "Floating Column compositions accept horizontal drops only at their outer edges",
+                        reason: "Floating column insertion must target an existing outer edge or internal splitter",
                     });
                 }
-                let insert_at = if zone == DropZone::Left {
-                    target_index
-                } else {
-                    target_index + 1
+                let insert_at = match zone {
+                    DropZone::Left | DropZone::FloatingColumnInsertion => target_index,
+                    DropZone::Right => target_index + 1,
+                    _ => unreachable!("validated horizontal insertion zone"),
                 };
                 let ratios = split_sibling_ratios(
                     &split.ratios,

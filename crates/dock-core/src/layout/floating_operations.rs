@@ -281,7 +281,9 @@ impl Layout {
                 Some(Node::Column(_)) | Some(Node::Split(_)),
                 DropTarget::GroupEdge {
                     group: target_group,
-                    zone: zone @ (DropZone::Left | DropZone::Right),
+                    zone: zone @ (
+                        DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
+                    ),
                 },
             ) if self.is_column_composition_root(root)
                 && self.floating_group_is_in_column_composition(target_group) =>
@@ -704,7 +706,9 @@ impl Layout {
         let source_is_column_composition = self.is_column_composition_root(source_root);
         if let DropTarget::GroupEdge {
             group,
-            zone: zone @ (DropZone::Left | DropZone::Right),
+            zone: zone @ (
+                DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
+            ),
         } = target
             && source_is_column_composition
             && self.floating_group_is_in_column_composition(group)
@@ -720,15 +724,35 @@ impl Layout {
         group: NodeId,
         zone: DropZone,
     ) -> Result<(), CommandError> {
-        if !matches!(zone, DropZone::Left | DropZone::Right) {
+        if !matches!(
+            zone,
+            DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
+        ) {
             return Err(CommandError::InvalidTarget {
-                reason: "floating composition docking requires a left or right edge",
+                reason: "floating composition docking requires an outer edge or internal column splitter",
             });
         }
         if self.is_group_in_icon_rail(group) {
             return Err(CommandError::InvalidTarget {
                 reason: "floating composition edge target cannot be an icon rail slot",
             });
+        }
+        if zone == DropZone::FloatingColumnInsertion {
+            let Some(column) = self.find_owner_column(group) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating column insertion target must belong to a Column",
+                });
+            };
+            let Some(Node::Column(column_data)) = self.nodes.get(column) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating column insertion target must belong to a Column",
+                });
+            };
+            if column_data.mode.is_rail() || column_data.groups.first() != Some(&group) {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating column insertion must target the first Group in an expanded Column",
+                });
+            }
         }
         if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
             return Err(match self.nodes.get(group) {
@@ -748,8 +772,10 @@ impl Layout {
                 .ok_or(CommandError::InvalidTarget {
                     reason: "floating composition edge target must belong to another floating area",
                 })?;
-        let is_outer_edge = match self.nodes.get(root) {
-            Some(Node::Column(_)) => root == column,
+        let is_valid_boundary = match self.nodes.get(root) {
+            Some(Node::Column(_)) => {
+                root == column && matches!(zone, DropZone::Left | DropZone::Right)
+            },
             Some(Node::Split(split))
                 if split.axis == Axis::X
                     && split
@@ -764,17 +790,24 @@ impl Layout {
                     .ok_or(CommandError::InvalidTarget {
                         reason: "floating target column is not part of its composition",
                     })?;
-                if zone == DropZone::Left {
-                    index == 0
-                } else {
-                    index + 1 == split.children.len()
+                match zone {
+                    DropZone::Left => index == 0,
+                    DropZone::Right => index + 1 == split.children.len(),
+                    DropZone::FloatingColumnInsertion => {
+                        index > 0
+                            && !matches!(
+                                split.children.get(index - 1).and_then(|id| self.nodes.get(*id)),
+                                Some(Node::Column(previous)) if previous.mode.is_rail()
+                            )
+                    }
+                    _ => false,
                 }
             }
             _ => false,
         };
-        if !is_outer_edge {
+        if !is_valid_boundary {
             return Err(CommandError::InvalidTarget {
-                reason: "floating horizontal docking is allowed only at the outer left or right edge of a Column composition",
+                reason: "floating horizontal docking requires an outer edge or internal Column splitter",
             });
         }
         Ok(())
@@ -869,16 +902,18 @@ impl Layout {
             .ok_or(CommandError::InvalidTarget {
                 reason: "target group is not inside the target composition",
             })?;
-        let is_outer_edge = match zone {
-            DropZone::Left => target_index == 0,
-            DropZone::Right => target_index + 1 == target_columns.len(),
-            _ => false,
+        let insertion_index = match zone {
+            DropZone::Left if target_index == 0 => 0,
+            DropZone::Right if target_index + 1 == target_columns.len() => {
+                target_columns.len()
+            }
+            DropZone::FloatingColumnInsertion if target_index > 0 => target_index,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating composition must target an outer edge or an internal column splitter",
+                });
+            }
         };
-        if !is_outer_edge {
-            return Err(CommandError::InvalidTarget {
-                reason: "floating composition may only be joined at its outer left or right edge",
-            });
-        }
 
         let source_ratios = normalized_ratios(source_ratios.into_iter().map(Some).collect());
         let target_ratios = normalized_ratios(target_ratios.into_iter().map(Some).collect());
@@ -894,16 +929,17 @@ impl Layout {
 
         let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
         let mut ratios = Vec::with_capacity(source_ratios.len() + target_ratios.len());
-        if zone == DropZone::Left {
-            ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
-            children.extend(source_columns);
-            ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
-            children.extend(target_columns);
-        } else {
-            ratios.extend(target_ratios.into_iter().map(|ratio| ratio * target_weight));
-            children.extend(target_columns);
-            ratios.extend(source_ratios.into_iter().map(|ratio| ratio * source_weight));
-            children.extend(source_columns);
+        for (index, target_column) in target_columns.iter().copied().enumerate() {
+            if index == insertion_index {
+                children.extend(source_columns.iter().copied());
+                ratios.extend(source_ratios.iter().map(|ratio| ratio * source_weight));
+            }
+            children.push(target_column);
+            ratios.push(target_ratios[index] * target_weight);
+        }
+        if insertion_index == target_columns.len() {
+            children.extend(source_columns.iter().copied());
+            ratios.extend(source_ratios.iter().map(|ratio| ratio * source_weight));
         }
 
         // Detaching the source root unregisters its FloatingGroup and DockArea,

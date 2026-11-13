@@ -475,10 +475,10 @@ impl Layout {
                     Some((split_ratio, target_index)),
                 )
             }
-            DropZone::Left | DropZone::Right => {
-                // Floating side zones represent the whole composition edge. The
-                // target may therefore be any Group in an outermost Column,
-                // regardless of how many vertically stacked Groups it contains.
+            DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion => {
+                // External side zones target the whole composition edge; the
+                // internal Floating insertion zone targets one splitter between
+                // adjacent Columns. Both create a new Column around this Group.
                 let column = self.nodes.insert(Node::Column(crate::Column {
                     width: metrics.default_column_width,
                     mode: ColumnMode::Expanded,

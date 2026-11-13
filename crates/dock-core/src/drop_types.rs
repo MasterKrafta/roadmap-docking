@@ -15,7 +15,7 @@ pub enum DropSource {
 }
 
 /// Semantic kind of a drop affordance. Cardinal directions are also used by
-/// GroupEdge targets; the other variants describe insertion and area targets.
+/// GroupEdge targets; dedicated column-insertion variants describe column boundaries.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum DropZone {
@@ -32,6 +32,8 @@ pub enum DropZone {
     /// Left/right side of a main column, creating an adjacent column.
     ColumnLeft,
     ColumnRight,
+    /// Insert a new Column at an internal boundary of a Floating Split(X).
+    FloatingColumnInsertion,
     /// Append a group to the end of an expanded column.
     ColumnEnd,
     /// Outer edge of a dock side.
@@ -58,7 +60,7 @@ pub enum DropTarget {
     Tabs { group: NodeId, index: usize },
     /// Merge all tabs from a dragged group into another Tabs group.
     GroupTabs { group: NodeId, index: usize },
-    /// Place a new group at an edge of an existing group.
+    /// Place a group or Column at an edge of a group or an internal Floating column boundary.
     GroupEdge { group: NodeId, zone: DropZone },
     /// Insert a new main-dock column at an exact position on the given side.
     MainColumn { side: DockSide, index: usize },
@@ -113,6 +115,7 @@ mod drop_zone_tests {
         assert_ne!(DropZone::Top, DropZone::Bottom);
         assert_ne!(DropZone::Center, DropZone::TabInsertion);
         assert_ne!(DropZone::FloatingTop, DropZone::FloatingBottom);
+        assert_ne!(DropZone::FloatingColumnInsertion, DropZone::ColumnLeft);
         assert_ne!(DropZone::DockEdge, DropZone::FreeArea);
     }
 
@@ -128,6 +131,7 @@ mod drop_zone_tests {
             DropZone::TabInsertion,
             DropZone::ColumnLeft,
             DropZone::ColumnRight,
+            DropZone::FloatingColumnInsertion,
             DropZone::ColumnEnd,
             DropZone::DockEdge,
             DropZone::FloatingCenter,
