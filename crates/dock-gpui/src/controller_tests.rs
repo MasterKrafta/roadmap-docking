@@ -990,12 +990,6 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
     let second_cache = &controller.floating_rects[&second_window].rects as *const LayoutRects;
     assert_ne!(first_cache, second_cache);
 
-    let floating_root = controller
-        .layout()
-        .floating_group(second_group)
-        .and_then(|floating| controller.layout().dock_area(floating.area))
-        .map(|area| area.root)
-        .unwrap();
     let source_group = source_nodes[1];
     assert!(matches!(
         controller.layout().node(source_group),
