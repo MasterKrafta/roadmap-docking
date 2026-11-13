@@ -1347,22 +1347,13 @@ impl DragHostManager {
                     closing_drag_host,
                 )
             }) {
-                Ok(Ok(())) => true,
-                Ok(Err(error)) => {
-                    tracing::warn!(
-                        ?target_group,
-                        ?closing_drag_host,
-                        %error,
-                        "could not redirect DragHost ownership to the Floating handoff target"
-                    );
-                    false
-                }
+                Ok(()) => true,
                 Err(error) => {
                     tracing::warn!(
                         ?target_group,
                         ?closing_drag_host,
                         %error,
-                        "could not access FloatingWindowManager to redirect DragHost ownership"
+                        "could not redirect DragHost ownership to the Floating handoff target"
                     );
                     false
                 }
