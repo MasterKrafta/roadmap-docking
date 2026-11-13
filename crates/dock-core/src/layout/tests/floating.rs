@@ -2226,3 +2226,134 @@ fn column_slot_uses_the_area_of_its_main_or_floating_column() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+
+#[test]
+fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_stationary() {
+    let metrics = DockMetrics::default();
+
+    let make_layout = || {
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+        let constraints = PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 160.0),
+            None,
+            false,
+        );
+
+        let (_, left_panel) = builder.panel(
+            PanelKey::new("floating-edge-resize-left").unwrap(),
+            constraints,
+        );
+        let left_group = builder.tabs(vec![left_panel], 0, false);
+        let left_column = builder.column(
+            280.0,
+            crate::ColumnMode::Expanded,
+            vec![left_group],
+            vec![1.0],
+        );
+
+        let (_, right_panel) = builder.panel(
+            PanelKey::new("floating-edge-resize-right").unwrap(),
+            constraints,
+        );
+        let right_group = builder.tabs(vec![right_panel], 0, false);
+        let right_column = builder.column(
+            280.0,
+            crate::ColumnMode::Expanded,
+            vec![right_group],
+            vec![1.0],
+        );
+
+        let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+        let initial_bounds = Rect::new(Point::new(100.0, 50.0), Size::new(564.0, 320.0));
+        let floating = builder.floating_group(root, initial_bounds, 1);
+        (
+            builder.build(),
+            floating,
+            root,
+            left_column,
+            right_column,
+            initial_bounds,
+        )
+    };
+
+    // Resizing the right edge expands only the right Column.
+    let (mut right_layout, floating, root, left_column, right_column, initial_bounds) =
+        make_layout();
+    right_layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(664.0, initial_bounds.size.height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let right_rects = right_layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(right_rects.columns[0].column, left_column);
+    assert_eq!(right_rects.columns[0].rect.size.width, 280.0);
+    assert_eq!(right_rects.columns[1].column, right_column);
+    assert_eq!(right_rects.columns[1].rect.size.width, 380.0);
+    assert_eq!(
+        initial_bounds.origin.x + right_rects.columns[0].rect.size.width,
+        initial_bounds.origin.x + 280.0,
+        "right-edge resize must not move the internal Split"
+    );
+    assert!(matches!(
+        right_layout.node(root),
+        Some(Node::Split(split))
+            if (split.ratios[0] - 280.0 / 660.0).abs() < 1.0e-4
+                && (split.ratios[1] - 380.0 / 660.0).abs() < 1.0e-4
+    ));
+
+    // Resizing the left edge expands only the left Column. Its right boundary
+    // stays at the same screen coordinate, so the internal Split does not move.
+    let (mut left_layout, floating, _, left_column, right_column, initial_bounds) =
+        make_layout();
+    let left_resized_bounds = Rect::new(
+        Point::new(0.0, initial_bounds.origin.y),
+        Size::new(664.0, initial_bounds.size.height),
+    );
+    left_layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: left_resized_bounds,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let left_rects = left_layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(left_rects.columns[0].column, left_column);
+    assert_eq!(left_rects.columns[0].rect.size.width, 380.0);
+    assert_eq!(left_rects.columns[1].column, right_column);
+    assert_eq!(left_rects.columns[1].rect.size.width, 280.0);
+    assert_eq!(
+        left_resized_bounds.origin.x + left_rects.columns[0].rect.size.width,
+        initial_bounds.origin.x + 280.0,
+        "left-edge resize must keep the internal Split at its screen coordinate"
+    );
+
+    // Moving a Floating window changes both outer edges equally and must not
+    // resize either Column.
+    let (mut moved_layout, floating, _, _, _, initial_bounds) = make_layout();
+    moved_layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    Point::new(150.0, initial_bounds.origin.y),
+                    initial_bounds.size,
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let moved_rects = moved_layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(moved_rects.columns[0].rect.size.width, 280.0);
+    assert_eq!(moved_rects.columns[1].rect.size.width, 280.0);
+    assert_eq!(moved_layout.validate(&metrics), Ok(()));
+}
