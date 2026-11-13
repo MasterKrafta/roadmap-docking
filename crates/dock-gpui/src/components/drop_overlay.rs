@@ -5,7 +5,7 @@ use dock_core::{
     DockSide, NodeId, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
-    IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _,
+    IntoElement, ParentElement, Styled, div,
     px, rgb,
 };
 use ui::Theme;
