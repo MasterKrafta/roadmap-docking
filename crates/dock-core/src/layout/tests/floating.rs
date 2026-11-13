@@ -2353,7 +2353,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     );
 
     // Shrinking from the right edge reduces only the right Column, down
-    // to its content minimum, while the left Column and splitter stay fixed.
+    // to Core's minimum expanded width, while the left Column and splitter stay fixed.
     let (mut shrink_layout, floating, _, left_column, right_column, initial_bounds) =
         make_layout();
     let minimum_edge_width = metrics.min_column_width;
