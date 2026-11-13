@@ -1699,52 +1699,9 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Makes the handoff destination the temporary DragHost owner before it closes.
+    /// Activates the persistent destination after its temporary DragHost has closed.
     ///
-    /// Windows activates an owned window's owner when the owned window is hidden.
-    /// Reparenting only this short-lived DragHost ensures that focus returns to the
-    /// destination FloatingHost instead of Main.
-    pub(crate) fn redirect_drag_host_owner_to_handoff_target(
-        &self,
-        group: FloatingGroupId,
-        drag_host_window: NativeWindowId,
-    ) -> Result<(), String> {
-        let panel = self
-            .host_registry
-            .panel_for_group(group)
-            .ok_or_else(|| format!("Floating group {group:?} has no host panel"))?;
-        let entry = self
-            .registry
-            .windows
-            .get(&panel)
-            .ok_or_else(|| format!("Floating host panel {panel:?} has no native window entry"))?;
-        if entry.host_group != Some(group) || entry.visibility != PanelWindowVisibility::Visible {
-            return Err(format!("Floating group {group:?} is not hosted by a visible window"));
-        }
-        let target_window = entry
-            .native_window
-            .ok_or_else(|| format!("Floating group {group:?} has no native HWND"))?;
-        let foreground_before = self.native_ops.foreground_window();
-        self.native_ops
-            .set_owner(drag_host_window, target_window)
-            .map_err(|error| error.to_string())?;
-        let foreground_after = self.native_ops.foreground_window();
-        tracing::warn!(
-            ?group,
-            ?panel,
-            ?drag_host_window,
-            ?target_window,
-            main_native_window = ?self.main_native_window,
-            ?foreground_before,
-            ?foreground_after,
-            "redirected DragHost native owner to Floating handoff target"
-        );
-        Ok(())
-    }
-
-    /// Fallback-activates the persistent destination if Windows did not focus it
-    /// after the temporary DragHost was hidden.
-    ///
+    /// Closing the owned DragHost can restore Main as the foreground window.
     /// Only reclaim focus from Main; never steal it back after the user has
     /// already moved to another application or another floating window.
     pub(crate) fn activate_handoff_target(
@@ -1765,91 +1722,39 @@ impl FloatingWindowManager {
             return false;
         };
 
-        let foreground = match self.native_ops.foreground_window() {
-            Ok(foreground) => foreground,
+        match self.native_ops.foreground_window() {
+            Ok(Some(foreground)) if foreground == native_window => return true,
+            Ok(Some(foreground)) if foreground == closing_drag_host => return false,
+            Ok(Some(foreground)) if Some(foreground) != self.main_native_window => {
+                // Respect a different app window or another FloatingHost that
+                // the user activated after releasing the drag.
+                return true;
+            }
+            Ok(_) => {}
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     ?group,
-                    ?panel,
-                    ?native_window,
-                    ?closing_drag_host,
                     %error,
-                    "could not inspect foreground HWND after DragHost close"
+                    "could not inspect foreground window after DragHost close"
                 );
                 return false;
             }
-        };
-
-        if foreground == Some(native_window) {
-            tracing::warn!(
-                ?group,
-                ?panel,
-                ?native_window,
-                "Floating handoff target is already the foreground window"
-            );
-            return true;
-        }
-        if foreground == Some(closing_drag_host) {
-            tracing::warn!(
-                ?group,
-                ?panel,
-                ?native_window,
-                ?closing_drag_host,
-                ?foreground,
-                "DragHost is still foreground; waiting for Windows owner-focus handoff"
-            );
-            return false;
-        }
-        if foreground != self.main_native_window {
-            // Respect a different app window or another FloatingHost that
-            // the user activated after releasing the drag.
-            tracing::warn!(
-                ?group,
-                ?panel,
-                ?native_window,
-                main_native_window = ?self.main_native_window,
-                ?foreground,
-                "foreground is neither Main nor the handoff target; preserving current focus"
-            );
-            return true;
         }
 
-        tracing::warn!(
-            ?group,
-            ?panel,
-            ?native_window,
-            ?closing_drag_host,
-            main_native_window = ?self.main_native_window,
-            ?foreground,
-            "Main is foreground after DragHost close; requesting FloatingHost activation"
-        );
         if let Err(error) = self.native_ops.activate(native_window) {
             tracing::warn!(
                 ?group,
                 ?panel,
-                ?native_window,
-                ?foreground,
                 %error,
-                "SetForegroundWindow request for FloatingHost failed"
+                "could not activate FloatingHost after DragHost close"
             );
             return false;
         }
 
-        let foreground_after = self.native_ops.foreground_window();
-        let activated = matches!(
-            &foreground_after,
-            Ok(Some(foreground)) if *foreground == native_window
-        );
-        tracing::warn!(
-            ?group,
-            ?panel,
-            ?native_window,
-            ?foreground,
-            ?foreground_after,
-            activated,
-            "checked foreground HWND after FloatingHost activation request"
-        );
-        activated
+        matches!(
+            self.native_ops.foreground_window(),
+            Ok(Some(foreground)) if foreground == native_window
+        )
     }
 
     /// Returns the transferred panels whose destination FloatingHost is ready
@@ -1897,39 +1802,6 @@ impl FloatingWindowManager {
         }
 
         if let Some(drag_host) = self.drag_host_manager.as_ref().and_then(|manager| manager.upgrade()) {
-            // This method is already running inside FloatingWindowManager::update.
-            // Query DragHostManager, then redirect ownership directly through self;
-            // never call FloatingWindowManager::update recursively from its callback.
-            let (drag_host_native_window, pending_panels) = drag_host.update(cx, |manager, _| {
-                (
-                    manager.active_native_window_id(),
-                    manager.pending_handoff_panels(group),
-                )
-            });
-            let handoff_is_ready = pending_panels.is_some_and(|panels| {
-                panels.iter().all(|panel| rendered_panels.contains(panel))
-            });
-            if handoff_is_ready {
-                if let Some(drag_host_native_window) = drag_host_native_window {
-                    if let Err(error) = self.redirect_drag_host_owner_to_handoff_target(
-                        group,
-                        drag_host_native_window,
-                    ) {
-                        tracing::warn!(
-                            ?group,
-                            ?drag_host_native_window,
-                            %error,
-                            "could not redirect DragHost owner to the Floating handoff target"
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        ?group,
-                        "DragHost had no native window while completing the Floating handoff"
-                    );
-                }
-            }
-
             let _ = drag_host.update(cx, |manager, manager_cx| {
                 manager.complete_floating_handoff(group, rendered_panels, manager_cx);
             });
