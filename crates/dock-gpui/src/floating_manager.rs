@@ -1272,7 +1272,7 @@ impl FloatingWindowManager {
         DockGeometry::host_local_point_from_screen(screen, client, Point::ZERO, scale)
     }
 
-    fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
+    fn finish_native_move(&mut self, mut state: NativeMoveSession, cx: &mut Context<Self>) {
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
