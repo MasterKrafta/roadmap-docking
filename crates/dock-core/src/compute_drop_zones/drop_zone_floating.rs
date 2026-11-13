@@ -192,7 +192,7 @@ impl FloatingZoneContext<'_> {
                     continue;
                 }
 
-                let Some(zone_rect) = super::shared_group_vertical_edge_rect(
+                let Some(mut zone_rect) = super::shared_group_vertical_edge_rect(
                     self.layout,
                     self.rects,
                     self.tree_index,
@@ -203,6 +203,20 @@ impl FloatingZoneContext<'_> {
                 )? else {
                     continue;
                 };
+
+                // Keep the Floating top hit area in the lower half of the
+                // composition header, close to the Group seam. Main keeps the
+                // full canonical zone height.
+                if edge == DropZone::Top && self.layout.profile() == Profile::Photoshop {
+                    let group_top = target_group.rect.origin.y;
+                    let zone_bottom = zone_rect.origin.y + zone_rect.size.height;
+                    if (zone_bottom - group_top).abs() <= 1.0 {
+                        let reduced_height = zone_rect.size.height * 0.5;
+                        zone_rect.origin.y += zone_rect.size.height - reduced_height;
+                        zone_rect.size.height = reduced_height;
+                    }
+                }
+
                 push_zone(
                     self.zones,
                     DropTarget::GroupEdge {

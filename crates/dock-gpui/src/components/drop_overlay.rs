@@ -102,14 +102,22 @@ impl DropOverlay {
                     let target_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
+                    // FloatingTop keeps its hit area clear of the outer
+                    // side zones, but its visible feedback spans the full target
+                    // Group width just like Main's top edge.
+                    let visual_rect = if zone.zone == DropZone::FloatingTop {
+                        floating_top_edge_visual_rect(zone.rect, target_bounds)
+                    } else {
+                        zone.rect
+                    };
                     layer = layer.child(highlight_rect(
-                        main_group_edge_highlight_rect(zone.rect, edge),
+                        main_group_edge_highlight_rect(visual_rect, edge),
                         theme,
                         0.10,
                         false,
                     ));
                     layer = layer.child(guide_rect(
-                        main_group_edge_guide_rect(zone.rect, edge, target_bounds),
+                        main_group_edge_guide_rect(visual_rect, edge, target_bounds),
                         theme,
                     ));
                 }
@@ -418,6 +426,21 @@ fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
     }
 }
 
+fn floating_top_edge_visual_rect(rect: Rect, target_group: Option<Rect>) -> Rect {
+    let Some(group) = target_group else {
+        return rect;
+    };
+
+    let left = rect.origin.x.min(group.origin.x);
+    let rect_right = rect.origin.x + rect.size.width;
+    let group_right = group.origin.x + group.size.width;
+    let right = rect_right.max(group_right);
+    Rect::new(
+        Point::new(left, rect.origin.y),
+        dock_core::Size::new(right - left, rect.size.height),
+    )
+}
+
 fn main_group_edge_highlight_rect(rect: Rect, zone: DropZone) -> Rect {
     match zone {
         // Keep the full width, but reduce the translucent highlight to half
@@ -614,7 +637,7 @@ mod tests {
     use super::{
         composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
         main_group_edge_guide_rect, same_group_panel_tab_insertion_rect,
-        canonical_group_edge_zone, zone_matches_preview,
+        floating_top_edge_visual_rect, canonical_group_edge_zone, zone_matches_preview,
     };
 
     #[test]
@@ -742,6 +765,22 @@ mod tests {
             super::tab_strip_group_highlight_rect(target, &groups, &strips),
             Some(Rect::new(Point::new(20.0, 68.0), Size::new(320.0, 24.0))),
             "the Floating append zone must highlight tabs and trailing controls"
+        );
+    }
+
+    #[test]
+    fn floating_top_feedback_spans_the_target_group_without_expanding_hit_testing() {
+        let zone = Rect::new(Point::new(30.0, 40.0), Size::new(240.0, 12.0));
+        let target_group = Rect::new(Point::new(10.0, 52.0), Size::new(280.0, 260.0));
+
+        assert_eq!(
+            super::floating_top_edge_visual_rect(zone, Some(target_group)),
+            Rect::new(Point::new(10.0, 40.0), Size::new(280.0, 12.0))
+        );
+        assert_eq!(
+            zone,
+            Rect::new(Point::new(30.0, 40.0), Size::new(240.0, 12.0)),
+            "visual stretching must not alter the Core hit area"
         );
     }
 

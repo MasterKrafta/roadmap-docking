@@ -355,7 +355,7 @@ pub(super) fn floating_top_edge_rect(
     let header_height = (first_group_rect.origin.y - floating_bounds.origin.y)
         .max(0.0)
         .min(floating_bounds.size.height);
-    let height = metrics.edge_drop_width.min(header_height);
+    let height = metrics.edge_drop_width.min(header_height) * 0.5;
     if height <= 0.0 {
         return Ok(None);
     }
