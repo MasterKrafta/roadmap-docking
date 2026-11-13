@@ -1765,6 +1765,7 @@ impl Render for FloatingHost {
                 Some(preview),
                 &snapshot.rects.groups,
                 &snapshot.rects.columns,
+                &snapshot.column_groups,
                 &snapshot.rects.tab_headers,
                 &snapshot.rects.tab_strips,
                 None,
