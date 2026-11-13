@@ -252,7 +252,7 @@ pub(super) fn shared_group_vertical_edge_rect(
                 )?));
             };
             let header_height = (group_rect.origin.y - column_rect.origin.y).max(0.0);
-            let height = metrics.edge_drop_width.min(header_height);
+            let height = metrics.edge_drop_width.min(header_height) * 0.5;
             if height <= 0.0 {
                 return Ok(Some(group_edge_rect(
                     group_rect,

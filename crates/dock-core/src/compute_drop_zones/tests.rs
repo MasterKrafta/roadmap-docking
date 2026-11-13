@@ -366,7 +366,7 @@ fn adjacent_main_groups_share_one_full_width_vertical_drop_strip() {
     );
     assert_eq!(
         first_top.rect.size.height,
-        metrics.edge_drop_width.min(metrics.column_header_height)
+        metrics.edge_drop_width.min(metrics.column_header_height) * 0.5
     );
 
     let first_bottom = zones
@@ -1226,7 +1226,7 @@ fn floating_top_zone_tracks_the_actual_header_for_column_and_tabs_roots() {
             .expect("the Floating header should expose its lower top-drop band");
 
         let actual_header_height = first_group.rect.origin.y - bounds.origin.y;
-        let expected_height = metrics.edge_drop_width.min(actual_header_height);
+        let expected_height = metrics.edge_drop_width.min(actual_header_height) * 0.5;
         assert_eq!(actual_header_height, metrics.column_header_height);
         assert_eq!(top_zone.rect.size.height, expected_height);
         assert_eq!(

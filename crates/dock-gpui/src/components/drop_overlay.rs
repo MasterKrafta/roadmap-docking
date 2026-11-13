@@ -102,14 +102,9 @@ impl DropOverlay {
                     let target_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
-                    // FloatingTop keeps its hit area clear of the outer
-                    // side zones, but its visible feedback spans the full target
-                    // Group width just like Main's top edge.
-                    let visual_rect = if zone.zone == DropZone::FloatingTop {
-                        floating_top_edge_visual_rect(zone.rect, target_bounds)
-                    } else {
-                        zone.rect
-                    };
+                    // Keep hit-testing geometry unchanged while extending
+                    // every horizontal edge highlight to the full target Group.
+                    let visual_rect = group_edge_visual_rect(zone.rect, target_bounds);
                     layer = layer.child(highlight_rect(
                         main_group_edge_highlight_rect(visual_rect, edge),
                         theme,
@@ -117,7 +112,7 @@ impl DropOverlay {
                         false,
                     ));
                     layer = layer.child(guide_rect(
-                        main_group_edge_guide_rect(visual_rect, edge, target_bounds),
+                        main_group_edge_guide_rect(visual_rect, zone.zone, target_bounds),
                         theme,
                     ));
                 }
@@ -126,11 +121,12 @@ impl DropOverlay {
                     // the guide across the corresponding Main DockArea's full height.
                     let visual_rect =
                         composition_edge_highlight_rect(zone, target, main_dock_bounds);
-                    let x = visual_rect.origin.x + visual_rect.size.width * 0.5;
-                    let line = Rect::new(
-                        Point::new(x - 2.0, visual_rect.origin.y),
-                        dock_core::Size::new(4.0, visual_rect.size.height),
-                    );
+                    let edge = match zone.zone {
+                        DropZone::ColumnLeft => DropZone::Left,
+                        DropZone::ColumnRight => DropZone::Right,
+                        _ => unreachable!("only ColumnLeft/ColumnRight reach this branch"),
+                    };
+                    let line = group_edge_guide_rect(visual_rect, edge);
                     layer = layer.child(highlight_rect(visual_rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
                 }
@@ -139,8 +135,11 @@ impl DropOverlay {
                     // outer composition edge. Keep the marker inside that splitter.
                     let x = zone.rect.origin.x + zone.rect.size.width * 0.5;
                     let line = Rect::new(
-                        Point::new(x - 2.0, zone.rect.origin.y),
-                        dock_core::Size::new(4.0, zone.rect.size.height),
+                        Point::new(x - DROP_EDGE_GUIDE_THICKNESS * 0.5, zone.rect.origin.y),
+                        dock_core::Size::new(
+                            DROP_EDGE_GUIDE_THICKNESS,
+                            zone.rect.size.height,
+                        ),
                     );
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.18, false));
                     layer = layer.child(guide_rect(line, theme));
@@ -158,8 +157,14 @@ impl DropOverlay {
                 DropZone::ColumnEnd => {
                     let y = zone.rect.origin.y;
                     let line = Rect::new(
-                        Point::new(zone.rect.origin.x, y - 2.0),
-                        dock_core::Size::new(zone.rect.size.width, 4.0),
+                        Point::new(
+                            zone.rect.origin.x,
+                            y - DROP_EDGE_GUIDE_THICKNESS,
+                        ),
+                        dock_core::Size::new(
+                            zone.rect.size.width,
+                            DROP_EDGE_GUIDE_THICKNESS,
+                        ),
                     );
                     layer = layer.child(highlight_rect(zone.rect, theme, 0.10, false));
                     layer = layer.child(guide_rect(line, theme));
@@ -403,38 +408,40 @@ fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
 }
 
 
-fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
-    const GUIDE_THICKNESS: f32 = 4.0;
-    let guide_half = GUIDE_THICKNESS * 0.5;
+const DROP_EDGE_GUIDE_THICKNESS: f32 = 2.0;
 
+fn group_edge_guide_rect(rect: Rect, zone: DropZone) -> Rect {
+    let right = rect.origin.x + rect.size.width;
+    let x = match zone {
+        DropZone::Left => rect.origin.x,
+        DropZone::Right => right - DROP_EDGE_GUIDE_THICKNESS,
+        _ => rect.origin.x,
+    };
     match zone {
-        DropZone::Left | DropZone::Right => {
-            let x = rect.origin.x + rect.size.width * 0.5 - guide_half;
-            Rect::new(
-                Point::new(x, rect.origin.y),
-                dock_core::Size::new(GUIDE_THICKNESS, rect.size.height),
-            )
-        }
+        DropZone::Left | DropZone::Right => Rect::new(
+            Point::new(x, rect.origin.y),
+            dock_core::Size::new(DROP_EDGE_GUIDE_THICKNESS, rect.size.height),
+        ),
         DropZone::Top | DropZone::Bottom => {
-            let y = rect.origin.y + rect.size.height * 0.5 - guide_half;
+            let y = rect.origin.y + rect.size.height * 0.5
+                - DROP_EDGE_GUIDE_THICKNESS * 0.5;
             Rect::new(
                 Point::new(rect.origin.x, y),
-                dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+                dock_core::Size::new(rect.size.width, DROP_EDGE_GUIDE_THICKNESS),
             )
         }
         _ => rect,
     }
 }
 
-fn floating_top_edge_visual_rect(rect: Rect, target_group: Option<Rect>) -> Rect {
+fn group_edge_visual_rect(rect: Rect, target_group: Option<Rect>) -> Rect {
     let Some(group) = target_group else {
         return rect;
     };
 
     let left = rect.origin.x.min(group.origin.x);
-    let rect_right = rect.origin.x + rect.size.width;
-    let group_right = group.origin.x + group.size.width;
-    let right = rect_right.max(group_right);
+    let right = (rect.origin.x + rect.size.width)
+        .max(group.origin.x + group.size.width);
     Rect::new(
         Point::new(left, rect.origin.y),
         dock_core::Size::new(right - left, rect.size.height),
@@ -458,30 +465,31 @@ fn main_group_edge_guide_rect(
     zone: DropZone,
     target_group: Option<Rect>,
 ) -> Rect {
-    const GUIDE_THICKNESS: f32 = 4.0;
     let centered = || group_edge_guide_rect(rect, zone);
 
     match zone {
-        DropZone::Top => {
+        DropZone::Top | DropZone::FloatingTop => {
             // The Top hit zone lives inside the bottom of the composition header.
-            let y = rect.origin.y + rect.size.height - GUIDE_THICKNESS * 0.5;
+            let y = rect.origin.y + rect.size.height - DROP_EDGE_GUIDE_THICKNESS * 0.5;
             Rect::new(
                 Point::new(rect.origin.x, y),
-                dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+                dock_core::Size::new(rect.size.width, DROP_EDGE_GUIDE_THICKNESS),
             )
         }
-        DropZone::Bottom => {
-            let Some(group) = target_group else {
-                return centered();
-            };
-            let group_bottom = group.origin.y + group.size.height;
+        DropZone::Bottom | DropZone::FloatingBottom => {
             let zone_bottom = rect.origin.y + rect.size.height;
-            if (zone_bottom - group_bottom).abs() <= 1.0 {
-                // The last group: place the bright stripe at the outer bottom edge.
-                let y = zone_bottom - GUIDE_THICKNESS;
+            let is_floating_bottom = zone == DropZone::FloatingBottom;
+            let is_last_group = target_group.is_some_and(|group| {
+                let group_bottom = group.origin.y + group.size.height;
+                (zone_bottom - group_bottom).abs() <= 1.0
+            });
+
+            if is_floating_bottom || is_last_group {
+                // The outer bottom stripe sits directly on the window/Group edge.
+                let y = zone_bottom - DROP_EDGE_GUIDE_THICKNESS;
                 Rect::new(
                     Point::new(rect.origin.x, y),
-                    dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
+                    dock_core::Size::new(rect.size.width, DROP_EDGE_GUIDE_THICKNESS),
                 )
             } else {
                 // Internal separator: keep the stripe centered on the splitter.
@@ -581,17 +589,12 @@ fn rail_insertion_rect(zone: &DropZoneRect, headers: &[TabHeaderRect]) -> Option
 }
 
 fn main_dock_edge_guide_rect(rect: Rect, side: DockSide) -> Rect {
-    const GUIDE_WIDTH: f32 = 4.0;
-    const EDGE_INSET: f32 = 2.0;
-
-    let x = match side {
-        DockSide::Left => rect.origin.x + EDGE_INSET,
-        DockSide::Right => rect.origin.x + rect.size.width - EDGE_INSET - GUIDE_WIDTH,
-    };
-
-    Rect::new(
-        Point::new(x, rect.origin.y),
-        dock_core::Size::new(GUIDE_WIDTH, rect.size.height),
+    group_edge_guide_rect(
+        rect,
+        match side {
+            DockSide::Left => DropZone::Left,
+            DockSide::Right => DropZone::Right,
+        },
     )
 }
 
@@ -637,7 +640,7 @@ mod tests {
     use super::{
         composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
         main_group_edge_guide_rect, same_group_panel_tab_insertion_rect,
-        floating_top_edge_visual_rect, canonical_group_edge_zone, zone_matches_preview,
+        group_edge_visual_rect, canonical_group_edge_zone, zone_matches_preview,
     };
 
     #[test]
@@ -690,17 +693,21 @@ mod tests {
 
         assert_eq!(
             group_edge_guide_rect(rect, DropZone::Top),
-            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
+            Rect::new(Point::new(10.0, 31.0), Size::new(200.0, 2.0))
         );
         assert_eq!(
             group_edge_guide_rect(rect, DropZone::Bottom),
-            Rect::new(Point::new(10.0, 30.0), Size::new(200.0, 4.0))
+            Rect::new(Point::new(10.0, 31.0), Size::new(200.0, 2.0))
         );
 
         let side_rect = Rect::new(Point::new(10.0, 20.0), Size::new(24.0, 100.0));
         assert_eq!(
             group_edge_guide_rect(side_rect, DropZone::Left),
-            Rect::new(Point::new(20.0, 20.0), Size::new(4.0, 100.0))
+            Rect::new(Point::new(10.0, 20.0), Size::new(2.0, 100.0))
+        );
+        assert_eq!(
+            group_edge_guide_rect(side_rect, DropZone::Right),
+            Rect::new(Point::new(32.0, 20.0), Size::new(2.0, 100.0))
         );
     }
 
@@ -725,7 +732,7 @@ mod tests {
         let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 300.0));
         assert_eq!(
             main_group_edge_guide_rect(top_zone, DropZone::Top, Some(target_group)),
-            Rect::new(Point::new(10.0, 58.0), Size::new(200.0, 4.0))
+            Rect::new(Point::new(10.0, 59.0), Size::new(200.0, 2.0))
         );
 
         let bottom_zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
@@ -736,7 +743,7 @@ mod tests {
                 DropZone::Bottom,
                 Some(target_group),
             ),
-            Rect::new(Point::new(10.0, 356.0), Size::new(200.0, 4.0))
+            Rect::new(Point::new(10.0, 358.0), Size::new(200.0, 2.0))
         );
 
         let internal_zone = Rect::new(Point::new(10.0, 196.0), Size::new(200.0, 24.0));
@@ -747,7 +754,7 @@ mod tests {
                 DropZone::Bottom,
                 Some(upper_group),
             ),
-            Rect::new(Point::new(10.0, 206.0), Size::new(200.0, 4.0))
+            Rect::new(Point::new(10.0, 207.0), Size::new(200.0, 2.0))
         );
     }
 
@@ -769,18 +776,40 @@ mod tests {
     }
 
     #[test]
-    fn floating_top_feedback_spans_the_target_group_without_expanding_hit_testing() {
-        let zone = Rect::new(Point::new(30.0, 40.0), Size::new(240.0, 12.0));
+    fn horizontal_edge_feedback_spans_the_target_group_without_expanding_hit_testing() {
         let target_group = Rect::new(Point::new(10.0, 52.0), Size::new(280.0, 260.0));
+        for zone in [
+            Rect::new(Point::new(30.0, 40.0), Size::new(240.0, 12.0)),
+            Rect::new(Point::new(30.0, 180.0), Size::new(240.0, 12.0)),
+            Rect::new(Point::new(30.0, 300.0), Size::new(240.0, 12.0)),
+        ] {
+            assert_eq!(
+                super::group_edge_visual_rect(zone, Some(target_group)),
+                Rect::new(
+                    Point::new(10.0, zone.origin.y),
+                    Size::new(280.0, zone.size.height),
+                )
+            );
+            assert_eq!(
+                zone.size.width,
+                240.0,
+                "visual stretching must not alter the Core hit area"
+            );
+        }
+    }
+
+    #[test]
+    fn floating_bottom_guide_is_pinned_to_the_window_edge() {
+        let zone = Rect::new(Point::new(10.0, 336.0), Size::new(200.0, 24.0));
+        let target_group = Rect::new(Point::new(10.0, 60.0), Size::new(200.0, 270.0));
 
         assert_eq!(
-            super::floating_top_edge_visual_rect(zone, Some(target_group)),
-            Rect::new(Point::new(10.0, 40.0), Size::new(280.0, 12.0))
-        );
-        assert_eq!(
-            zone,
-            Rect::new(Point::new(30.0, 40.0), Size::new(240.0, 12.0)),
-            "visual stretching must not alter the Core hit area"
+            super::main_group_edge_guide_rect(
+                zone,
+                DropZone::FloatingBottom,
+                Some(target_group),
+            ),
+            Rect::new(Point::new(10.0, 358.0), Size::new(200.0, 2.0))
         );
     }
 
@@ -873,11 +902,11 @@ mod tests {
 
         assert_eq!(
             main_dock_edge_guide_rect(left, DockSide::Left),
-            Rect::new(Point::new(102.0, 20.0), Size::new(4.0, 300.0))
+            Rect::new(Point::new(100.0, 20.0), Size::new(2.0, 300.0))
         );
         assert_eq!(
             main_dock_edge_guide_rect(right, DockSide::Right),
-            Rect::new(Point::new(994.0, 20.0), Size::new(4.0, 300.0))
+            Rect::new(Point::new(998.0, 20.0), Size::new(2.0, 300.0))
         );
     }
 }
