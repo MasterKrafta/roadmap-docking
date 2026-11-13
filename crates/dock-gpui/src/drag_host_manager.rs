@@ -1337,44 +1337,15 @@ impl DragHostManager {
         let id = active.id;
         let closing_drag_host = active.native_window;
 
-        // Windows normally restores focus to an owned window's owner when that
-        // window is hidden. Redirect the temporary DragHost owner to the target
-        // FloatingHost before closing it, so focus returns to B rather than Main.
-        let owner_redirected = match self.floating_manager.clone() {
-            Some(manager) => match manager.update(cx, |manager, _| {
-                manager.redirect_drag_host_owner_to_handoff_target(
-                    target_group,
-                    closing_drag_host,
-                )
-            }) {
-                Ok(()) => true,
-                Err(error) => {
-                    tracing::warn!(
-                        ?target_group,
-                        ?closing_drag_host,
-                        %error,
-                        "could not redirect DragHost ownership to the Floating handoff target"
-                    );
-                    false
-                }
-            },
-            None => false,
-        };
-        if !owner_redirected {
-            tracing::debug!(
-                ?target_group,
-                "DragHost will close with its original Main owner; foreground activation fallback remains enabled"
-            );
-        }
-
+        // FloatingWindowManager redirects DragHost ownership before calling
+        // this method. Do not update that Entity here: this callback is invoked
+        // from FloatingWindowManager::notify_drag_host_handoff_rendered.
         let foreground_before_close = self.native_ops.foreground_window();
-        tracing::info!(
+        tracing::warn!(
             ?id,
             ?target_group,
             ?closing_drag_host,
-            main_native_window = ?self.main_native_window,
             ?foreground_before_close,
-            owner_redirected,
             "starting Floating handoff DragHost close"
         );
         if let Err(error) = self.close(id, cx) {
@@ -1477,7 +1448,7 @@ impl DragHostManager {
         drop(active.source_detach_subscription.take());
 
         let foreground_before_hide = self.native_ops.foreground_window();
-        tracing::info!(
+        tracing::warn!(
             ?id,
             drag_host = ?active.native_window,
             ?foreground_before_hide,
@@ -1492,7 +1463,7 @@ impl DragHostManager {
             );
         }
         let foreground_after_hide = self.native_ops.foreground_window();
-        tracing::info!(
+        tracing::warn!(
             ?id,
             drag_host = ?active.native_window,
             ?foreground_after_hide,
@@ -1515,7 +1486,7 @@ impl DragHostManager {
             );
         }
         let foreground_after_remove = self.native_ops.foreground_window();
-        tracing::info!(
+        tracing::warn!(
             ?id,
             drag_host = ?active.native_window,
             ?foreground_before_hide,
