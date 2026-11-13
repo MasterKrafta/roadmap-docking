@@ -272,7 +272,8 @@ mod windows_impl {
             GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SetLastError, WIN32_ERROR, WPARAM,
         },
         Graphics::Gdi::{
-            ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+            ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, InvalidateRect,
+            MONITORINFO,
         },
         Media::{timeBeginPeriod, timeEndPeriod},
         UI::{
