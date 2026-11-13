@@ -600,6 +600,7 @@ fn is_resize_command(command: &DockCommand) -> bool {
             | DockCommand::ResizeColumnBoundary { .. }
             | DockCommand::ResizeSplitColumnBoundary { .. }
             | DockCommand::ResizeFloatingBounds { .. }
+            | DockCommand::ResizeFloatingBoundsFromEdge { .. }
             | DockCommand::ResizeFlyout { .. }
             | DockCommand::ResetColumnRatios { .. }
             | DockCommand::ResetMainColumnRatios { .. }
