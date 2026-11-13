@@ -762,10 +762,10 @@ impl Layout {
                 // Column's content minimum, not its current saved width.
                 let mut minimum = Size::ZERO;
                 for child in &split.children {
-                    let child_minimum =
-                        self.minimum_floating_size_with_cache(*child, metrics, cache)?;
-                    minimum.width += child_minimum.width;
-                    minimum.height = minimum.height.max(child_minimum.height);
+                    minimum.width += self.minimum_column_width(*child, metrics)?;
+                    minimum.height = minimum.height.max(
+                        self.minimum_node_size_with_cache(*child, metrics, cache)?.height,
+                    );
                 }
                 minimum.width +=
                     metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
