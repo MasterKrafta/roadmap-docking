@@ -1900,25 +1900,34 @@ impl FloatingWindowManager {
             // This method is already running inside FloatingWindowManager::update.
             // Query DragHostManager, then redirect ownership directly through self;
             // never call FloatingWindowManager::update recursively from its callback.
-            let drag_host_native_window =
-                drag_host.update(cx, |manager, _| manager.active_native_window_id());
-            if let Some(drag_host_native_window) = drag_host_native_window {
-                if let Err(error) = self.redirect_drag_host_owner_to_handoff_target(
-                    group,
-                    drag_host_native_window,
-                ) {
+            let (drag_host_native_window, pending_panels) = drag_host.update(cx, |manager, _| {
+                (
+                    manager.active_native_window_id(),
+                    manager.pending_handoff_panels(group),
+                )
+            });
+            let handoff_is_ready = pending_panels.is_some_and(|panels| {
+                panels.iter().all(|panel| rendered_panels.contains(panel))
+            });
+            if handoff_is_ready {
+                if let Some(drag_host_native_window) = drag_host_native_window {
+                    if let Err(error) = self.redirect_drag_host_owner_to_handoff_target(
+                        group,
+                        drag_host_native_window,
+                    ) {
+                        tracing::warn!(
+                            ?group,
+                            ?drag_host_native_window,
+                            %error,
+                            "could not redirect DragHost owner to the Floating handoff target"
+                        );
+                    }
+                } else {
                     tracing::warn!(
                         ?group,
-                        ?drag_host_native_window,
-                        %error,
-                        "could not redirect DragHost owner to the Floating handoff target"
+                        "DragHost had no native window while completing the Floating handoff"
                     );
                 }
-            } else {
-                tracing::warn!(
-                    ?group,
-                    "DragHost had no native window while completing the Floating handoff"
-                );
             }
 
             let _ = drag_host.update(cx, |manager, manager_cx| {
