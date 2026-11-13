@@ -2341,6 +2341,39 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
         "left-edge resize must keep the internal Split at its screen coordinate"
     );
 
+    // Shrinking from the right edge reduces only the right Column, down
+    // to its content minimum, while the left Column and splitter stay fixed.
+    let (mut shrink_layout, floating, _, left_column, right_column, initial_bounds) =
+        make_layout();
+    let minimum_edge_width = metrics.min_column_width;
+    let shrink_delta = minimum_edge_width - 280.0;
+    shrink_layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(
+                        initial_bounds.size.width + shrink_delta,
+                        initial_bounds.size.height,
+                    ),
+                ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor: 1.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let shrink_rects = shrink_layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(shrink_rects.columns[0].column, left_column);
+    assert_eq!(shrink_rects.columns[0].rect.size.width, 280.0);
+    assert_eq!(shrink_rects.columns[1].column, right_column);
+    assert_eq!(shrink_rects.columns[1].rect.size.width, minimum_edge_width);
+    assert_eq!(
+        shrink_rects.floating_groups[0].rect.size.width,
+        initial_bounds.size.width + shrink_delta
+    );
+
     // Moving a Floating window changes both outer edges equally and must not
     // resize either Column.
     let (mut moved_layout, floating, _, _, _, initial_bounds) = make_layout();
