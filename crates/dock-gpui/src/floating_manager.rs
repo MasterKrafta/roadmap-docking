@@ -1724,9 +1724,22 @@ impl FloatingWindowManager {
         let target_window = entry
             .native_window
             .ok_or_else(|| format!("Floating group {group:?} has no native HWND"))?;
+        let foreground_before = self.native_ops.foreground_window();
         self.native_ops
             .set_owner(drag_host_window, target_window)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        let foreground_after = self.native_ops.foreground_window();
+        tracing::info!(
+            ?group,
+            ?panel,
+            ?drag_host_window,
+            ?target_window,
+            ?main_native_window = self.main_native_window,
+            ?foreground_before,
+            ?foreground_after,
+            "redirected DragHost native owner to Floating handoff target"
+        );
+        Ok(())
     }
 
     /// Fallback-activates the persistent destination if Windows did not focus it
@@ -1752,39 +1765,91 @@ impl FloatingWindowManager {
             return false;
         };
 
-        match self.native_ops.foreground_window() {
-            Ok(Some(foreground)) if foreground == native_window => return true,
-            Ok(Some(foreground)) if foreground == closing_drag_host => return false,
-            Ok(Some(foreground)) if Some(foreground) != self.main_native_window => {
-                // Respect a different app window or another FloatingHost that
-                // the user activated after releasing the drag.
-                return true;
-            }
-            Ok(_) => {}
+        let foreground = match self.native_ops.foreground_window() {
+            Ok(foreground) => foreground,
             Err(error) => {
-                tracing::debug!(
+                tracing::warn!(
                     ?group,
+                    ?panel,
+                    ?native_window,
+                    ?closing_drag_host,
                     %error,
-                    "could not inspect foreground window after DragHost close"
+                    "could not inspect foreground HWND after DragHost close"
                 );
                 return false;
             }
+        };
+
+        if foreground == Some(native_window) {
+            tracing::info!(
+                ?group,
+                ?panel,
+                ?native_window,
+                "Floating handoff target is already the foreground window"
+            );
+            return true;
+        }
+        if foreground == Some(closing_drag_host) {
+            tracing::info!(
+                ?group,
+                ?panel,
+                ?native_window,
+                ?closing_drag_host,
+                ?foreground,
+                "DragHost is still foreground; waiting for Windows owner-focus handoff"
+            );
+            return false;
+        }
+        if foreground != self.main_native_window {
+            // Respect a different app window or another FloatingHost that
+            // the user activated after releasing the drag.
+            tracing::info!(
+                ?group,
+                ?panel,
+                ?native_window,
+                ?main_native_window = self.main_native_window,
+                ?foreground,
+                "foreground is neither Main nor the handoff target; preserving current focus"
+            );
+            return true;
         }
 
+        tracing::info!(
+            ?group,
+            ?panel,
+            ?native_window,
+            ?closing_drag_host,
+            ?main_native_window = self.main_native_window,
+            ?foreground,
+            "Main is foreground after DragHost close; requesting FloatingHost activation"
+        );
         if let Err(error) = self.native_ops.activate(native_window) {
             tracing::warn!(
                 ?group,
                 ?panel,
+                ?native_window,
+                ?foreground,
                 %error,
-                "could not activate FloatingHost after DragHost close"
+                "SetForegroundWindow request for FloatingHost failed"
             );
             return false;
         }
 
-        matches!(
-            self.native_ops.foreground_window(),
-            Ok(Some(foreground)) if foreground == native_window
-        )
+        let foreground_after = self.native_ops.foreground_window();
+        let activated = matches!(
+            &foreground_after,
+            Ok(Some(foreground)) if *foreground == native_window
+        );
+        tracing::info!(
+            ?group,
+            ?panel,
+            ?native_window,
+            ?foreground,
+            ?foreground_after,
+            activated,
+            "checked foreground HWND after FloatingHost activation request"
+        );
+        activated
     }
 
     /// Returns the transferred panels whose destination FloatingHost is ready
