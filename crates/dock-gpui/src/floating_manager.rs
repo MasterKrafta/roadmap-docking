@@ -1729,7 +1729,7 @@ impl FloatingWindowManager {
             .set_owner(drag_host_window, target_window)
             .map_err(|error| error.to_string())?;
         let foreground_after = self.native_ops.foreground_window();
-        tracing::info!(
+        tracing::warn!(
             ?group,
             ?panel,
             ?drag_host_window,
@@ -1781,7 +1781,7 @@ impl FloatingWindowManager {
         };
 
         if foreground == Some(native_window) {
-            tracing::info!(
+            tracing::warn!(
                 ?group,
                 ?panel,
                 ?native_window,
@@ -1790,7 +1790,7 @@ impl FloatingWindowManager {
             return true;
         }
         if foreground == Some(closing_drag_host) {
-            tracing::info!(
+            tracing::warn!(
                 ?group,
                 ?panel,
                 ?native_window,
@@ -1803,7 +1803,7 @@ impl FloatingWindowManager {
         if foreground != self.main_native_window {
             // Respect a different app window or another FloatingHost that
             // the user activated after releasing the drag.
-            tracing::info!(
+            tracing::warn!(
                 ?group,
                 ?panel,
                 ?native_window,
@@ -1814,7 +1814,7 @@ impl FloatingWindowManager {
             return true;
         }
 
-        tracing::info!(
+        tracing::warn!(
             ?group,
             ?panel,
             ?native_window,
@@ -1840,7 +1840,7 @@ impl FloatingWindowManager {
             &foreground_after,
             Ok(Some(foreground)) if *foreground == native_window
         );
-        tracing::info!(
+        tracing::warn!(
             ?group,
             ?panel,
             ?native_window,
@@ -1897,6 +1897,30 @@ impl FloatingWindowManager {
         }
 
         if let Some(drag_host) = self.drag_host_manager.as_ref().and_then(|manager| manager.upgrade()) {
+            // This method is already running inside FloatingWindowManager::update.
+            // Query DragHostManager, then redirect ownership directly through self;
+            // never call FloatingWindowManager::update recursively from its callback.
+            let drag_host_native_window =
+                drag_host.update(cx, |manager, _| manager.active_native_window_id());
+            if let Some(drag_host_native_window) = drag_host_native_window {
+                if let Err(error) = self.redirect_drag_host_owner_to_handoff_target(
+                    group,
+                    drag_host_native_window,
+                ) {
+                    tracing::warn!(
+                        ?group,
+                        ?drag_host_native_window,
+                        %error,
+                        "could not redirect DragHost owner to the Floating handoff target"
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    ?group,
+                    "DragHost had no native window while completing the Floating handoff"
+                );
+            }
+
             let _ = drag_host.update(cx, |manager, manager_cx| {
                 manager.complete_floating_handoff(group, rendered_panels, manager_cx);
             });
