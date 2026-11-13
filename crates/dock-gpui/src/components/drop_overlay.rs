@@ -44,6 +44,7 @@ impl DropOverlay {
         preview: Option<DragPreview>,
         groups: &[GroupRect],
         columns: &[ColumnRect],
+        column_groups: &HashMap<NodeId, Vec<NodeId>>,
         tab_headers: &[TabHeaderRect],
         tab_strips: &[TabStripRect],
         main_dock_bounds: Option<(&HashMap<DockSide, Rect>, &HashMap<NodeId, DockSide>)>,
@@ -102,10 +103,15 @@ impl DropOverlay {
                     layer = layer.child(guide_rect(guide, theme));
                 }
                 DropZone::Top | DropZone::Bottom => {
-                    let target_bounds = target_group(target)
+                    let target_group_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
-                    let visual_rect = group_edge_visual_rect(zone.rect, target_bounds);
+                    let target_column_bounds =
+                        target_column_bounds(target, columns, column_groups);
+                    let visual_rect = group_edge_visual_rect(
+                        zone.rect,
+                        target_column_bounds.or(target_group_bounds),
+                    );
                     layer = layer.child(highlight_rect(
                         group_edge_highlight_rect(visual_rect, zone.zone),
                         theme,
@@ -118,10 +124,15 @@ impl DropOverlay {
                     ));
                 }
                 DropZone::FloatingTop | DropZone::FloatingBottom => {
-                    let target_bounds = target_group(target)
+                    let target_group_bounds = target_group(target)
                         .and_then(|id| groups.iter().find(|group| group.group == id))
                         .map(|group| group.rect);
-                    let visual_rect = group_edge_visual_rect(zone.rect, target_bounds);
+                    let target_column_bounds =
+                        target_column_bounds(target, columns, column_groups);
+                    let visual_rect = group_edge_visual_rect(
+                        zone.rect,
+                        target_column_bounds.or(target_group_bounds),
+                    );
                     layer = layer.child(highlight_rect(
                         group_edge_highlight_rect(visual_rect, zone.zone),
                         theme,
@@ -188,6 +199,21 @@ impl DropOverlay {
 
         layer
     }
+}
+
+fn target_column_bounds(
+    target: DropTarget,
+    columns: &[ColumnRect],
+    column_groups: &HashMap<NodeId, Vec<NodeId>>,
+) -> Option<Rect> {
+    let group = target_group(target)?;
+    let column = column_groups
+        .iter()
+        .find_map(|(column, groups)| groups.contains(&group).then_some(*column))?;
+    columns
+        .iter()
+        .find(|rect| rect.column == column)
+        .map(|rect| rect.rect)
 }
 
 fn zone_matches_preview(
