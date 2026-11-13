@@ -1399,7 +1399,7 @@ impl Layout {
                 reason: "floating horizontal resize delta is not finite",
             });
         }
-        let minimum_column_width = self.minimum_column_width(column_id, metrics)?;
+        let minimum_column_width = self.minimum_floating_size(column_id, metrics)?.width;
         let maximum_column_width = self
             .maximum_column_width(column_id)?
             .unwrap_or(f32::INFINITY);
