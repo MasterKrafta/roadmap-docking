@@ -72,7 +72,7 @@ pub use compute_rects_error::ComputeRectsError;
 pub use dock_area::DockArea;
 pub use dock_area_id::DockAreaId;
 pub use dock_area_kind::DockAreaKind;
-pub use dock_command::DockCommand;
+pub use dock_command::{DockCommand, FloatingResizeEdge};
 pub use dock_metrics::DockMetrics;
 pub use dock_side::DockSide;
 pub use drag_session::DragSession;
