@@ -76,6 +76,18 @@ impl PanelWindowHandle {
         }
     }
 
+    /// Requests a redraw from the exact GPUI window that owns this host.
+    fn notify_host(&self, cx: &mut Context<FloatingWindowManager>) -> Result<(), String> {
+        match self {
+            Self::Floating(window) => window
+                .update(cx, |_, _, host_cx| host_cx.notify())
+                .map_err(|error| error.to_string()),
+            Self::DragHost(window) => window
+                .update(cx, |_, _, host_cx| host_cx.notify())
+                .map_err(|error| error.to_string()),
+        }
+    }
+
     fn remove_window(&self, cx: &mut Context<FloatingWindowManager>) {
         match self {
             Self::Floating(window) => {
@@ -1646,16 +1658,28 @@ impl FloatingWindowManager {
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
         };
-        let Some((native_window, already_visible)) = self.registry.windows.get(&panel).and_then(|entry| {
-            (entry.host_group == Some(group))
-                .then_some((entry.native_window?, entry.visibility == PanelWindowVisibility::Visible))
+        let Some((window, native_window, already_visible)) = self.registry.windows.get(&panel).and_then(|entry| {
+            (entry.host_group == Some(group)).then_some((
+                entry.window,
+                entry.native_window?,
+                entry.visibility == PanelWindowVisibility::Visible,
+            ))
         }) else {
             return false;
         };
         if already_visible {
-            // The handoff state lives in DragHostManager. Notify its observers
-            // even when the destination HWND is already visible, so the
-            // existing FloatingHost mounts the released PanelViews immediately.
+            // A manager notification alone may not redraw an already-visible
+            // GPUI root. Explicitly notify the exact destination host so it
+            // mounts the PanelViews released from DragHost on the next frame.
+            if let Err(error) = window.notify_host(cx) {
+                tracing::warn!(
+                    ?group,
+                    ?panel,
+                    %error,
+                    "could not notify the visible FloatingHost after panel handoff"
+                );
+                return false;
+            }
             cx.notify();
             return true;
         }
@@ -1664,6 +1688,15 @@ impl FloatingWindowManager {
             Ok(()) => {
                 if let Some(entry) = self.registry.windows.get_mut(&panel) {
                     entry.visibility = PanelWindowVisibility::Visible;
+                }
+                if let Err(error) = window.notify_host(cx) {
+                    tracing::warn!(
+                        ?group,
+                        ?panel,
+                        %error,
+                        "could not notify the FloatingHost after showing the handoff target"
+                    );
+                    return false;
                 }
                 cx.notify();
                 true
