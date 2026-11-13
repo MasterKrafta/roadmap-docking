@@ -1393,7 +1393,9 @@ impl Layout {
             });
         }
         let minimum_column_width = self.minimum_column_width(column_id, metrics)?;
-        let maximum_column_width = self.maximum_column_width(column_id)?.unwrap_or(f32::INFINITY);
+        let maximum_column_width = self
+            .maximum_column_width(column_id)?
+            .unwrap_or(f32::INFINITY);
         let requested_width = column.width + requested_delta;
         if !requested_width.is_finite() {
             return Err(CommandError::InvalidValue {
@@ -1436,16 +1438,13 @@ impl Layout {
                 }),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let total_width = widths.iter().sum::<f32>()
-            + metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
-        if !total_width.is_finite() || total_width <= 0.0 {
+        let column_width_total = widths.iter().sum::<f32>();
+        if !column_width_total.is_finite() || column_width_total <= 0.0 {
             return Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "floating horizontal Split width total is invalid",
             });
         }
-        let column_width_total = total_width
-            - metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
         let next_width = floating.bounds.size.width + actual_delta;
         let next_origin_x = match edge {
             crate::FloatingResizeEdge::Left => {
