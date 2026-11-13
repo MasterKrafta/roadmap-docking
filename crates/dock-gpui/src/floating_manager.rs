@@ -1667,50 +1667,47 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
-        if already_visible {
-            // A manager notification alone may not redraw an already-visible
-            // GPUI root. Explicitly notify the exact destination host so it
-            // mounts the PanelViews released from DragHost on the next frame.
-            if let Err(error) = window.notify_host(cx) {
-                tracing::warn!(
-                    ?group,
-                    ?panel,
-                    %error,
-                    "could not notify the visible FloatingHost after panel handoff"
-                );
-                return false;
-            }
-            cx.notify();
-            return true;
-        }
-
-        match self.native_ops.show_no_activate(native_window) {
-            Ok(()) => {
-                if let Some(entry) = self.registry.windows.get_mut(&panel) {
-                    entry.visibility = PanelWindowVisibility::Visible;
-                }
-                if let Err(error) = window.notify_host(cx) {
-                    tracing::warn!(
-                        ?group,
-                        ?panel,
-                        %error,
-                        "could not notify the FloatingHost after showing the handoff target"
-                    );
-                    return false;
-                }
-                cx.notify();
-                true
-            }
-            Err(error) => {
+        if !already_visible {
+            if let Err(error) = self.native_ops.show_no_activate(native_window) {
                 tracing::warn!(
                     ?group,
                     ?panel,
                     %error,
                     "could not show the persistent FloatingHost during DragHost handoff"
                 );
-                false
+                return false;
+            }
+            if let Some(entry) = self.registry.windows.get_mut(&panel) {
+                entry.visibility = PanelWindowVisibility::Visible;
             }
         }
+
+        // The DragHost is non-activating and owned by Main. When it closes,
+        // Windows can restore Main as the foreground window unless the actual
+        // dock destination is explicitly activated during this handoff.
+        if let Err(error) = self.native_ops.activate(native_window) {
+            tracing::warn!(
+                ?group,
+                ?panel,
+                %error,
+                "could not activate the FloatingHost after panel handoff"
+            );
+        }
+
+        // Activation and rendering are separate: notify the exact destination
+        // GPUI host so it mounts the PanelViews released from DragHost.
+        if let Err(error) = window.notify_host(cx) {
+            tracing::warn!(
+                ?group,
+                ?panel,
+                %error,
+                "could not notify the FloatingHost after panel handoff"
+            );
+            return false;
+        }
+
+        cx.notify();
+        true
     }
 
     /// Returns the transferred panels whose destination FloatingHost is ready
