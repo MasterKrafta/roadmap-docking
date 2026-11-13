@@ -2282,12 +2282,14 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
         make_layout();
     right_layout
         .apply(
-            DockCommand::ResizeFloatingBounds {
+            DockCommand::ResizeFloatingBoundsFromEdge {
                 group: floating,
                 bounds: Rect::new(
                     initial_bounds.origin,
                     Size::new(664.0, initial_bounds.size.height),
                 ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor: 1.0,
             },
             &metrics,
         )
@@ -2319,9 +2321,11 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     );
     left_layout
         .apply(
-            DockCommand::ResizeFloatingBounds {
+            DockCommand::ResizeFloatingBoundsFromEdge {
                 group: floating,
                 bounds: left_resized_bounds,
+                edge: crate::FloatingResizeEdge::Left,
+                scale_factor: 1.0,
             },
             &metrics,
         )
