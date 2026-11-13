@@ -37,7 +37,7 @@ use crate::{
 };
 
 use super::{
-    drop_overlay::{DragGhost, DropOverlay},
+    drop_overlay::DropOverlay,
     context_menu::{
         ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
         ContextMenuTarget, GroupMenuToggle,
@@ -1774,17 +1774,9 @@ impl Render for FloatingHost {
                 None,
                 self.theme,
             ));
-            if snapshot.drag_handle != Some(DragHandle::PanelTab)
-                && snapshot.drag_handle != Some(DragHandle::FloatingCapture)
-                && snapshot.drag_handle != Some(DragHandle::FloatingTitle)
-            {
-                root = root.child(DragGhost::render(
-                    Some(preview),
-                    &snapshot.group_presentations,
-                    snapshot.rects.viewport,
-                    self.theme,
-                ));
-            }
+            // Match MainHost: Floating hosts paint only resolved drop feedback.
+            // DragHost/native move already represents the source; a second
+            // cursor-following Ghost obscures the destination tab row.
         }
 
         if let Some(open) = self.open_context_menu.as_ref()

@@ -81,15 +81,21 @@ impl DropOverlay {
                     }
                 }
                 DropZone::TabInsertion => {
-                    if let Some(group_rect) = tab_strip_group_highlight_rect(target, groups) {
-                        // A whole Group drop on a Floating strip highlights the
-                        // complete destination Group, not an individual tab.
-                        layer = layer.child(highlight_rect(group_rect, theme, 0.12, true));
+                    if let Some(strip_rect) =
+                        tab_strip_group_highlight_rect(target, groups, tab_strips)
+                    {
+                        // Highlight the complete tab/control row. The Group
+                        // rectangle is wider than TabStripRect when controls
+                        // occupy the trailing part of the same header row.
+                        layer = layer.child(highlight_rect(strip_rect, theme, 0.12, true));
                     }
                     if main_dock_bounds.is_none()
+                        && should_show_tab_insertion_marker(preview)
                         && let Some(line) =
                             tab_insertion_rect(target, tab_headers, tab_strips)
                     {
+                        // Only individual Panel drags need a precise insertion
+                        // marker. Whole Group/Composition drops append as one unit.
                         layer = layer.child(guide_rect(line, theme));
                     }
                 }
@@ -366,10 +372,26 @@ fn composition_edge_highlight_rect(
 fn tab_strip_group_highlight_rect(
     target: DropTarget,
     groups: &[GroupRect],
+    tab_strips: &[TabStripRect],
 ) -> Option<Rect> {
-    target_group(target)
-        .and_then(|id| groups.iter().find(|group| group.group == id))
-        .map(|group| group.rect)
+    let group = target_group(target)
+        .and_then(|id| groups.iter().find(|group| group.group == id))?;
+    let strip = tab_strips
+        .iter()
+        .find(|strip| strip.group == group.group)?;
+
+    // Match the Core TabInsertion hit-area bounds: the visible strip can stop
+    // before trailing controls, but the drop target spans the complete row.
+    let left = group.rect.origin.x.min(strip.rect.origin.x);
+    let right = group.rect.checked_right().ok()?.max(strip.rect.checked_right().ok()?);
+    Some(Rect::new(
+        Point::new(left, strip.rect.origin.y),
+        dock_core::Size::new(right - left, strip.rect.size.height),
+    ))
+}
+
+fn should_show_tab_insertion_marker(preview: DragPreview) -> bool {
+    matches!(preview.payload, DragPayload::Panel { .. })
 }
 
 fn target_group(target: DropTarget) -> Option<dock_core::NodeId> {
@@ -625,7 +647,8 @@ mod tests {
 
     use super::{
         composition_edge_highlight_rect, group_edge_guide_rect, main_dock_edge_guide_rect,
-        main_group_edge_guide_rect, same_group_panel_tab_insertion_rect, zone_matches_preview,
+        main_group_edge_guide_rect, same_group_panel_tab_insertion_rect,
+        should_show_tab_insertion_marker, zone_matches_preview,
     };
 
     #[test]
@@ -740,19 +763,43 @@ mod tests {
     }
 
     #[test]
-    fn floating_group_tab_insertion_highlights_the_entire_target_group() {
+    fn floating_group_tab_insertion_highlights_the_full_tab_control_row() {
         let group = NodeId::null();
         let group_rect = Rect::new(Point::new(20.0, 40.0), Size::new(320.0, 280.0));
-        let strip_rect = Rect::new(Point::new(20.0, 68.0), Size::new(320.0, 24.0));
+        // The visual strip ends before the two trailing Group controls.
+        let strip_rect = Rect::new(Point::new(20.0, 68.0), Size::new(252.0, 24.0));
         let groups = [dock_core::GroupRect::new(group, group_rect)];
+        let strips = [TabStripRect::new(group, strip_rect)];
         let target = DropTarget::GroupTabs { group, index: 4 };
 
         assert_eq!(
-            super::tab_strip_group_highlight_rect(target, &groups),
-            Some(group_rect),
-            "the Floating append zone must highlight the complete destination Group"
+            super::tab_strip_group_highlight_rect(target, &groups, &strips),
+            Some(Rect::new(Point::new(20.0, 68.0), Size::new(320.0, 24.0))),
+            "the Floating append zone must highlight tabs and trailing controls"
         );
-        assert_ne!(strip_rect, group_rect);
+    }
+
+    #[test]
+    fn whole_group_and_composition_drops_do_not_show_tab_insertion_markers() {
+        let group_preview = DragPreview {
+            payload: DragPayload::Group { group: NodeId::null() },
+            point: Point::ZERO,
+            target: None,
+        };
+        let composition_preview = DragPreview {
+            payload: DragPayload::DockArea { side: DockSide::Left },
+            point: Point::ZERO,
+            target: None,
+        };
+        let panel_preview = DragPreview {
+            payload: DragPayload::Panel { panel: PanelId::null() },
+            point: Point::ZERO,
+            target: None,
+        };
+
+        assert!(!should_show_tab_insertion_marker(group_preview));
+        assert!(!should_show_tab_insertion_marker(composition_preview));
+        assert!(should_show_tab_insertion_marker(panel_preview));
     }
 
     #[test]
