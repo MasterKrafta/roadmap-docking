@@ -1343,6 +1343,27 @@ impl DragHostManager {
                 "could not close DragHost after FloatingHost rendered transferred content"
             );
         }
+
+        // DragHost is owned by Main. Give Windows a moment to process its
+        // asynchronous hide/destruction before activating the destination;
+        // otherwise owner reactivation can immediately put Main back on top.
+        if let Some(floating_manager) = self.floating_manager.clone() {
+            cx.spawn(async move |_, app| {
+                app.background_executor()
+                    .timer(Duration::from_millis(32))
+                    .await;
+                let activated = floating_manager
+                    .update(app, |manager, _| manager.activate_handoff_target(target_group))
+                    .unwrap_or(false);
+                if !activated {
+                    tracing::debug!(
+                        ?target_group,
+                        "Floating handoff completed without changing the foreground window"
+                    );
+                }
+            })
+            .detach();
+        }
     }
 
     fn flush_controller_events(&self, cx: &mut Context<Self>) {
