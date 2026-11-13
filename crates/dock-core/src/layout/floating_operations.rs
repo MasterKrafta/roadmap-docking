@@ -1319,8 +1319,6 @@ impl Layout {
         })
     }
 
-
-
     pub(super) fn apply_resize_floating_bounds_from_edge_command(
         &mut self,
         group: FloatingGroupId,
@@ -1373,7 +1371,9 @@ impl Layout {
         let column_id = match edge {
             crate::FloatingResizeEdge::Left => children[0],
             crate::FloatingResizeEdge::Right => {
-                *children.last().expect("horizontal Split has at least two Columns")
+                *children
+                    .last()
+                    .expect("horizontal Split has at least two Columns")
             }
         };
         let column = match self.nodes.get(column_id) {
