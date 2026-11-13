@@ -1653,6 +1653,10 @@ impl FloatingWindowManager {
             return false;
         };
         if already_visible {
+            // The handoff state lives in DragHostManager. Notify its observers
+            // even when the destination HWND is already visible, so the
+            // existing FloatingHost mounts the released PanelViews immediately.
+            cx.notify();
             return true;
         }
 
