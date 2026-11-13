@@ -1385,16 +1385,22 @@ impl Layout {
             return Ok(());
         }
 
-        if let Some(Node::Column(value)) = self.nodes.get_mut(column_id) {
-            value.width = actual_width;
-            value.last_expanded_width = Some(actual_width);
-        }
-
         // Split(X) with direct Columns is laid out from each Column's width.
-        // Keep its ratios in sync for later splitter resizing and persistence.
+        // Calculate the complete ratio update before mutating the model so an
+        // invalid Split can never leave a partially-applied edge resize.
+        let ratios_match = matches!(
+            self.nodes.get(root),
+            Some(Node::Split(split)) if split.ratios.len() == children.len()
+        );
+        if !ratios_match {
+            return Err(CommandError::InvalidTarget {
+                reason: "floating horizontal Split ratios do not match its Columns",
+            });
+        }
         let widths = children
             .iter()
             .map(|child| match self.nodes.get(*child) {
+                Some(Node::Column(column)) if *child == column_id => Ok(actual_width),
                 Some(Node::Column(column)) => Ok(match column.mode {
                     ColumnMode::Expanded => column.width,
                     ColumnMode::IconsAndLabels => metrics.min_column_width,
@@ -1412,12 +1418,12 @@ impl Layout {
                 reason: "floating horizontal Split width total is invalid",
             });
         }
+
+        if let Some(Node::Column(value)) = self.nodes.get_mut(column_id) {
+            value.width = actual_width;
+            value.last_expanded_width = Some(actual_width);
+        }
         if let Some(Node::Split(split)) = self.nodes.get_mut(root) {
-            if split.ratios.len() != widths.len() {
-                return Err(CommandError::InvalidTarget {
-                    reason: "floating horizontal Split ratios do not match its Columns",
-                });
-            }
             for (ratio, width) in split.ratios.iter_mut().zip(widths) {
                 *ratio = width / total_width;
             }
