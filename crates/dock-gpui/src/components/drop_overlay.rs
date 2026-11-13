@@ -784,7 +784,7 @@ mod tests {
             Rect::new(Point::new(30.0, 300.0), Size::new(240.0, 12.0)),
         ] {
             assert_eq!(
-                super::group_edge_visual_rect(zone, Some(target_group)),
+                group_edge_visual_rect(zone, Some(target_group)),
                 Rect::new(
                     Point::new(10.0, zone.origin.y),
                     Size::new(280.0, zone.size.height),
