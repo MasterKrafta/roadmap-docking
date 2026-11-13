@@ -1603,7 +1603,12 @@ fn floating_composition_capture_uses_composition_drop_zones_and_docks_as_one_uni
 
     assert!(zones.iter().all(|zone| matches!(
         zone.target,
-        DropTarget::MainColumn { .. } | DropTarget::FreeArea
+        DropTarget::MainColumn { .. }
+            | DropTarget::FreeArea
+            | DropTarget::GroupEdge {
+                zone: DropZone::Top | DropZone::Bottom,
+                ..
+            }
     )));
     let target = DropTarget::MainColumn {
         side: DockSide::Right,
