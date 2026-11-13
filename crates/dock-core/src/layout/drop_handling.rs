@@ -74,6 +74,13 @@ impl Layout {
                 let root = self.main_area(side)?.root;
                 self.simple_composition_root_for_source(DropSource::Composition { root })
             }
+            (DragHandle::FloatingCapture, DragPayload::FloatingGroup { group }) => {
+                let root = self
+                    .floating_group(group)
+                    .and_then(|floating| self.dock_area(floating.area))
+                    .map(|area| area.root)?;
+                self.simple_composition_root_for_source(DropSource::Composition { root })
+            }
             _ => None,
         }
     }
@@ -174,6 +181,16 @@ impl Layout {
             } => {
                 if self.group_edge_is_same_position(group, target_group, zone) {
                     return Ok(DragDropAction::NoOp);
+                }
+                if let (
+                    DragHandle::FloatingCapture,
+                    DragPayload::FloatingGroup { group: floating_group },
+                ) = (request.handle, request.payload)
+                {
+                    return Ok(DragDropAction::Command(DockCommand::DockFloating {
+                        group: floating_group,
+                        target,
+                    }));
                 }
                 Ok(DragDropAction::Command(DockCommand::SplitGroup {
                     group,
