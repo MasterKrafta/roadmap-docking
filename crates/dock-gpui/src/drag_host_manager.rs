@@ -1335,6 +1335,7 @@ impl DragHostManager {
         }
 
         let id = active.id;
+        let closing_drag_host = active.native_window;
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
@@ -1344,21 +1345,29 @@ impl DragHostManager {
             );
         }
 
-        // DragHost is owned by Main. Give Windows a moment to process its
-        // asynchronous hide/destruction before activating the destination;
-        // otherwise owner reactivation can immediately put Main back on top.
+        // DragHost is owned by Main and hidden asynchronously. Retry briefly
+        // while it remains the foreground HWND; activate the destination only
+        // after Windows has completed the owner-focus handoff.
         if let Some(floating_manager) = self.floating_manager.clone() {
             cx.spawn(async move |_, app| {
-                app.background_executor()
-                    .timer(Duration::from_millis(32))
-                    .await;
-                let activated = floating_manager
-                    .update(app, |manager, _| manager.activate_handoff_target(target_group))
-                    .unwrap_or(false);
+                let mut activated = false;
+                for _ in 0..8 {
+                    app.background_executor()
+                        .timer(Duration::from_millis(16))
+                        .await;
+                    activated = floating_manager
+                        .update(app, |manager, _| {
+                            manager.activate_handoff_target(target_group, closing_drag_host)
+                        })
+                        .unwrap_or(false);
+                    if activated {
+                        break;
+                    }
+                }
                 if !activated {
                     tracing::debug!(
                         ?target_group,
-                        "Floating handoff completed without changing the foreground window"
+                        "Floating handoff completed without activating its destination"
                     );
                 }
             })
