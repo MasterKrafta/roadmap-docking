@@ -1729,9 +1729,9 @@ impl FloatingWindowManager {
             .map_err(|error| error.to_string())
     }
 
-    /// Activates the persistent destination after its temporary DragHost has closed.
+    /// Fallback-activates the persistent destination if Windows did not focus it
+    /// after the temporary DragHost was hidden.
     ///
-    /// Closing the owned DragHost can restore Main as the foreground window.
     /// Only reclaim focus from Main; never steal it back after the user has
     /// already moved to another application or another floating window.
     pub(crate) fn activate_handoff_target(
