@@ -2314,7 +2314,10 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
 
     right_layout.apply(right_resize.inverse.unwrap(), &metrics).unwrap();
     let restored_rects = right_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(restored_rects.floating_groups[0].rect, Rect::new(Point::ZERO, initial_bounds.size));
+    assert_eq!(
+        restored_rects.floating_groups[0].rect,
+        Rect::new(Point::ZERO, initial_bounds.size)
+    );
     assert_eq!(restored_rects.columns[0].rect.size.width, 280.0);
     assert_eq!(restored_rects.columns[1].rect.size.width, 280.0);
 
