@@ -2,6 +2,7 @@
 
 pub mod canvas_slot;
 pub mod context_menu;
+mod drop_overlay_geometry;
 pub mod drop_overlay;
 pub mod floating;
 pub mod flyout;

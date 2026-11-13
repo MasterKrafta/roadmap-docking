@@ -1767,6 +1767,7 @@ impl Render for FloatingHost {
                 &snapshot.rects.tab_headers,
                 &snapshot.rects.tab_strips,
                 None,
+                snapshot.rects.floating_groups.first().map(|floating| floating.rect),
                 self.theme,
             ));
             // Match MainHost: Floating hosts paint only resolved drop feedback.

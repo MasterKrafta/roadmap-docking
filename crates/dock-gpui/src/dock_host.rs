@@ -974,6 +974,7 @@ impl Render for DockHost {
                 &rects.tab_headers,
                 &rects.tab_strips,
                 Some((&main_area_bounds, &main_node_sides)),
+                None,
                 theme,
             ));
         }
