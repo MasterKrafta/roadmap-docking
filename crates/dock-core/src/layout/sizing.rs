@@ -771,28 +771,6 @@ impl Layout {
                     metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 minimum
             }
-            Some(Node::Split(split))
-                if split.axis == Axis::X
-                    && split.children.len() >= 2
-                    && split.children.iter().all(|child| {
-                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
-                    }) =>
-            {
-                // Native edge resizing changes one outer Column at a time.
-                // The OS track-size floor must be based on panel constraints,
-                // not the Columns' current widths, or Windows would prevent
-                // the user from shrinking the selected edge in the first place.
-                let mut minimum = Size::ZERO;
-                for child in &split.children {
-                    minimum.width += self.minimum_column_width(*child, metrics)?;
-                    minimum.height = minimum.height.max(
-                        self.minimum_node_size_with_cache(*child, metrics, cache)?.height,
-                    );
-                }
-                minimum.width +=
-                    metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
-                minimum
-            }
             Some(Node::Column(column)) if !column.mode.is_rail() => {
                 let mut content_minimum = Size::ZERO;
                 for group in &column.groups {
