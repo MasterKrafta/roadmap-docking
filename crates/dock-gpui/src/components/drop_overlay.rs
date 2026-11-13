@@ -645,8 +645,8 @@ mod tests {
     #[test]
     fn floating_left_and_right_guides_use_their_own_inner_window_edges() {
         let bounds = Rect::new(Point::new(100.0, 40.0), Size::new(300.0, 240.0));
-        let left_zone = Rect::new(Point::new(100.0, 40.0), Size::new(16.0, 240.0));
-        let right_zone = Rect::new(Point::new(384.0, 40.0), Size::new(16.0, 240.0));
+        let left_zone = Rect::new(Point::new(100.5, 40.0), Size::new(16.0, 240.0));
+        let right_zone = Rect::new(Point::new(384.5, 40.0), Size::new(16.0, 240.0));
 
         assert_eq!(
             floating_side_edge_guide_rect(bounds, left_zone, DropZone::Left),
@@ -661,7 +661,7 @@ mod tests {
     #[test]
     fn floating_side_guides_do_not_override_group_local_generic_edges() {
         let bounds = Rect::new(Point::new(100.0, 40.0), Size::new(300.0, 240.0));
-        let group_edge = Rect::new(Point::new(160.0, 90.0), Size::new(16.0, 80.0));
+        let group_edge = Rect::new(Point::new(100.0, 90.0), Size::new(16.0, 80.0));
         assert_eq!(
             floating_side_edge_guide_rect(bounds, group_edge, DropZone::Left),
             None

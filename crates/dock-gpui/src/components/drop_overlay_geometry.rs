@@ -95,19 +95,22 @@ pub(super) fn floating_side_edge_guide_rect(
 ) -> Option<Rect> {
     let bounds_right = floating_bounds.origin.x + floating_bounds.size.width;
     let zone_right = zone_rect.origin.x + zone_rect.size.width;
-    let is_outer_edge = match zone {
-        DropZone::Left => (zone_rect.origin.x - floating_bounds.origin.x).abs() <= 1.0,
-        DropZone::Right => (zone_right - bounds_right).abs() <= 1.0,
-        _ => false,
-    };
+    let spans_window_height = (zone_rect.origin.y - floating_bounds.origin.y).abs() <= 1.0
+        && (zone_rect.size.height - floating_bounds.size.height).abs() <= 1.0;
+    let is_outer_edge = spans_window_height
+        && match zone {
+            DropZone::Left => (zone_rect.origin.x - floating_bounds.origin.x).abs() <= 1.0,
+            DropZone::Right => (zone_right - bounds_right).abs() <= 1.0,
+            _ => false,
+        };
     if !is_outer_edge {
         return None;
     }
 
     let thickness = DROP_EDGE_GUIDE_THICKNESS.min(zone_rect.size.width);
     let x = match zone {
-        DropZone::Left => zone_rect.origin.x + zone_rect.size.width - thickness,
-        DropZone::Right => zone_rect.origin.x,
+        DropZone::Left => floating_bounds.origin.x + zone_rect.size.width - thickness,
+        DropZone::Right => bounds_right - zone_rect.size.width,
         _ => return None,
     };
     Some(Rect::new(
