@@ -21,6 +21,9 @@ impl Layout {
             DockCommand::DockFloating { group, target } => {
                 self.apply_dock_floating_command(group, target, metrics)
             }
+            DockCommand::DockMainArea { side, target } => {
+                self.apply_dock_main_area_command(side, target, metrics)
+            }
             DockCommand::CloseFloatingGroup { group } => {
                 self.apply_close_floating_group_command(group)
             }
@@ -178,6 +181,72 @@ impl Layout {
         Ok(CommandApplication::persistent())
     }
 
+    pub(super) fn apply_dock_main_area_command(
+        &mut self,
+        side: &DockSide,
+        target: &DropTarget,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if self.profile != crate::Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "docking a complete Main composition into Floating is available only in the Photoshop profile",
+            });
+        }
+
+        let source_root = self
+            .main_area(*side)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Main DockArea drag source no longer exists",
+            })?;
+        if !self.is_column_composition_root(source_root) {
+            return Err(CommandError::InvalidTarget {
+                reason: "Main DockArea source must be a Column or horizontal composition of Columns",
+            });
+        }
+
+        let target_node = target.referenced_node_id().ok_or(CommandError::InvalidTarget {
+            reason: "Main DockArea docking requires a Floating composition target",
+        })?;
+        let target_root = self
+            .find_floating_root_containing(target_node)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Main DockArea can only dock into another Floating composition",
+            })?;
+        let target_bounds = self
+            .floating_groups
+            .iter()
+            .find_map(|(_, floating)| {
+                self.dock_areas
+                    .get(floating.area)
+                    .is_some_and(|area| area.root == target_root)
+                    .then_some(floating.bounds)
+            })
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Floating target has no registered window bounds",
+            })?;
+
+        self.validate_floating_dock_target(source_root, *target, metrics)?;
+        let moving_panels = self.panel_ids_in_subtree(source_root);
+        self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
+
+        // Reuse the exact Floating -> Floating docking path. The temporary
+        // source host exists only inside this transaction and is removed before
+        // the candidate Layout can be committed.
+        let temporary = self.apply_float_command(&source_root, &target_bounds, metrics)?;
+        let temporary_group = match temporary.actual_value {
+            Some(CommandValue::FloatingGroup(group)) => group,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "temporary Main DockArea float did not create a Floating group",
+                });
+            }
+        };
+        self.apply_dock_floating_command(&temporary_group, target, metrics)?;
+        Ok(CommandApplication::persistent())
+    }
+
     pub(super) fn dock_floating_group(
         &mut self,
         group_id: FloatingGroupId,
@@ -307,15 +376,13 @@ impl Layout {
                 self.insert_group_edge(moving_group, target_group, zone, Some(0.5), metrics)
             }
             (
-                Some(Node::Column(column)),
+                Some(Node::Column(_)) | Some(Node::Split(_)),
                 DropTarget::GroupEdge {
                     group: target_group,
                     zone: zone @ (DropZone::Top | DropZone::Bottom),
                 },
-            ) if self.profile == Profile::Photoshop && column.groups.len() == 1 => {
-                let moving_group = column.groups[0];
-                self.detach_node(moving_group)?;
-                self.insert_group_edge(moving_group, target_group, zone, Some(0.5), metrics)
+            ) if self.profile == Profile::Photoshop && self.is_column_composition_root(root) => {
+                self.dock_floating_composition_to_group_edge(root, target_group, zone)
             }
             (
                 Some(Node::Column(column)),
@@ -526,6 +593,116 @@ impl Layout {
         Ok(())
     }
 
+    fn column_composition_stack(
+        &self,
+        root: NodeId,
+    ) -> Result<(Split, Vec<NodeId>), CommandError> {
+        match self.nodes.get(root).cloned() {
+            Some(Node::Column(column)) => {
+                if column.groups.is_empty() || column.groups.len() != column.group_ratios.len() {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "source Column has an invalid Group stack",
+                    });
+                }
+                Ok((
+                    Split {
+                        axis: Axis::Y,
+                        children: column.groups,
+                        ratios: normalized_ratios(
+                            column.group_ratios.into_iter().map(Some).collect(),
+                        ),
+                    },
+                    Vec::new(),
+                ))
+            }
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) =>
+            {
+                let column_ratios =
+                    normalized_ratios(split.ratios.into_iter().map(Some).collect());
+                let source_columns = split.children.clone();
+                let mut groups = Vec::new();
+                let mut ratios = Vec::new();
+
+                for (column_index, column_id) in source_columns.iter().copied().enumerate() {
+                    let Some(Node::Column(column)) = self.nodes.get(column_id) else {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "composition contains a missing Column",
+                        });
+                    };
+                    if column.groups.is_empty() || column.groups.len() != column.group_ratios.len() {
+                        return Err(CommandError::InvalidTarget {
+                            reason: "composition Column has an invalid Group stack",
+                        });
+                    }
+                    let group_ratios = normalized_ratios(
+                        column.group_ratios.iter().copied().map(Some).collect(),
+                    );
+                    for (group_index, group) in column.groups.iter().copied().enumerate() {
+                        groups.push(group);
+                        ratios.push(column_ratios[column_index] * group_ratios[group_index]);
+                    }
+                }
+
+                if groups.is_empty() {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "composition does not contain any Groups",
+                    });
+                }
+                Ok((
+                    Split {
+                        axis: Axis::Y,
+                        children: groups,
+                        ratios: normalized_ratios(ratios.into_iter().map(Some).collect()),
+                    },
+                    source_columns,
+                ))
+            }
+            _ => Err(CommandError::InvalidTarget {
+                reason: "source must be a Column or horizontal composition of Columns",
+            }),
+        }
+    }
+
+    fn dock_floating_composition_to_group_edge(
+        &mut self,
+        root: NodeId,
+        target_group: NodeId,
+        zone: DropZone,
+    ) -> Result<(), CommandError> {
+        let target_column = self.find_owner_column(target_group).ok_or(
+            CommandError::InvalidTarget {
+                reason: "vertical composition target must belong to a Column",
+            },
+        )?;
+        let target_index = match self.nodes.get(target_column) {
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .position(|group| *group == target_group)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "target Group is absent from its Column",
+                })?,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "vertical composition target must belong to a Column",
+                });
+            }
+        };
+        let insert_at = target_index + usize::from(zone == DropZone::Bottom);
+        let (stack, source_columns) = self.column_composition_stack(root)?;
+
+        self.dock_floating_stack_to_column_slot(root, stack, target_column, insert_at)?;
+        // A Split(X) source contributes its Groups, not its old Column wrappers.
+        for source_column in source_columns {
+            self.nodes.remove(source_column);
+        }
+        Ok(())
+    }
+
     pub(super) fn dock_floating_column_to_column_slot(
         &mut self,
         root: NodeId,
@@ -681,7 +858,7 @@ impl Layout {
     /// Validates a floating-group drop. Horizontal GroupEdge targets inside
     /// floating areas are reserved for joining complete Column-based compositions;
     /// the general GroupEdge validator remains scoped to main-dock splits.
-    fn is_column_composition_root(&self, root: NodeId) -> bool {
+    pub(super) fn is_column_composition_root(&self, root: NodeId) -> bool {
         match self.nodes.get(root) {
             Some(Node::Column(_)) => true,
             Some(Node::Split(split)) if split.axis == Axis::X => split

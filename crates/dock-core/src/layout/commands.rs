@@ -113,6 +113,7 @@ impl Layout {
             | DockCommand::ResizeFloatingBounds { .. }
             | DockCommand::RaiseFloating { .. }
             | DockCommand::DockFloating { .. }
+            | DockCommand::DockMainArea { .. }
             | DockCommand::CloseFloatingGroup { .. } => {
                 self.apply_floating_command(command, metrics)
             }
@@ -213,6 +214,18 @@ impl Layout {
             DockCommand::MoveColumnToMainColumn { column, .. }
             | DockCommand::MoveColumnToTarget { column, .. } => {
                 affected.push(*column);
+            }
+            DockCommand::DockMainArea { side, target } => {
+                for layout in [self, other] {
+                    if let Some(area) = layout.main_area(*side) {
+                        affected.push(area.root);
+                    }
+                    if let Some(node) = target.referenced_node_id()
+                        && let Some(root) = layout.find_floating_root_containing(node)
+                    {
+                        affected.push(root);
+                    }
+                }
             }
             DockCommand::SetChrome { .. } => {
                 for layout in [self, other] {

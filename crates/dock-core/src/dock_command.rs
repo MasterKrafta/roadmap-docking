@@ -163,6 +163,14 @@ pub enum DockCommand {
         group: FloatingGroupId,
         target: DropTarget,
     },
+    /// Move a complete Main DockArea composition into an existing Floating composition.
+    ///
+    /// The source is transferred using the same target-specific docking rules as
+    /// a Floating composition, while remaining atomic to the Layout transaction.
+    DockMainArea {
+        side: DockSide,
+        target: DropTarget,
+    },
     /// Close a floating window and remove every panel instance owned by its area.
     CloseFloatingGroup { group: FloatingGroupId },
     /// Collapse or expand a Tabs group while preserving its children, active tab,
@@ -346,6 +354,10 @@ mod tests {
                 group: FloatingGroupId::null(),
                 target,
             },
+            DockCommand::DockMainArea {
+                side: DockSide::Left,
+                target,
+            },
             DockCommand::CloseFloatingGroup {
                 group: FloatingGroupId::null(),
             },
@@ -376,7 +388,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 38);
+        assert_eq!(commands.len(), 39);
     }
 
     #[cfg(feature = "serde")]

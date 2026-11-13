@@ -189,6 +189,9 @@ impl Layout {
             && simple_composition.is_none()
             && !source_is_floating_root(self, source_root)
         {
+            if self.profile() == crate::Profile::Photoshop {
+                self.append_floating_window_zones(&context, &mut zones)?;
+            }
             if source_allows(self, &source_panels, AllowedArea::FLOATING)
                 && let Some(canvas) = rects.canvas
             {

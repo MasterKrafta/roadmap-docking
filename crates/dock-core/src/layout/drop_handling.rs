@@ -492,8 +492,9 @@ impl Layout {
     }
 
     /// Resolves a whole Main DockArea drag. A single-Group composition reuses
-    /// Group docking semantics; a multi-Group DockArea can be floated as one
-    /// composition, but is not split apart for a dock-side drop.
+    /// Group docking semantics; a multi-Group or multi-Column composition can
+    /// dock into an existing Floating composition without being split apart
+    /// before the destination-specific operation is selected.
     fn resolve_dock_area_header_drag(
         &self,
         request: &DragDropRequest,
@@ -531,6 +532,33 @@ impl Layout {
 
         if let Some(group) = single_group_in_subtree(self, root) {
             return self.resolve_group_grip_drag(request, group, metrics);
+        }
+
+        let supported_floating_target = match target {
+            DropTarget::GroupEdge {
+                zone: DropZone::Left
+                    | DropZone::Right
+                    | DropZone::Top
+                    | DropZone::Bottom
+                    | DropZone::FloatingColumnInsertion,
+                ..
+            } => true,
+            DropTarget::ColumnSlot { .. } => matches!(self.node(root), Some(Node::Column(_))),
+            _ => false,
+        };
+        if self.profile == crate::Profile::Photoshop
+            && self.is_column_composition_root(root)
+            && supported_floating_target
+            && target
+                .referenced_node_id()
+                .is_some_and(|node| self.find_floating_root_containing(node).is_some())
+        {
+            self.validate_floating_dock_target(root, target, metrics)?;
+            self.validate_panel_ids_allowed_for_target(&self.panel_ids_in_subtree(root), target)?;
+            return Ok(DragDropAction::Command(DockCommand::DockMainArea {
+                side,
+                target,
+            }));
         }
 
         Err(CommandError::InvalidTarget {

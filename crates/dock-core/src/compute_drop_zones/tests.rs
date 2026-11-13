@@ -4694,3 +4694,81 @@ fn photoshop_docks_a_floating_column_at_an_internal_splitter() {
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_top_panel) = builder.panel(key("main-floating-stack-source-top"), constraints());
+    let source_top = builder.tabs(vec![source_top_panel], 0, false);
+    let (_, source_bottom_panel) = builder.panel(key("main-floating-stack-source-bottom"), constraints());
+    let source_bottom = builder.tabs(vec![source_bottom_panel], 0, false);
+    let source_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![source_top, source_bottom],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_top_panel) = builder.panel(key("main-floating-stack-target-top"), constraints());
+    let target_top = builder.tabs(vec![target_top_panel], 0, false);
+    let (_, target_bottom_panel) = builder.panel(key("main-floating-stack-target-bottom"), constraints());
+    let target_bottom = builder.tabs(vec![target_bottom_panel], 0, false);
+    let target_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![target_top, target_bottom],
+        vec![0.5, 0.5],
+    );
+    builder.floating_group(
+        target_column,
+        Rect::new(Point::new(700.0, 120.0), Size::new(420.0, 560.0)),
+        1,
+    );
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let zones = layout
+        .compute_drop_zones(
+            DropSource::Composition { root: source_column },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::GroupEdge {
+                group: target_top,
+                zone: DropZone::Top,
+            }
+            && zone.zone == DropZone::FloatingTop
+    }));
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::GroupEdge {
+                group: target_top,
+                zone: DropZone::Bottom,
+            }
+            && zone.zone == DropZone::Bottom
+    }));
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::ColumnSlot {
+                column: target_column,
+                index: 2,
+            }
+            && zone.zone == DropZone::ColumnEnd
+    }));
+    assert!(zones.iter().any(|zone| {
+        zone.target
+            == DropTarget::GroupEdge {
+                group: target_top,
+                zone: DropZone::Left,
+            }
+            && zone.zone == DropZone::Left
+    }));
+}

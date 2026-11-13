@@ -1958,3 +1958,140 @@ fn main_single_group_dock_area_can_split_into_a_floating_group() {
     assert_eq!(layout.panel_instances().count(), 3);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn main_multi_group_dock_area_can_dock_into_a_floating_stack() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_top_panel) = builder.panel(key("main-dock-floating-stack-source-top"), constraints());
+    let source_top = builder.tabs(vec![source_top_panel], 0, false);
+    let (_, source_bottom_panel) = builder.panel(key("main-dock-floating-stack-source-bottom"), constraints());
+    let source_bottom = builder.tabs(vec![source_bottom_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_top, source_bottom],
+        vec![0.5, 0.5],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_top_panel) = builder.panel(key("main-dock-floating-stack-target-top"), constraints());
+    let target_top = builder.tabs(vec![target_top_panel], 0, false);
+    let (_, target_bottom_panel) = builder.panel(key("main-dock-floating-stack-target-bottom"), constraints());
+    let target_bottom = builder.tabs(vec![target_bottom_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_top, target_bottom],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 1);
+    let mut layout = builder.build();
+
+    let target = DropTarget::GroupEdge {
+        group: target_top,
+        zone: crate::DropZone::Bottom,
+    };
+    let request = DragDropRequest {
+        payload: DragPayload::DockArea { side: DockSide::Left },
+        handle: DragHandle::DockAreaHeader,
+        origin: Point::ZERO,
+        point: Point::new(800.0, 300.0),
+        target: Some(target),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockMainArea {
+            side: DockSide::Left,
+            target,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a multi-Group Main DockArea drop must dock the complete composition");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    assert!(layout.floating_group(target_floating).is_some());
+    let Some(Node::Column(column)) = layout.node(target_column) else {
+        panic!("the destination Floating root must remain a Column");
+    };
+    assert_eq!(
+        column.groups,
+        vec![target_top, source_top, source_bottom, target_bottom]
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn floating_multi_group_composition_can_stack_into_another_floating_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, source_top_panel) = builder.panel(key("floating-stack-source-top"), constraints());
+    let source_top = builder.tabs(vec![source_top_panel], 0, false);
+    let (_, source_bottom_panel) = builder.panel(key("floating-stack-source-bottom"), constraints());
+    let source_bottom = builder.tabs(vec![source_bottom_panel], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_top, source_bottom],
+        vec![0.4, 0.6],
+    );
+    let source_floating = builder.floating_group(source_column, bounds(100.0, 100.0), 1);
+
+    let (_, target_top_panel) = builder.panel(key("floating-stack-target-top"), constraints());
+    let target_top = builder.tabs(vec![target_top_panel], 0, false);
+    let (_, target_bottom_panel) = builder.panel(key("floating-stack-target-bottom"), constraints());
+    let target_bottom = builder.tabs(vec![target_bottom_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_top, target_bottom],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(target_column, bounds(620.0, 140.0), 2);
+    let mut layout = builder.build();
+
+    let target = DropTarget::GroupEdge {
+        group: target_top,
+        zone: DropZone::Bottom,
+    };
+    let request = DragDropRequest {
+        payload: DragPayload::FloatingGroup { group: source_floating },
+        handle: DragHandle::FloatingCapture,
+        origin: Point::ZERO,
+        point: Point::new(800.0, 300.0),
+        target: Some(target),
+        floating_bounds: None,
+    };
+
+    let action = layout.resolve_drag_drop(&request, &metrics).unwrap();
+    assert_eq!(
+        action,
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: source_floating,
+            target,
+        })
+    );
+    let DragDropAction::Command(command) = action else {
+        panic!("a Floating composition drop must dock the whole source composition");
+    };
+    layout.apply(command, &metrics).unwrap();
+
+    assert!(layout.floating_group(source_floating).is_none());
+    assert!(layout.floating_group(target_floating).is_some());
+    let Some(Node::Column(column)) = layout.node(target_column) else {
+        panic!("the destination Floating root must remain a Column");
+    };
+    assert_eq!(
+        column.groups,
+        vec![target_top, source_top, source_bottom, target_bottom]
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
