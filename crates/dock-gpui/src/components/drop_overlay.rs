@@ -455,7 +455,7 @@ fn main_group_edge_guide_rect(
             // The Top hit zone lives inside the bottom of the composition header.
             let y = rect.origin.y + rect.size.height - GUIDE_THICKNESS * 0.5;
             Rect::new(
-                Point::new(rect.origin.x, y - GUIDE_THICKNESS * 0.5),
+                Point::new(rect.origin.x, y),
                 dock_core::Size::new(rect.size.width, GUIDE_THICKNESS),
             )
         }

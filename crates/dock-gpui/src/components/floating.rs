@@ -1919,11 +1919,18 @@ mod floating_dock_area_header_hit_tests {
             ),
             Some(true),
         );
+        let collapse_button_center = column.origin.x
+            + super::CompositionDragArea::collapse_button_left(
+                column,
+                columns[0],
+                metrics.column_control_button_width,
+            )
+            + metrics.column_control_button_width * 0.5;
         assert_eq!(
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
-                Point::new(20.0, 30.0),
+                Point::new(collapse_button_center, 30.0),
                 metrics,
             ),
             Some(false),

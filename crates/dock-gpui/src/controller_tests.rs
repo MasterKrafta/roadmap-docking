@@ -996,13 +996,18 @@ fn floating_geometry_hit_test_and_drop_resolver_are_window_local() {
         .and_then(|floating| controller.layout().dock_area(floating.area))
         .map(|area| area.root)
         .unwrap();
+    let source_group = source_nodes[1];
+    assert!(matches!(
+        controller.layout().node(source_group),
+        Some(Node::Tabs(_))
+    ));
     let source = DropSource::Group {
-        group: floating_root,
+        group: source_group,
     };
     controller
         .begin_drag_interaction(
             DragPayload::Group {
-                group: floating_root,
+                group: source_group,
             },
             DragHandle::GroupGrip,
             Point::new(40.0, 20.0),
