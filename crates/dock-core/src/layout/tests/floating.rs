@@ -2400,3 +2400,52 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     assert_eq!(moved_rects.columns[1].rect.size.width, 280.0);
     assert_eq!(moved_layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn floating_single_column_edge_resize_keeps_column_filling_the_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+    let (_, panel) = builder.panel(
+        PanelKey::new("floating-single-edge-resize").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(200.0, 160.0),
+            None,
+            false,
+        ),
+    );
+    let group = builder.tabs(vec![panel], 0, false);
+    let column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    let initial_bounds = Rect::new(Point::new(100.0, 50.0), Size::new(280.0, 320.0));
+    let floating = builder.floating_group(column, initial_bounds, 1);
+    let mut layout = builder.build();
+
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(380.0, initial_bounds.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor: 1.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(rects.columns[0].column, column);
+    assert_eq!(rects.columns[0].rect.size.width, 380.0);
+    assert_eq!(
+        rects.columns[0].rect.size.width,
+        rects.floating_groups[0].rect.size.width
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
