@@ -3,6 +3,14 @@ use crate::{
     PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
 };
 
+/// The horizontal edge of a native Floating window being resized.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum FloatingResizeEdge {
+    Left,
+    Right,
+}
+
 /// A requested change to persistent docking state or an explicitly declared
 /// transient UI state. Commands contain intent; execution belongs to Layout::apply.
 #[derive(Clone, Debug, PartialEq)]
@@ -153,6 +161,14 @@ pub enum DockCommand {
     ResizeFloatingBounds {
         group: FloatingGroupId,
         bounds: Rect,
+    },
+    /// Resize a floating window from one horizontal edge while keeping the
+    /// opposite edge and the internal horizontal Column split stationary.
+    ResizeFloatingBoundsFromEdge {
+        group: FloatingGroupId,
+        bounds: Rect,
+        edge: FloatingResizeEdge,
+        scale_factor: f32,
     },
     /// Resize a floating window by setting its requested size.
     ResizeFloating { group: FloatingGroupId, size: Size },
