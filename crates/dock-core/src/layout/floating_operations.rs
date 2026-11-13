@@ -1355,7 +1355,11 @@ impl Layout {
             })?
             .root;
 
-        let children = match self.nodes.get(root) {
+        // A one-column composition stretches its only Column. A horizontal
+        // Split of direct Columns stretches only the Column at the dragged
+        // outer edge, leaving every internal boundary at the same screen point.
+        let split_children = match self.nodes.get(root) {
+            Some(Node::Column(_)) => None,
             Some(Node::Split(split))
                 if split.axis == Axis::X
                     && split.children.len() >= 2
@@ -1363,21 +1367,24 @@ impl Layout {
                         matches!(self.nodes.get(*child), Some(Node::Column(_)))
                     }) =>
             {
-                split.children.clone()
+                Some(split.children.clone())
             }
             _ => return self.apply_resize_floating_bounds_command(group, bounds, metrics),
         };
-        let column_id = match edge {
-            crate::FloatingResizeEdge::Left => children[0],
-            crate::FloatingResizeEdge::Right => *children
-                .last()
-                .expect("horizontal Split has at least two Columns"),
+        let column_id = match split_children.as_deref() {
+            None => root,
+            Some(children) => match edge {
+                crate::FloatingResizeEdge::Left => children[0],
+                crate::FloatingResizeEdge::Right => {
+                    *children.last().expect("horizontal Split has at least two Columns")
+                }
+            },
         };
         let column = match self.nodes.get(column_id) {
             Some(Node::Column(column)) => column.clone(),
             _ => {
                 return Err(CommandError::InvalidTarget {
-                    reason: "floating horizontal Split edge does not reference a Column",
+                    reason: "floating horizontal edge does not reference a Column",
                 });
             }
         };
@@ -1412,39 +1419,53 @@ impl Layout {
         )?;
         let actual_delta = actual_width - column.width;
 
-        // The saved Column widths are the current split positions, not the
-        // structural minimum. Compute ratios and the new mixed-unit window
-        // bounds before mutating the Layout.
-        let ratios_match = matches!(
-            self.nodes.get(root),
-            Some(Node::Split(split)) if split.ratios.len() == children.len()
-        );
-        if !ratios_match {
-            return Err(CommandError::InvalidTarget {
-                reason: "floating horizontal Split ratios do not match its Columns",
-            });
-        }
-        let widths = children
-            .iter()
-            .map(|child| match self.nodes.get(*child) {
-                Some(Node::Column(_)) if *child == column_id => Ok(actual_width),
-                Some(Node::Column(value)) => Ok(match value.mode {
-                    ColumnMode::Expanded => value.width,
-                    ColumnMode::IconsAndLabels => metrics.min_column_width,
-                    ColumnMode::IconsOnly => metrics.rail_width,
-                }),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "floating horizontal Split contains a non-Column child",
-                }),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let column_width_total = widths.iter().sum::<f32>();
-        if !column_width_total.is_finite() || column_width_total <= 0.0 {
-            return Err(CommandError::InvalidValue {
-                field: "width",
-                reason: "floating horizontal Split width total is invalid",
-            });
-        }
+        // Prepare Split ratios before mutating either the Column or the window.
+        // The geometry pass uses the saved Column widths; normalized ratios keep
+        // later internal-splitter resizing consistent with those same widths.
+        let next_split_ratios = if let Some(children) = split_children.as_ref() {
+            let ratios_match = matches!(
+                self.nodes.get(root),
+                Some(Node::Split(split)) if split.ratios.len() == children.len()
+            );
+            if !ratios_match {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split ratios do not match its Columns",
+                });
+            }
+            let widths = children
+                .iter()
+                .map(|child| match self.nodes.get(*child) {
+                    Some(Node::Column(_)) if *child == column_id => Ok(actual_width),
+                    Some(Node::Column(value)) => Ok(match value.mode {
+                        ColumnMode::Expanded => value.width,
+                        ColumnMode::IconsAndLabels => metrics.min_column_width,
+                        ColumnMode::IconsOnly => metrics.rail_width,
+                    }),
+                    _ => Err(CommandError::InvalidTarget {
+                        reason: "floating horizontal Split contains a non-Column child",
+                    }),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let total_width = widths.iter().sum::<f32>();
+            if !total_width.is_finite() || total_width <= 0.0 {
+                return Err(CommandError::InvalidValue {
+                    field: "width",
+                    reason: "floating horizontal Split width total is invalid",
+                });
+            }
+            Some(
+                widths
+                    .into_iter()
+                    .map(|width| width / total_width)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+
+        // DockCore stores screen origins in physical pixels and client sizes in
+        // logical pixels. Keep the opposite outer edge fixed using the monitor's
+        // scale, even when Windows is resizing on a non-100%-DPI display.
         let next_width = floating.bounds.size.width + actual_delta;
         let next_origin_x = match edge {
             crate::FloatingResizeEdge::Left => {
@@ -1479,9 +1500,11 @@ impl Layout {
             value.width = actual_width;
             value.last_expanded_width = Some(actual_width);
         }
-        if let Some(Node::Split(split)) = self.nodes.get_mut(root) {
-            for (ratio, width) in split.ratios.iter_mut().zip(widths) {
-                *ratio = width / column_width_total;
+        if let Some(next_ratios) = next_split_ratios
+            && let Some(Node::Split(split)) = self.nodes.get_mut(root)
+        {
+            for (ratio, next_ratio) in split.ratios.iter_mut().zip(next_ratios) {
+                *ratio = next_ratio;
             }
         }
         if let Some(value) = self.floating_groups.get_mut(group) {
