@@ -1309,7 +1309,7 @@ impl FloatingWindowManager {
         cx.notify();
     }
 
-    fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
+    fn cancel_native_move(&mut self, mut state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
