@@ -2351,7 +2351,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     // to its content minimum, while the left Column and splitter stay fixed.
     let (mut shrink_layout, floating, _, left_column, right_column, initial_bounds) =
         make_layout();
-    let minimum_edge_width = 120.0;
+    let minimum_edge_width = metrics.min_column_width;
     let shrink_delta = minimum_edge_width - 280.0;
     shrink_layout
         .apply(
