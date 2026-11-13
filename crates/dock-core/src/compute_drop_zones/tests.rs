@@ -2275,6 +2275,12 @@ fn floating_panel_tab_strip_uses_one_append_zone() {
         .iter()
         .find(|strip| strip.group == target_group)
         .expect("the Floating target must have a tab strip");
+    let group_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == target_group)
+        .expect("the Floating target must have Group bounds")
+        .rect;
     let zones = layout
         .compute_drop_zones(DropSource::Panel { panel: source_panel }, &rects, &metrics)
         .unwrap();
@@ -2291,7 +2297,10 @@ fn floating_panel_tab_strip_uses_one_append_zone() {
         })
         .collect();
     assert_eq!(append_zones.len(), 1);
-    assert_eq!(append_zones[0].rect, strip.rect);
+    assert_eq!(
+        append_zones[0].rect,
+        super::tab_strip_drop_rect(group_rect, strip.rect).unwrap()
+    );
     assert!(!zones.iter().any(|zone| {
         zone.zone == DropZone::TabInsertion
             && matches!(
@@ -2698,11 +2707,15 @@ fn single_group_floating_column_can_merge_into_another_floating_tab_strip() {
         index: 1,
     };
     let strip = rects.tab_strips.iter().find(|strip| strip.group == target_group).unwrap();
+    let group_rect = rects.groups.iter().find(|group| group.group == target_group).unwrap().rect;
     let zone = zones.iter().find(|zone| {
         zone.zone == DropZone::TabInsertion && zone.target == expected_target
     }).expect("a one-group Floating composition must expose the target tab strip");
 
-    assert_eq!(zone.rect, strip.rect);
+    assert_eq!(
+        zone.rect,
+        super::tab_strip_drop_rect(group_rect, strip.rect).unwrap()
+    );
     let point = Point::new(
         strip.rect.origin.x + strip.rect.size.width / 2.0,
         strip.rect.origin.y + strip.rect.size.height / 2.0,
@@ -2766,7 +2779,13 @@ fn photoshop_single_group_composition_uses_group_edges_in_floating_horizontal_co
     );
     let target_floating = builder.floating_group(
         target_root,
-        Rect::new(Point::new(620.0, 140.0), Size::new(420.0, 320.0)),
+        Rect::new(
+            Point::new(620.0, 140.0),
+            Size::new(
+                metrics.default_column_width * 2.0 + metrics.splitter_thickness,
+                320.0,
+            ),
+        ),
         1,
     );
     let mut layout = builder.build();
@@ -4744,14 +4763,16 @@ fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
         vec![target_top, target_bottom],
         vec![0.5, 0.5],
     );
-    builder.floating_group(
+    let target_floating = builder.floating_group(
         target_column,
         Rect::new(Point::new(700.0, 120.0), Size::new(420.0, 560.0)),
         1,
     );
 
     let layout = builder.build();
-    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let rects = layout
+        .compute_floating_rects(target_floating, &metrics)
+        .unwrap();
     let zones = layout
         .compute_drop_zones(
             DropSource::Composition { root: source_column },
