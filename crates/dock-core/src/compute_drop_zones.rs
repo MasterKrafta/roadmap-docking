@@ -548,6 +548,7 @@ impl DropZoneResolver {
                     DropZone::FloatingCenter
                         | DropZone::FloatingTop
                         | DropZone::FloatingBottom
+                        | DropZone::FloatingColumnInsertion
                         | DropZone::TabInsertion
                         | DropZone::ColumnEnd
                         | DropZone::Top
