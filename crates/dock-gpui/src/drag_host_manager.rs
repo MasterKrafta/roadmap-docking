@@ -1336,18 +1336,6 @@ impl DragHostManager {
 
         let id = active.id;
         let closing_drag_host = active.native_window;
-
-        // FloatingWindowManager redirects DragHost ownership before calling
-        // this method. Do not update that Entity here: this callback is invoked
-        // from FloatingWindowManager::notify_drag_host_handoff_rendered.
-        let foreground_before_close = self.native_ops.foreground_window();
-        tracing::warn!(
-            ?id,
-            ?target_group,
-            ?closing_drag_host,
-            ?foreground_before_close,
-            "starting Floating handoff DragHost close"
-        );
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
@@ -1357,9 +1345,9 @@ impl DragHostManager {
             );
         }
 
-        // Hiding DragHost is asynchronous. Windows should activate its new
-        // FloatingHost owner; retry briefly and use explicit activation only
-        // if Main remains foreground after the owner-focus handoff.
+        // DragHost is owned by Main and hidden asynchronously. Retry briefly
+        // while it remains the foreground HWND; activate the destination only
+        // after Windows has completed the owner-focus handoff.
         if let Some(floating_manager) = self.floating_manager.clone() {
             cx.spawn(async move |_, app| {
                 let mut activated = false;
@@ -1447,28 +1435,13 @@ impl DragHostManager {
         }
         drop(active.source_detach_subscription.take());
 
-        let foreground_before_hide = self.native_ops.foreground_window();
-        tracing::warn!(
-            ?id,
-            drag_host = ?active.native_window,
-            ?foreground_before_hide,
-            "requesting DragHost hide"
-        );
         if let Err(error) = self.native_ops.hide(active.native_window) {
-            tracing::warn!(
+            tracing::debug!(
                 ?id,
-                drag_host = ?active.native_window,
                 %error,
-                "DragHost hide request failed during close"
+                "DragHost could not be confirmed hidden during close"
             );
         }
-        let foreground_after_hide = self.native_ops.foreground_window();
-        tracing::warn!(
-            ?id,
-            drag_host = ?active.native_window,
-            ?foreground_after_hide,
-            "foreground HWND immediately after DragHost hide request"
-        );
 
         // GPUI may already have disposed the window (for example after a native
         // close). In either case the manager must release its runtime entry;
@@ -1485,16 +1458,6 @@ impl DragHostManager {
                 "DragHost window was already unavailable during close"
             );
         }
-        let foreground_after_remove = self.native_ops.foreground_window();
-        tracing::warn!(
-            ?id,
-            drag_host = ?active.native_window,
-            ?foreground_before_hide,
-            ?foreground_after_hide,
-            ?foreground_after_remove,
-            window_remove_failed = window_update_error.is_some(),
-            "DragHost close foreground snapshot"
-        );
 
         self.controller.update(cx, |controller, controller_cx| {
             controller.drag_mut().clear_transport_host(id);
