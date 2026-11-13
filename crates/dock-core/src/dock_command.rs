@@ -234,7 +234,8 @@ pub enum DockCommand {
 mod tests {
     use super::DockCommand;
     use crate::{
-        ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId, NodeId,
+        ChromeMode, ColumnMode, DockSide, DropTarget, DropZone, FloatingGroupId,
+        FloatingResizeEdge, NodeId,
         PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
     };
     use slotmap::Key;
