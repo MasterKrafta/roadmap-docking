@@ -178,7 +178,7 @@ impl FloatingZoneContext<'_> {
                     index: tabs.children.len(),
                 },
                 DropZone::TabInsertion,
-                strip.rect,
+                super::tab_strip_drop_rect(target_group.rect, strip.rect)?,
             )?;
         }
 

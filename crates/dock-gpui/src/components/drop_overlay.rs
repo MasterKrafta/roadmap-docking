@@ -88,7 +88,7 @@ impl DropOverlay {
                     }
                     if main_dock_bounds.is_none()
                         && let Some(line) =
-                            tab_insertion_rect(target, zone.rect, tab_headers, tab_strips)
+                            tab_insertion_rect(target, tab_headers, tab_strips)
                     {
                         layer = layer.child(guide_rect(line, theme));
                     }
@@ -500,12 +500,11 @@ fn same_group_panel_tab_insertion_rect(
         return None;
     }
     let strip = strips.iter().find(|strip| strip.group == group)?;
-    tab_insertion_rect(target, strip.rect, headers, strips)
+    tab_insertion_rect(target, headers, strips)
 }
 
 fn tab_insertion_rect(
     target: DropTarget,
-    zone_rect: Rect,
     headers: &[TabHeaderRect],
     strips: &[TabStripRect],
 ) -> Option<Rect> {
@@ -532,7 +531,7 @@ fn tab_insertion_rect(
             if index == 0 {
                 strip.rect.origin.x
             } else {
-                zone_rect.origin.x + zone_rect.size.width
+                strip.rect.origin.x + strip.rect.size.width
             }
         });
     Some(Rect::new(

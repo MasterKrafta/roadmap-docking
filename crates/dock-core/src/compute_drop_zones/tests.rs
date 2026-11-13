@@ -75,7 +75,16 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
         .iter()
         .find(|strip| strip.group == target_group)
         .expect("the target group should have a tab strip");
-    assert_eq!(append_zones[0].rect, target_strip.rect);
+    let target_group_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == target_group)
+        .expect("the target group should have bounds")
+        .rect;
+    assert_eq!(append_zones[0].rect.origin.x, target_group_rect.origin.x);
+    assert_eq!(append_zones[0].rect.size.width, target_group_rect.size.width);
+    assert_eq!(append_zones[0].rect.origin.y, target_strip.rect.origin.y);
+    assert_eq!(append_zones[0].rect.size.height, target_strip.rect.size.height);
     let strip_center = Point::new(
         target_strip.rect.origin.x + target_strip.rect.size.width * 0.5,
         target_strip.rect.origin.y + target_strip.rect.size.height * 0.5,
@@ -129,7 +138,10 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
         1,
         "a Main Dock Group drag must expose one append-only tab-strip zone"
     );
-    assert_eq!(group_append_zones[0].rect, target_strip.rect);
+    assert_eq!(group_append_zones[0].rect.origin.x, target_group_rect.origin.x);
+    assert_eq!(group_append_zones[0].rect.size.width, target_group_rect.size.width);
+    assert_eq!(group_append_zones[0].rect.origin.y, target_strip.rect.origin.y);
+    assert_eq!(group_append_zones[0].rect.size.height, target_strip.rect.size.height);
     assert!(
         !group_zones.iter().any(|zone| {
             zone.target
@@ -156,6 +168,52 @@ fn main_panel_targets_append_to_the_end_of_a_tab_strip() {
         }),
         "dropping a Group on a Main Dock tab strip must append it to the end"
     );
+    let control_width = metrics
+        .group_control_button_width
+        .min(target_group_rect.size.width / 3.0)
+        .max(1.0);
+    let group_control_points = [
+        Point::new(
+            target_group_rect.origin.x + target_group_rect.size.width - control_width * 1.5,
+            strip_center.y,
+        ),
+        Point::new(
+            target_group_rect.origin.x + target_group_rect.size.width - control_width * 0.5,
+            strip_center.y,
+        ),
+    ];
+    for point in group_control_points {
+        assert_eq!(
+            layout
+                .resolve_drop(
+                    point,
+                    DropSource::Panel { panel: source_panel },
+                    &rects,
+                    &metrics,
+                )
+                .unwrap(),
+            Some(DropTarget::Tabs {
+                group: target_group,
+                index: 1,
+            }),
+            "the GroupGrip and GroupMenuButton hit areas belong to the Main tab-strip drop zone"
+        );
+        assert_eq!(
+            layout
+                .resolve_drop(
+                    point,
+                    DropSource::Group { group: source_group },
+                    &rects,
+                    &metrics,
+                )
+                .unwrap(),
+            Some(DropTarget::GroupTabs {
+                group: target_group,
+                index: 1,
+            }),
+            "the GroupGrip and GroupMenuButton hit areas belong to the Main group append zone"
+        );
+    }
     assert!(
         !zones.iter().any(|zone| {
             zone.target
@@ -2829,7 +2887,10 @@ fn floating_panel_and_group_use_the_same_main_dock_drop_zones() {
                 zone.zone == DropZone::TabInsertion && zone.target == tab_target
             })
             .expect("a Floating source must expose the full Main tab-strip target");
-        assert_eq!(tab_zone.rect, target_strip.rect);
+        assert_eq!(tab_zone.rect.origin.x, first_rect.origin.x);
+        assert_eq!(tab_zone.rect.size.width, first_rect.size.width);
+        assert_eq!(tab_zone.rect.origin.y, target_strip.rect.origin.y);
+        assert_eq!(tab_zone.rect.size.height, target_strip.rect.size.height);
         let before_target = match tab_target {
             DropTarget::Tabs { group, .. } => DropTarget::Tabs { group, index: 0 },
             DropTarget::GroupTabs { group, .. } => DropTarget::GroupTabs { group, index: 0 },
@@ -2919,6 +2980,22 @@ fn floating_panel_and_group_use_the_same_main_dock_drop_zones() {
             .expect("the Main tab strip must resolve for a Floating source");
         assert_eq!(resolved_tab.target, tab_target);
 
+        let group_control_width = metrics
+            .group_control_button_width
+            .min(first_rect.size.width / 3.0)
+            .max(1.0);
+        for x in [
+            first_rect.origin.x + first_rect.size.width - group_control_width * 1.5,
+            first_rect.origin.x + first_rect.size.width - group_control_width * 0.5,
+        ] {
+            let resolved = resolver
+                .resolve_zone(Point::new(x, target_strip.rect.origin.y + target_strip.rect.size.height * 0.5))
+                .unwrap()
+                .expect("Main tab-strip append must include its GroupGrip and GroupMenuButton");
+            assert_eq!(resolved.target, tab_target);
+            assert_eq!(resolved.zone, DropZone::TabInsertion);
+        }
+
         let resolved_split = resolver
             .resolve_zone(split_point)
             .unwrap()
@@ -2992,7 +3069,16 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
             zone.zone == DropZone::TabInsertion && zone.target == expected_target
         })
         .expect("a one-group Floating composition must expose the Main tab strip");
-    assert_eq!(zone.rect, strip.rect);
+    let target_group_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == target_group)
+        .expect("the Main target group should have bounds")
+        .rect;
+    assert_eq!(zone.rect.origin.x, target_group_rect.origin.x);
+    assert_eq!(zone.rect.size.width, target_group_rect.size.width);
+    assert_eq!(zone.rect.origin.y, strip.rect.origin.y);
+    assert_eq!(zone.rect.size.height, strip.rect.size.height);
 
     let point = Point::new(
         strip.rect.origin.x + strip.rect.size.width * 0.5,
@@ -3002,6 +3088,21 @@ fn single_group_floating_column_can_merge_into_a_main_tab_strip() {
         layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
         Some(expected_target)
     );
+    let control_width = metrics
+        .group_control_button_width
+        .min(target_group_rect.size.width / 3.0)
+        .max(1.0);
+    for x in [
+        target_group_rect.origin.x + target_group_rect.size.width - control_width * 1.5,
+        target_group_rect.origin.x + target_group_rect.size.width - control_width * 0.5,
+    ] {
+        let control_point = Point::new(x, point.y);
+        assert_eq!(
+            layout.resolve_drop(control_point, source, &rects, &metrics).unwrap(),
+            Some(expected_target),
+            "both fixed Group control buttons must be covered by the Main tab-strip target"
+        );
+    }
     layout
         .apply(
             DockCommand::DockFloating {
@@ -3930,6 +4031,52 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
                 index: 1,
             }
     }), "the simple composition must be able to merge into another Floating group");
+    let first_group_rect = rects
+        .groups
+        .iter()
+        .find(|group| group.group == first_group)
+        .expect("the target Floating group should have bounds")
+        .rect;
+    let first_strip = rects
+        .tab_strips
+        .iter()
+        .find(|strip| strip.group == first_group)
+        .expect("the target Floating group should have a tab strip");
+    let first_tab_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::TabInsertion
+                && zone.target == DropTarget::GroupTabs {
+                    group: first_group,
+                    index: 1,
+                }
+        })
+        .expect("the simple composition must expose the Floating tab-strip append zone");
+    assert_eq!(first_tab_zone.rect.origin.x, first_group_rect.origin.x);
+    assert_eq!(first_tab_zone.rect.size.width, first_group_rect.size.width);
+    assert_eq!(first_tab_zone.rect.origin.y, first_strip.rect.origin.y);
+    assert_eq!(first_tab_zone.rect.size.height, first_strip.rect.size.height);
+    let control_width = metrics
+        .group_control_button_width
+        .min(first_group_rect.size.width / 3.0)
+        .max(1.0);
+    let strip_y = first_strip.rect.origin.y + first_strip.rect.size.height * 0.5;
+    for x in [
+        first_group_rect.origin.x + first_group_rect.size.width - control_width * 1.5,
+        first_group_rect.origin.x + first_group_rect.size.width - control_width * 0.5,
+    ] {
+        let resolved = layout
+            .resolve_drop(Point::new(x, strip_y), source, &rects, &metrics)
+            .unwrap();
+        assert_eq!(
+            resolved,
+            Some(DropTarget::GroupTabs {
+                group: first_group,
+                index: 1,
+            }),
+            "the Floating tab-strip append zone must include GroupGrip and GroupMenuButton"
+        );
+    }
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingCenter
             && zone.target == DropTarget::GroupTabs {

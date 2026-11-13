@@ -227,6 +227,31 @@ impl Layout {
 #[path = "compute_drop_zones/tests.rs"]
 mod tests;
 
+/// Expands a visual tab-strip rectangle to the complete Group header row.
+///
+/// Compact Column Groups reserve the trailing controls outside TabStripRect.
+/// Those controls are still part of the tab-strip drop target during a drag.
+pub(super) fn tab_strip_drop_rect(
+    group_rect: Rect,
+    strip_rect: Rect,
+) -> Result<Rect, ComputeRectsError> {
+    let left = group_rect.origin.x.min(strip_rect.origin.x);
+    let right = group_rect
+        .checked_right()
+        .map_err(ComputeRectsError::Geometry)?
+        .max(
+            strip_rect
+                .checked_right()
+                .map_err(ComputeRectsError::Geometry)?,
+        );
+    let rect = Rect::new(
+        Point::new(left, strip_rect.origin.y),
+        Size::new(right - left, strip_rect.size.height),
+    );
+    rect.validate().map_err(ComputeRectsError::Geometry)?;
+    Ok(rect)
+}
+
 pub(super) fn push_zone(
     zones: &mut Vec<DropZoneRect>,
     target: DropTarget,

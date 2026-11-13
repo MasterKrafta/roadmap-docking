@@ -253,6 +253,14 @@ impl Layout {
                 let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
                     continue;
                 };
+                let Some(group_rect) = rects
+                    .groups
+                    .iter()
+                    .find(|group| group.group == strip.group)
+                    .map(|group| group.rect)
+                else {
+                    continue;
+                };
                 push_zone(
                     zones,
                     DropTarget::Tabs {
@@ -260,7 +268,7 @@ impl Layout {
                         index: tabs.children.len(),
                     },
                     DropZone::TabInsertion,
-                    strip.rect,
+                    super::tab_strip_drop_rect(group_rect, strip.rect)?,
                 )?;
             }
         }
@@ -296,6 +304,14 @@ impl Layout {
                 let Some(Node::Tabs(tabs)) = self.node(strip.group) else {
                     continue;
                 };
+                let Some(group_rect) = rects
+                    .groups
+                    .iter()
+                    .find(|group| group.group == strip.group)
+                    .map(|group| group.rect)
+                else {
+                    continue;
+                };
                 push_zone(
                     zones,
                     DropTarget::GroupTabs {
@@ -303,7 +319,7 @@ impl Layout {
                         index: tabs.children.len(),
                     },
                     DropZone::TabInsertion,
-                    strip.rect,
+                    super::tab_strip_drop_rect(group_rect, strip.rect)?,
                 )?;
             }
         }
