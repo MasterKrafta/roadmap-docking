@@ -1,16 +1,14 @@
 use std::collections::HashMap;
 
 use dock_core::{
-    DragPayload, DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, GroupRect,
+    DragPreview, DropTarget, DropZone, DropZoneRect, DropZoneResolver, GroupRect,
     DockSide, NodeId, Point, Rect, TabHeaderRect, TabStripRect,
 };
 use gpui::{
-    IntoElement, ParentElement, SharedString, Styled, div, img, prelude::InteractiveElement as _,
+    IntoElement, ParentElement, Styled, div, prelude::InteractiveElement as _,
     px, rgb,
 };
 use ui::Theme;
-
-use crate::dock_components::GroupPresentation;
 
 use super::drop_overlay_geometry::{
     canonical_group_edge_zone, centered_vertical_split_guide_rect, column_end_guide_rect,
@@ -25,9 +23,6 @@ use super::drop_overlay_geometry::{
 /// Main and Floating use the same visual treatment for equivalent resolved zones.
 /// Floating same-group PanelTab reordering may use a geometry-only insertion marker.
 pub struct DropOverlay;
-
-/// A non-interactive visual card that follows the active drag pointer.
-pub struct DragGhost;
 
 impl DropOverlay {
     /// Resolves the preview zone from the resolver owned by the current host.
@@ -181,153 +176,6 @@ impl DropOverlay {
         }
 
         layer
-    }
-}
-
-impl DragGhost {
-    pub(crate) fn render(
-        preview: Option<DragPreview>,
-        presentations: &HashMap<dock_core::NodeId, GroupPresentation>,
-        viewport: Option<Rect>,
-        theme: Theme,
-    ) -> impl IntoElement {
-        let Some(preview) = preview else {
-            return div().id("dock-drag-ghost");
-        };
-
-        let (title, icon, subtitle, is_group) =
-            ghost_presentation(preview.payload, presentations);
-        let width = if is_group { 244.0 } else { 220.0 };
-        let height = if subtitle.is_some() { 56.0 } else { 46.0 };
-        let mut left = preview.point.x + 18.0;
-        let mut top = preview.point.y + 18.0;
-        if let Some(viewport) = viewport {
-            left = left.min(viewport.origin.x + viewport.size.width - width);
-            top = top.min(viewport.origin.y + viewport.size.height - height);
-            left = left.max(viewport.origin.x);
-            top = top.max(viewport.origin.y);
-        }
-
-        let mut icon_slot = div()
-            .w(px(28.0))
-            .h(px(28.0))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(4.0))
-            .bg(rgb(theme.colors.group_grip_background));
-
-        if let Some(icon) = icon {
-            icon_slot = icon_slot.child(img(icon).size(px(18.0)));
-        } else {
-            let fallback = title.chars().next().unwrap_or('•').to_string();
-            icon_slot = icon_slot
-                .text_color(rgb(theme.colors.primary_text))
-                .text_size(px(theme.typography.tab_size))
-                .child(fallback);
-        }
-
-        let mut text_column = div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .justify_center()
-            .overflow_hidden()
-            .text_color(rgb(theme.colors.primary_text))
-            .child(
-                div()
-                    .w_full()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_size(px(theme.typography.tab_size))
-                    .child(title),
-            );
-        if let Some(subtitle) = subtitle {
-            text_column = text_column.child(
-                div()
-                    .w_full()
-                    .text_size(px((theme.typography.tab_size - 2.0).max(9.0)))
-                    .text_color(rgb(theme.colors.muted_text))
-                    .child(subtitle),
-            );
-        }
-
-        // This view has no pointer listeners; it is purely visual and leaves
-        // pointer interaction to the dock surfaces underneath it.
-        div()
-            .id("dock-drag-ghost")
-            .absolute()
-            .left(px(left))
-            .top(px(top))
-            .w(px(width))
-            .h(px(height))
-            .flex()
-            .items_center()
-            .gap(px(9.0))
-            .px(px(9.0))
-            .bg(rgb(theme.colors.panel_surface_background))
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .shadow_lg()
-            .opacity(0.94)
-            .child(icon_slot)
-            .child(text_column)
-    }
-}
-
-fn ghost_presentation(
-    payload: DragPayload,
-    presentations: &HashMap<dock_core::NodeId, GroupPresentation>,
-) -> (
-    SharedString,
-    Option<SharedString>,
-    Option<SharedString>,
-    bool,
-) {
-    match payload {
-        DragPayload::Panel { panel } => {
-            let tab = presentations
-                .values()
-                .find_map(|group| group.tabs.iter().find(|tab| tab.panel == panel));
-            tab.map(|tab| (tab.title.clone(), tab.icon.clone(), None, false))
-                .unwrap_or_else(|| (SharedString::from("Panel"), None, None, false))
-        }
-        DragPayload::Group { group } => {
-            let presentation = presentations.get(&group);
-            let active = presentation.and_then(|presentation| {
-                presentation
-                    .tabs
-                    .iter()
-                    .find(|tab| Some(tab.panel) == presentation.active_panel)
-                    .or_else(|| presentation.tabs.first())
-            });
-            let title = active
-                .map(|tab| tab.title.clone())
-                .unwrap_or_else(|| SharedString::from("Group"));
-            let icon = active.and_then(|tab| tab.icon.clone());
-            let count = presentation.map_or(0, |value| value.tabs.len());
-            (
-                title,
-                icon,
-                Some(SharedString::from(format!("{count} tabs"))),
-                true,
-            )
-        }
-        DragPayload::DockArea { .. } => (
-            SharedString::from("Dock area"),
-            None,
-            Some(SharedString::from("Dock composition")),
-            true,
-        ),
-        DragPayload::FloatingGroup { .. } => (
-            SharedString::from("Floating window"),
-            None,
-            Some(SharedString::from("Floating window")),
-            true,
-        ),
     }
 }
 
