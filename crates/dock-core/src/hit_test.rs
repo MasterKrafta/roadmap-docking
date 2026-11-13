@@ -512,8 +512,8 @@ fn drop_zone_priority(zone: DropZone) -> u8 {
         DropZone::RailInsertion
         | DropZone::Left
         | DropZone::Right
-        | DropZone::FloatingColumnInsertion => 0,
-        DropZone::TabInsertion => 1,
+        | DropZone::FloatingColumnInsertion
+        | DropZone::TabInsertion => 0,
         DropZone::DockEdge => 2,
         DropZone::ColumnLeft | DropZone::ColumnRight => 3,
         DropZone::FloatingTop | DropZone::FloatingBottom => 4,
