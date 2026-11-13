@@ -2322,7 +2322,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     let (mut left_layout, floating, _, left_column, right_column, initial_bounds) =
         make_layout();
     let left_resized_bounds = Rect::new(
-        Point::new(0.0, initial_bounds.origin.y),
+        Point::new(-50.0, initial_bounds.origin.y),
         Size::new(664.0, initial_bounds.size.height),
     );
     left_layout
@@ -2331,7 +2331,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
                 group: floating,
                 bounds: left_resized_bounds,
                 edge: crate::FloatingResizeEdge::Left,
-                scale_factor: 1.0,
+                scale_factor: 1.5,
             },
             &metrics,
         )
@@ -2342,9 +2342,14 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
     assert_eq!(left_rects.columns[1].column, right_column);
     assert_eq!(left_rects.columns[1].rect.size.width, 280.0);
     assert_eq!(
-        left_resized_bounds.origin.x + left_rects.columns[0].rect.size.width,
-        initial_bounds.origin.x + 280.0,
-        "left-edge resize must keep the internal Split at its screen coordinate"
+        left_layout.floating_group(floating).unwrap().bounds.origin.x,
+        -50.0,
+        "the left edge origin must use physical pixels at the destination DPI"
+    );
+    assert_eq!(
+        left_resized_bounds.origin.x + left_rects.columns[0].rect.size.width * 1.5,
+        initial_bounds.origin.x + 280.0 * 1.5,
+        "left-edge resize must keep the internal Split at its physical screen coordinate"
     );
 
     // Shrinking from the right edge reduces only the right Column, down
