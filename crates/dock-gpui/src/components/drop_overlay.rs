@@ -119,7 +119,7 @@ impl DropOverlay {
                         false,
                     ));
                     layer = layer.child(guide_rect(
-                        main_group_edge_guide_rect(visual_rect, zone.zone, target_bounds),
+                        main_group_edge_guide_rect(visual_rect, zone.zone, target_group_bounds),
                         theme,
                     ));
                 }
