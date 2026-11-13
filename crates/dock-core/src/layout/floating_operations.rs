@@ -1306,8 +1306,6 @@ impl Layout {
             });
         }
 
-        self.resize_floating_split_edge_column(root, floating.bounds, actual_bounds, metrics)?;
-
         if let Some(value) = self.floating_groups.get_mut(group) {
             value.bounds = actual_bounds;
         }
