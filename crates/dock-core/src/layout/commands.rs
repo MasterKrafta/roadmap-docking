@@ -111,6 +111,7 @@ impl Layout {
             | DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
+            | DockCommand::ResizeFloatingBoundsFromEdge { .. }
             | DockCommand::RaiseFloating { .. }
             | DockCommand::DockFloating { .. }
             | DockCommand::DockMainArea { .. }
@@ -200,6 +201,7 @@ impl Layout {
         match command {
             DockCommand::MoveFloating { group, .. }
             | DockCommand::ResizeFloatingBounds { group, .. }
+            | DockCommand::ResizeFloatingBoundsFromEdge { group, .. }
             | DockCommand::ResizeFloating { group, .. }
             | DockCommand::RaiseFloating { group }
             | DockCommand::DockFloating { group, .. } => {
