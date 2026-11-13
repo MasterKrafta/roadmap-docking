@@ -388,7 +388,7 @@ fn hit_layout_geometry(
         {
             continue;
         }
-        let priority = drop_zone_priority(zone.zone);
+        let priority = drop_zone_priority(zone.zone, zone.target);
         let replace = best_drop_zone
             .as_ref()
             .map(|(best_priority, _, _)| priority < *best_priority)
@@ -507,12 +507,20 @@ fn target_in_scope(target: DropTarget, scope_nodes: &HashSet<NodeId>, include_on
     target_node.is_some_and(|node| node_in_scope(node, scope_nodes, include_only))
 }
 
-fn drop_zone_priority(zone: DropZone) -> u8 {
+fn drop_zone_priority(zone: DropZone, target: DropTarget) -> i8 {
+    // Match the Core resolver: only appending a complete Group outranks
+    // the Floating side bands that overlap the target tab strip.
+    if zone == DropZone::TabInsertion && matches!(target, DropTarget::GroupTabs { .. }) {
+        return -1;
+    }
+
+    // Individual Panel tab insertion retains its established priority.
     match zone {
         DropZone::RailInsertion
-        | DropZone::FloatingColumnInsertion
-        | DropZone::TabInsertion => 0,
-        DropZone::Left | DropZone::Right => 1,
+        | DropZone::Left
+        | DropZone::Right
+        | DropZone::FloatingColumnInsertion => 0,
+        DropZone::TabInsertion => 1,
         DropZone::DockEdge => 2,
         DropZone::ColumnLeft | DropZone::ColumnRight => 3,
         DropZone::FloatingTop | DropZone::FloatingBottom => 4,

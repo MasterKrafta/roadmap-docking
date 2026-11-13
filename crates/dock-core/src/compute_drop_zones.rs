@@ -571,7 +571,7 @@ fn best_containing_zone(
     point: Point,
     include: impl Fn(&DropZoneRect) -> bool,
 ) -> Result<Option<&DropZoneRect>, ComputeRectsError> {
-    let mut best: Option<(u8, usize)> = None;
+    let mut best: Option<(i8, usize)> = None;
     for (index, zone) in zones.iter().enumerate() {
         if !include(zone)
             || !zone
@@ -581,7 +581,7 @@ fn best_containing_zone(
         {
             continue;
         }
-        let priority = zone_priority(zone.zone);
+        let priority = zone_priority(zone);
         if best
             .map(|(best_priority, _)| priority < best_priority)
             .unwrap_or(true)
@@ -592,12 +592,23 @@ fn best_containing_zone(
     Ok(best.and_then(|(_, index)| zones.get(index)))
 }
 
-fn zone_priority(zone: DropZone) -> u8 {
-    match zone {
+fn zone_priority(zone: &DropZoneRect) -> i8 {
+    // Appending a complete Group to a tab strip is the only TabInsertion
+    // target that must win over the overlapping Floating side bands.
+    if zone.zone == DropZone::TabInsertion
+        && matches!(zone.target, DropTarget::GroupTabs { .. })
+    {
+        return -1;
+    }
+
+    // Keep the established priority for individual-tab insertion and all
+    // other drop targets.
+    match zone.zone {
         DropZone::RailInsertion
-        | DropZone::FloatingColumnInsertion
-        | DropZone::TabInsertion => 0,
-        DropZone::Left | DropZone::Right => 1,
+        | DropZone::Left
+        | DropZone::Right
+        | DropZone::FloatingColumnInsertion => 0,
+        DropZone::TabInsertion => 1,
         DropZone::DockEdge => 2,
         DropZone::ColumnLeft | DropZone::ColumnRight => 3,
         DropZone::FloatingTop | DropZone::FloatingBottom => 4,

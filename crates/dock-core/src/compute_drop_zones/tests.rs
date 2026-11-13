@@ -3601,13 +3601,35 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                 zone.rect.origin.x + zone.rect.size.width * 0.5,
                 strip.rect.origin.y + strip.rect.size.height * 0.5,
             );
-            for source in [group_source, panel_source] {
-                let resolved = layout
-                    .resolve_drop(point, source, &rects, &metrics)
-                    .unwrap()
-                    .expect("the full-height side must remain active over tab strips");
-                assert_eq!(resolved, zone.target);
-            }
+            let group_append_zone = group_zones
+                .iter()
+                .find(|candidate| {
+                    candidate.zone == DropZone::TabInsertion
+                        && matches!(
+                            candidate.target,
+                            DropTarget::GroupTabs { group, .. } if group == strip.group
+                        )
+                })
+                .expect("a whole-Group drag must expose one append target for each tab strip");
+            let group_resolved = layout
+                .resolve_drop(point, group_source, &rects, &metrics)
+                .unwrap()
+                .expect("the Group tab-strip append zone must resolve");
+            assert_eq!(
+                group_resolved,
+                group_append_zone.target,
+                "a complete Group appends to the strip instead of selecting its overlapping side band"
+            );
+
+            let panel_resolved = layout
+                .resolve_drop(point, panel_source, &rects, &metrics)
+                .unwrap()
+                .expect("an individual Panel drag must retain the full-height side target");
+            assert_eq!(
+                panel_resolved,
+                zone.target,
+                "individual Panel drags keep the established Floating side-zone behavior"
+            );
         }
     }
 
