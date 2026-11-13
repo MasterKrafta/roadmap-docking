@@ -167,8 +167,8 @@ impl FloatingZoneContext<'_> {
             for edge in [DropZone::Top, DropZone::Bottom] {
                 // A whole Composition uses FloatingTop/FloatingBottom for its
                 // outer window boundaries. Main keeps one shared target per
-                // splitter; Floating targets also expose each lower Group's own
-                // Top edge so a complete composition can be inserted there.
+                // splitter; only a multi-Group Composition gets an additional
+                // Top edge for each lower Group in another Floating window.
                 if matches!(self.source, DropSource::Composition { .. })
                     && let Some(column_id) =
                         owner_column(self.layout, self.tree_index, target_group.group)
@@ -206,6 +206,7 @@ impl FloatingZoneContext<'_> {
                     None
                         if edge == DropZone::Top
                             && matches!(self.source, DropSource::Composition { .. })
+                            && !self.layout.is_simple_composition_root(self.source_root)
                             && target_area(self.layout, self.tree_index, target_group.group)
                                 == Some(AllowedArea::FLOATING) =>
                     {
