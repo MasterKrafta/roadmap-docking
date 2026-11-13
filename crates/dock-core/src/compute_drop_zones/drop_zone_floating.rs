@@ -166,8 +166,9 @@ impl FloatingZoneContext<'_> {
         for target_group in target_groups {
             for edge in [DropZone::Top, DropZone::Bottom] {
                 // A whole Composition uses FloatingTop/FloatingBottom for its
-                // outer boundaries. Keep GroupEdge targets for internal
-                // Column splitters, where a complete composition can be inserted.
+                // outer window boundaries. Main keeps one shared target per
+                // splitter; Floating targets also expose each lower Group's own
+                // Top edge so a complete composition can be inserted there.
                 if matches!(self.source, DropSource::Composition { .. })
                     && let Some(column_id) =
                         owner_column(self.layout, self.tree_index, target_group.group)
