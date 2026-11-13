@@ -499,7 +499,9 @@ fn same_group_panel_tab_insertion_rect(
     if source_header.group != group {
         return None;
     }
-    let strip = strips.iter().find(|strip| strip.group == group)?;
+    if !strips.iter().any(|strip| strip.group == group) {
+        return None;
+    }
     tab_insertion_rect(target, headers, strips)
 }
 

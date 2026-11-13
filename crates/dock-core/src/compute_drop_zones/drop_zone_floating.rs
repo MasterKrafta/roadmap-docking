@@ -127,7 +127,7 @@ impl FloatingZoneContext<'_> {
 
 impl FloatingZoneContext<'_> {
     /// A whole Group dropped on a Photoshop Floating tab strip is appended as
-    /// one operation. The single zone covers the complete strip; per-tab
+    /// one operation. The single zone covers the full tab/control row; per-tab
     /// insertion slots remain exclusive to individual Panel drags.
     pub(super) fn append_group_tab_strip_zones(
         &mut self,
