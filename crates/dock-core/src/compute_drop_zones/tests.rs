@@ -3596,11 +3596,8 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
             }
         }
 
+        let mut overlapping_group_strips = 0;
         for strip in &rects.tab_strips {
-            let point = Point::new(
-                zone.rect.origin.x + zone.rect.size.width * 0.5,
-                strip.rect.origin.y + strip.rect.size.height * 0.5,
-            );
             let group_append_zone = group_zones
                 .iter()
                 .find(|candidate| {
@@ -3611,14 +3608,33 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                         )
                 })
                 .expect("a whole-Group drag must expose one append target for each tab strip");
+
+            // Only test the overlap where the pointer is physically inside both
+            // this tab strip and the composition-wide side band. A strip in the
+            // opposite Column cannot be selected from this edge of the window.
+            let intersection_left = zone.rect.origin.x.max(group_append_zone.rect.origin.x);
+            let intersection_top = zone.rect.origin.y.max(group_append_zone.rect.origin.y);
+            let intersection_right = (zone.rect.origin.x + zone.rect.size.width)
+                .min(group_append_zone.rect.origin.x + group_append_zone.rect.size.width);
+            let intersection_bottom = (zone.rect.origin.y + zone.rect.size.height)
+                .min(group_append_zone.rect.origin.y + group_append_zone.rect.size.height);
+            if intersection_right <= intersection_left || intersection_bottom <= intersection_top {
+                continue;
+            }
+            overlapping_group_strips += 1;
+
+            let point = Point::new(
+                (intersection_left + intersection_right) * 0.5,
+                (intersection_top + intersection_bottom) * 0.5,
+            );
             let group_resolved = layout
                 .resolve_drop(point, group_source, &rects, &metrics)
                 .unwrap()
-                .expect("the Group tab-strip append zone must resolve");
+                .expect("the overlapping Group tab-strip append zone must resolve");
             assert_eq!(
                 group_resolved,
                 group_append_zone.target,
-                "a complete Group appends to the strip instead of selecting its overlapping side band"
+                "a complete Group appends to the strip inside its actual overlap with the side band"
             );
 
             let panel_resolved = layout
@@ -3631,6 +3647,10 @@ fn photoshop_floating_side_zones_span_the_composition_and_insert_a_column() {
                 "individual Panel drags keep the established Floating side-zone behavior"
             );
         }
+        assert!(
+            overlapping_group_strips > 0,
+            "each outer side band must overlap tab strips in its own boundary Column"
+        );
     }
 
     let point = Point::new(
