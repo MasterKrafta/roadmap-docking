@@ -2310,6 +2310,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
             if (split.ratios[0] - 280.0 / 660.0).abs() < 1.0e-4
                 && (split.ratios[1] - 380.0 / 660.0).abs() < 1.0e-4
     ));
+    assert_eq!(right_layout.validate(&metrics), Ok(()));
 
     right_layout.apply(right_resize.inverse.unwrap(), &metrics).unwrap();
     let restored_rects = right_layout.compute_floating_rects(floating, &metrics).unwrap();
@@ -2351,6 +2352,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
         initial_bounds.origin.x + 280.0 * 1.5,
         "left-edge resize must keep the internal Split at its physical screen coordinate"
     );
+    assert_eq!(left_layout.validate(&metrics), Ok(()));
 
     // Shrinking from the right edge reduces only the right Column, down
     // to Core's minimum expanded width, while the left Column and splitter stay fixed.
@@ -2384,6 +2386,7 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
         shrink_rects.floating_groups[0].rect.size.width,
         initial_bounds.size.width + shrink_delta
     );
+    assert_eq!(shrink_layout.validate(&metrics), Ok(()));
 
     // Moving a Floating window changes both outer edges equally and must not
     // resize either Column.
