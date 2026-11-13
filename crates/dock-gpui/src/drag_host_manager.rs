@@ -1385,9 +1385,9 @@ impl DragHostManager {
             );
         }
 
-        // DragHost is owned by Main and hidden asynchronously. Retry briefly
-        // while it remains the foreground HWND; activate the destination only
-        // after Windows has completed the owner-focus handoff.
+        // Hiding DragHost is asynchronous. Windows should activate its new
+        // FloatingHost owner; retry briefly and use explicit activation only
+        // if Main remains foreground after the owner-focus handoff.
         if let Some(floating_manager) = self.floating_manager.clone() {
             cx.spawn(async move |_, app| {
                 let mut activated = false;
