@@ -6,7 +6,7 @@ use std::{
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
-    DragHandle, DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState,
+    DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState,
     GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
