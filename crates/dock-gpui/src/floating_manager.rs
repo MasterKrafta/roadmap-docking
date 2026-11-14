@@ -888,7 +888,15 @@ impl FloatingWindowManager {
         }
 
         self.window_chains = next_chains;
-        self.reconcile(cx);
+        for member in members {
+            if let Some(panel) = self.host_registry.panel_for_group(member)
+                && let Some(mut entry) = self.registry.windows.remove(&panel)
+            {
+                self.sync_native_resize_edge_policy(&mut entry, member);
+                self.registry.windows.insert(panel, entry);
+            }
+        }
+        self.schedule_chain_compaction(commands, cx);
         cx.notify();
         Ok(())
     }
