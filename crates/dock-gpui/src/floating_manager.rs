@@ -1203,14 +1203,23 @@ impl FloatingWindowManager {
         if hidden_header_offset != 0 {
             for member in &mut move_windows {
                 member.drag_origin.y = member.drag_origin.y.saturating_add(hidden_header_offset);
+            }
+
+            let mut move_error = None;
+            for member in &move_windows {
                 if let Err(error) = self.native_ops.move_window(member.native_window, member.drag_origin) {
-                    tracing::warn!(?group, %error, "could not align native chain after hiding ColumnHeader");
-                    for restore in &move_windows {
-                        let _ = self.native_ops.move_window(restore.native_window, restore.cancel_origin);
-                    }
-                    self.cancel_controller_move(cx);
-                    return false;
+                    move_error = Some(error);
+                    break;
                 }
+            }
+
+            if let Some(error) = move_error {
+                tracing::warn!(?group, %error, "could not align native chain after hiding ColumnHeader");
+                for restore in &move_windows {
+                    let _ = self.native_ops.move_window(restore.native_window, restore.cancel_origin);
+                }
+                self.cancel_controller_move(cx);
+                return false;
             }
         }
         self.native_move_windows = move_windows;
