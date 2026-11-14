@@ -488,20 +488,17 @@ fn arrange_contiguous_window_chain_bounds(
     Some(bounds)
 }
 
-fn should_insert_window_before(
-    moving_left: i32,
-    moving_right: i32,
-    target_left: i32,
-    target_right: i32,
-    cursor_x: i32,
-) -> bool {
-    let moving_center_twice = i64::from(moving_left) + i64::from(moving_right);
-    let target_center_twice = i64::from(target_left) + i64::from(target_right);
-
-    if moving_center_twice == target_center_twice {
-        i64::from(cursor_x) * 2 < target_center_twice
-    } else {
-        moving_center_twice < target_center_twice
+fn floating_window_chain_insert_before(target: Option<DropTarget>) -> Option<bool> {
+    match target {
+        Some(DropTarget::GroupEdge {
+            zone: dock_core::DropZone::Left,
+            ..
+        }) => Some(true),
+        Some(DropTarget::GroupEdge {
+            zone: dock_core::DropZone::Right,
+            ..
+        }) => Some(false),
+        _ => None,
     }
 }
 
@@ -1831,7 +1828,7 @@ impl FloatingWindowManager {
                 target.map(|target| NativeMoveTarget::MainDock { target, point })
             })
         } else {
-            let Some((target_group, _target_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
+            let Some((target_group, target_window_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
                 let entry = self.registry.windows.get(panel)?;
                 (entry.native_window == Some(target_window) && *group != state.group)
                     .then_some((*group, entry.window_id))
@@ -1840,33 +1837,52 @@ impl FloatingWindowManager {
                 self.clear_native_drag_target(cx);
                 return;
             };
-            let Ok(target_rect) = self.native_ops.window_rect(target_window) else {
+            let Some(point) = self.core_point_for_floating(target_window, cursor) else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             };
-            let mut moving_left = i32::MAX;
-            let mut moving_right = i32::MIN;
-            for moving in &self.native_move_windows {
-                let Ok(rect) = self.native_ops.window_rect(moving.native_window) else {
-                    state.drop_target = None;
-                    self.clear_native_drag_target(cx);
-                    return;
-                };
-                moving_left = moving_left.min(rect.left);
-                moving_right = moving_right.max(rect.right);
-            }
-            let insert_before = should_insert_window_before(
-                moving_left,
-                moving_right,
-                target_rect.left,
-                target_rect.right,
-                cursor.x,
-            );
 
-            // Whole-window drags are not Core Dock operations. Clear the Core
-            // resolver/preview and retain only the destination window + side.
-            self.clear_native_drag_target(cx);
+            // Resolve the target Floating's own side zones so the destination
+            // window paints the same affordance used to choose the WindowChain side.
+            // The Core composition is not docked into the target; only HWND bounds
+            // and WindowChain membership are changed after release.
+            let resolved_target = self.controller.update(cx, |controller, controller_cx| {
+                let resolved = controller
+                    .prepare_floating_window_drop_resolver(target_window_id, target_group, source)
+                    .and_then(|resolver| resolver.resolve(point));
+                let target = match resolved {
+                    Ok(Some(target @ DropTarget::GroupEdge {
+                        zone: dock_core::DropZone::Left | dock_core::DropZone::Right,
+                        ..
+                    })) => Some(target),
+                    Ok(_) => None,
+                    Err(error) => {
+                        tracing::debug!(
+                            ?target_group,
+                            %error,
+                            "could not resolve Floating-to-Floating side drop zone"
+                        );
+                        controller.drag_mut().clear_resolver();
+                        None
+                    }
+                };
+
+                if controller.drag_mut().session_mut().pointer_move(point).is_err()
+                    || controller.drag_mut().session_mut().set_drop_target(target).is_err()
+                {
+                    controller.drag_mut().clear_resolver();
+                    controller_cx.notify();
+                    return None;
+                }
+                controller_cx.notify();
+                target
+            });
+
+            let Some(insert_before) = floating_window_chain_insert_before(resolved_target) else {
+                state.drop_target = None;
+                return;
+            };
             Some(NativeMoveTarget::FloatingChain {
                 anchor: target_group,
                 insert_before,
@@ -4067,7 +4083,8 @@ mod window_chain_registry_tests {
 #[cfg(test)]
 mod contiguous_window_chain_bounds_tests {
     use super::{
-        NativeFrameGeometry, arrange_contiguous_window_chain_bounds, should_insert_window_before,
+        NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
+        floating_window_chain_insert_before,
     };
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
@@ -4204,20 +4221,31 @@ mod contiguous_window_chain_bounds_tests {
     }
 
     #[test]
-    fn insertion_side_uses_window_center_not_mouse_grab_point() {
-        // The cursor is on the target's right half, but the dragged window
-        // itself is on the left: the source must be inserted before the target.
-        assert!(should_insert_window_before(100, 500, 300, 700, 650));
+    fn floating_window_chain_side_matches_the_resolved_drop_zone() {
+        use dock_core::{DropTarget, DropZone, NodeId};
 
-        // The cursor is on the target's left half, but the dragged window
-        // itself is on the right: the source must be inserted after the target.
-        assert!(!should_insert_window_before(500, 900, 300, 700, 350));
-    }
-
-    #[test]
-    fn insertion_side_uses_cursor_only_when_window_centers_match() {
-        assert!(should_insert_window_before(300, 700, 300, 700, 400));
-        assert!(!should_insert_window_before(300, 700, 300, 700, 600));
+        let group = NodeId::null();
+        assert_eq!(
+            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Left,
+            })),
+            Some(true),
+        );
+        assert_eq!(
+            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Right,
+            })),
+            Some(false),
+        );
+        assert_eq!(
+            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Top,
+            })),
+            None,
+        );
     }
 }
 
