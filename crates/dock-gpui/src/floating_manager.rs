@@ -3706,7 +3706,7 @@ mod contiguous_window_chain_bounds_tests {
 mod native_resize_chain_geometry_tests {
     use super::{native_resize_right_edge_delta, shift_window_chain_after_resize};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
-    use slotmap::{Key, SlotMap};
+    use slotmap::SlotMap;
 
     fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
@@ -3761,7 +3761,7 @@ mod native_resize_chain_geometry_tests {
 mod native_z_order_tests {
     use super::{FloatingGroupSnapshot, WindowChainRegistry, floating_groups_in_native_z_order};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
-    use slotmap::{Key, SlotMap};
+    use slotmap::SlotMap;
 
     fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 5]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
