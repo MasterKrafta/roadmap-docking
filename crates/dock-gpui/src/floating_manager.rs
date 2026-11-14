@@ -3263,7 +3263,7 @@ mod window_chain_registry_tests {
 mod contiguous_window_chain_bounds_tests {
     use super::arrange_contiguous_window_chain_bounds;
     use dock_core::{FloatingGroupId, Point, Rect, Size};
-    use slotmap::SlotMap;
+    use slotmap::{Key, SlotMap};
 
     fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
