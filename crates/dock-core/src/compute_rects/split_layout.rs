@@ -83,7 +83,11 @@ pub(super) fn layout_floating_root(
         );
     }
 
-    if let Some(Node::Split(split)) = layout.node(id)
+    // Photoshop Floating compositions fill the client area and use the
+    // Split ratios as live Column widths. Generic keeps its preferred-width
+    // layout, including unused client space outside the Columns.
+    if layout.profile() == crate::Profile::Photoshop
+        && let Some(Node::Split(split)) = layout.node(id)
         && split.axis == Axis::X
         && split.children.len() >= 2
         && split
