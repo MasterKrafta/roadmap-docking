@@ -7,8 +7,8 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
-    DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
-    PanelId, Point, Rect, Size,
+    DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
+    Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
@@ -452,20 +452,29 @@ impl WindowChainRegistry {
     }
 
     /// Drops links to FloatingGroups that no longer exist in Core Layout.
-    /// Returns the number of removed members.
-    fn retain_groups(&mut self, live_groups: &HashSet<FloatingGroupId>) -> usize {
+    ///
+    /// Returns the number of removed members and the surviving chains whose
+    /// adjacency may need to be compacted after an extracted source disappears.
+    fn retain_groups(
+        &mut self,
+        live_groups: &HashSet<FloatingGroupId>,
+    ) -> (usize, Vec<Vec<FloatingGroupId>>) {
         let previous_chains = self.chains.values().cloned().collect::<Vec<_>>();
         self.chains.clear();
         self.chain_by_group.clear();
 
         let mut removed = 0;
+        let mut chains_to_compact = Vec::new();
         for mut members in previous_chains {
             let previous_len = members.len();
             members.retain(|member| live_groups.contains(member));
             removed += previous_len - members.len();
+            if members.len() > 1 && members.len() != previous_len {
+                chains_to_compact.push(members.clone());
+            }
             self.store_chain(members);
         }
-        removed
+        (removed, chains_to_compact)
     }
 
     fn take_chain_for(&mut self, group: FloatingGroupId) {
@@ -1882,12 +1891,71 @@ impl FloatingWindowManager {
         groups.sort_by_key(|group| group.z_order);
 
         let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
-        let removed_chain_members = self.window_chains.retain_groups(&live_groups);
+        let (removed_chain_members, chains_to_compact) =
+            self.window_chains.retain_groups(&live_groups);
         if removed_chain_members > 0 {
             tracing::debug!(
                 removed_chain_members,
                 "removed stale FloatingGroups from window chains"
             );
+        }
+
+        if !chains_to_compact.is_empty() {
+            let mut compacted_bounds = Vec::new();
+            for members in &chains_to_compact {
+                let member_bounds = members
+                    .iter()
+                    .map(|member| {
+                        groups
+                            .iter()
+                            .find(|snapshot| snapshot.id == *member)
+                            .map(|snapshot| (snapshot.id, snapshot.bounds))
+                    })
+                    .collect::<Option<Vec<_>>>();
+                let Some(member_bounds) = member_bounds else {
+                    continue;
+                };
+                if let Some(anchor) = members.first().copied()
+                    && let Some(bounds) =
+                        arrange_contiguous_window_chain_bounds(member_bounds, anchor)
+                {
+                    compacted_bounds.extend(bounds);
+                }
+            }
+
+            let commands = compacted_bounds
+                .iter()
+                .filter_map(|(group, bounds)| {
+                    groups
+                        .iter()
+                        .find(|snapshot| snapshot.id == *group)
+                        .filter(|snapshot| snapshot.bounds != *bounds)
+                        .map(|_| DockCommand::ResizeFloatingBounds {
+                            group: *group,
+                            bounds: *bounds,
+                        })
+                })
+                .collect::<Vec<_>>();
+
+            if !commands.is_empty() {
+                let result = self.controller.update(cx, |controller, controller_cx| {
+                    controller.dispatch_sequence_in(commands, controller_cx)
+                });
+                match result {
+                    Ok(_) => {
+                        let bounds_by_group = compacted_bounds.into_iter().collect::<HashMap<_, _>>();
+                        for group in &mut groups {
+                            if let Some(bounds) = bounds_by_group.get(&group.id) {
+                                group.bounds = *bounds;
+                            }
+                        }
+                    }
+                    Err(error) => tracing::warn!(
+                        %error,
+                        "could not compact a Window Chain after an empty FloatingGroup was removed"
+                    ),
+                }
+            }
         }
 
         let previous_hosts = self.host_registry.floating_groups.clone();
@@ -3378,6 +3446,23 @@ mod window_chain_registry_tests {
         assert!(!chains.remove_member(a));
     }
 
+
+    #[test]
+    fn pruning_a_middle_member_returns_ordered_survivors_for_compaction() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        chains.link_after(a, b);
+        chains.link_after(b, c);
+        chains.link_after(c, d);
+
+        let live = HashSet::from([a, c, d]);
+        let (removed, survivors) = chains.retain_groups(&live);
+        assert_eq!(removed, 1);
+        assert_eq!(survivors, vec![vec![a, c, d]]);
+        assert_eq!(chains.members_for(c), vec![a, c, d]);
+    }
+
     #[test]
     fn reconciliation_prunes_missing_groups_and_dissolves_short_chains() {
         let [a, b, c, d] = groups(4).try_into().expect("four group ids");
@@ -3388,12 +3473,15 @@ mod window_chain_registry_tests {
         chains.link_after(c, d);
 
         let live = HashSet::from([a, c, d]);
-        assert_eq!(chains.retain_groups(&live), 1);
+        assert_eq!(
+            chains.retain_groups(&live),
+            (1, vec![vec![a, c, d]])
+        );
         assert_eq!(chains.members_for(a), vec![a, c, d]);
         assert_eq!(chains.members_for(b), vec![b]);
 
         let live = HashSet::from([c]);
-        assert_eq!(chains.retain_groups(&live), 2);
+        assert_eq!(chains.retain_groups(&live), (2, Vec::new()));
         assert_eq!(chains.members_for(c), vec![c]);
     }
 }
