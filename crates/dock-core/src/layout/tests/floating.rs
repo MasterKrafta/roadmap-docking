@@ -1929,6 +1929,32 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     assert_eq!(rects.splitters[0].owner, root);
     assert_eq!(rects.splitters[0].boundary_index, 0);
     assert_eq!(rects.splitters[0].axis, Axis::X);
+
+    layout
+        .apply(
+            DockCommand::ResizeSplitColumnBoundary {
+                split: root,
+                boundary_index: 0,
+                delta: 24.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let Some(Node::Column(left)) = layout.node(source_column) else {
+        panic!("left split child remains a Column");
+    };
+    let Some(Node::Column(right)) = layout.node(target_column) else {
+        panic!("right split child remains a Column");
+    };
+    assert_eq!(left.width, metrics.default_column_width + 24.0);
+    assert_eq!(right.width, metrics.default_column_width - 24.0);
+    let resized_rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
+    assert_eq!(resized_rects.splitters.len(), 1);
+    assert_eq!(
+        resized_rects.splitters[0].rect.origin.x,
+        metrics.default_column_width + 24.0,
+    );
+
     assert!(matches!(
         layout.node(source_column),
         Some(Node::Column(column)) if column.groups == vec![source_tabs]
