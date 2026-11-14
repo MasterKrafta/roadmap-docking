@@ -113,7 +113,6 @@ impl MainDockView {
             layer = layer.child(SplitterView::render(
                 *splitter,
                 Point::ZERO,
-                Point::ZERO,
                 controller.clone(),
                 metrics,
                 theme,
