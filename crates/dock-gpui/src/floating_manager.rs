@@ -15,8 +15,8 @@ use gpui::{
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId, NativeWindowOps,
-    PhysicalPoint, PhysicalRect, PhysicalSize, SystemNativeWindowOps,
+    hide_from_taskbar, NativeKey, NativeResizeEdge, NativeWindowAtPoint, NativeWindowId,
+    NativeWindowOps, PhysicalPoint, PhysicalRect, PhysicalSize, SystemNativeWindowOps,
 };
 
 use crate::{
@@ -291,7 +291,6 @@ struct NativeResizeSession {
     group: FloatingGroupId,
     window_id: WindowId,
     transaction_started: bool,
-    last_native_bounds: PhysicalRect,
     horizontal_edge: Option<FloatingResizeEdge>,
 }
 
@@ -638,25 +637,19 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return;
         }
-        let Ok(initial_native_bounds) = self.native_ops.window_rect(native_window) else {
-            return;
-        };
-
-        // Observe_native_resize can start after Windows has already begun
-        // its modal sizing loop. Classify the active horizontal edge from the
-        // cursor immediately so a fast right-edge drag cannot fall back to a
-        // bounds-only resize before the first polling delta is observed.
+        // WM_SIZING records the exact system edge even when observation
+        // begins after Windows entered its modal sizing loop.
         let horizontal_edge = self
             .native_ops
-            .cursor_position()
+            .resizing_edge(native_window)
             .ok()
-            .and_then(|cursor| horizontal_resize_edge_at_cursor(cursor, initial_native_bounds));
+            .flatten()
+            .map(core_resize_edge);
 
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
             transaction_started: false,
-            last_native_bounds: initial_native_bounds,
             horizontal_edge,
         });
         self.schedule_native_resize(cx, group, window_id);
@@ -705,17 +698,13 @@ impl FloatingWindowManager {
             return false;
         };
 
-        if let Ok(native_bounds) = self.native_ops.window_rect(native_window) {
-            if state.horizontal_edge.is_none() {
-                let left_edge_moved = native_bounds.left != state.last_native_bounds.left;
-                let right_edge_moved = native_bounds.right != state.last_native_bounds.right;
-                state.horizontal_edge = match (left_edge_moved, right_edge_moved) {
-                    (true, false) => Some(FloatingResizeEdge::Left),
-                    (false, true) => Some(FloatingResizeEdge::Right),
-                    _ => None,
-                };
-            }
-            state.last_native_bounds = native_bounds;
+        if state.horizontal_edge.is_none() {
+            state.horizontal_edge = self
+                .native_ops
+                .resizing_edge(native_window)
+                .ok()
+                .flatten()
+                .map(core_resize_edge);
         }
 
         let resizing = self.native_ops.is_resizing(native_window).unwrap_or(false);
@@ -2354,26 +2343,10 @@ impl FloatingWindowManager {
 }
 
 
-fn horizontal_resize_edge_at_cursor(
-    cursor: PhysicalPoint,
-    bounds: PhysicalRect,
-) -> Option<FloatingResizeEdge> {
-    if bounds.right <= bounds.left {
-        return None;
-    }
-
-    // Windows' non-client sizing border can sit just outside GetWindowRect.
-    // Use a small physical-pixel margin, including diagonal corner drags.
-    const EDGE_TOLERANCE: i64 = 32;
-    let left_distance = (i64::from(cursor.x) - i64::from(bounds.left)).abs();
-    let right_distance = (i64::from(cursor.x) - i64::from(bounds.right)).abs();
-
-    if left_distance <= EDGE_TOLERANCE && left_distance < right_distance {
-        Some(FloatingResizeEdge::Left)
-    } else if right_distance <= EDGE_TOLERANCE && right_distance < left_distance {
-        Some(FloatingResizeEdge::Right)
-    } else {
-        None
+fn core_resize_edge(edge: NativeResizeEdge) -> FloatingResizeEdge {
+    match edge {
+        NativeResizeEdge::Left => FloatingResizeEdge::Left,
+        NativeResizeEdge::Right => FloatingResizeEdge::Right,
     }
 }
 
@@ -2493,55 +2466,6 @@ impl Drop for FloatingWindowManager {
         if self.native_move.is_some_and(|state| state.high_resolution_timer) {
             let _ = self.native_ops.end_high_resolution_timer();
         }
-    }
-}
-
-#[cfg(test)]
-mod native_resize_edge_tests {
-    use super::horizontal_resize_edge_at_cursor;
-    use dock_core::FloatingResizeEdge;
-    use platform::{PhysicalPoint, PhysicalRect};
-
-    fn bounds() -> PhysicalRect {
-        PhysicalRect {
-            left: 100,
-            top: 80,
-            right: 700,
-            bottom: 480,
-        }
-    }
-
-    #[test]
-    fn cursor_at_right_non_client_edge_selects_right_column_resize() {
-        assert_eq!(
-            horizontal_resize_edge_at_cursor(
-                PhysicalPoint { x: 704, y: 240 },
-                bounds(),
-            ),
-            Some(FloatingResizeEdge::Right),
-        );
-    }
-
-    #[test]
-    fn cursor_at_left_non_client_edge_selects_left_column_resize() {
-        assert_eq!(
-            horizontal_resize_edge_at_cursor(
-                PhysicalPoint { x: 96, y: 240 },
-                bounds(),
-            ),
-            Some(FloatingResizeEdge::Left),
-        );
-    }
-
-    #[test]
-    fn vertical_edge_drag_does_not_select_a_horizontal_resize_edge() {
-        assert_eq!(
-            horizontal_resize_edge_at_cursor(
-                PhysicalPoint { x: 400, y: 80 },
-                bounds(),
-            ),
-            None,
-        );
     }
 }
 
