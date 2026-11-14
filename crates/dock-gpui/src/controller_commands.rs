@@ -335,7 +335,9 @@ impl DockController {
         window: &mut Window,
         app: &mut App,
     ) -> Option<AnyView> {
-        if self.drag.panel_view_is_transferred(panel) {
+        if self.drag.panel_view_is_transferred(panel)
+            || self.pending_panel_view_handoffs.contains(&panel)
+        {
             return None;
         }
         if let Some(view) = self.panel_views.get(panel) {
@@ -580,6 +582,7 @@ impl DockController {
 
         self.history.clear();
         self.panel_views.clear();
+        self.pending_panel_view_handoffs.clear();
         self.drag.cancel_gesture();
         self.interaction = None;
         self.resize_frame.latest = None;
