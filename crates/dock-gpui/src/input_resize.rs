@@ -1,12 +1,12 @@
 use dock_core::{
-    Axis, DockCommand, DockSide, HitResult, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
+    Axis, DockCommand, DockSide, HitResult, LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
     Rect, ResizeEdge, Size,
 };
 use gpui::{App, Entity};
 
 use crate::{DockController, ResizeInteraction};
 
-/// Starts a Core resize transaction from a splitter or flyout edge hit.
+/// Starts a Core resize transaction from Main geometry.
 pub(crate) fn begin_resize_hit(
     controller: &Entity<DockController>,
     hit: HitResult,
@@ -17,6 +17,21 @@ pub(crate) fn begin_resize_hit(
         controller.begin_resize_interaction(hit, point)
     }) {
         tracing::debug!(%error, "could not begin dock resize");
+    }
+}
+
+/// Starts a resize from the geometry snapshot belonging to a Floating host.
+pub(crate) fn begin_resize_hit_with_rects(
+    controller: &Entity<DockController>,
+    hit: HitResult,
+    point: Point,
+    rects: &LayoutRects,
+    app: &mut App,
+) {
+    if let Err(error) = controller.update(app, |controller, _| {
+        controller.begin_resize_interaction_with_rects(hit, point, Some(rects))
+    }) {
+        tracing::debug!(%error, "could not begin floating dock resize");
     }
 }
 
@@ -33,12 +48,32 @@ pub(crate) fn update_resize(controller: &Entity<DockController>, point: Point, a
     });
 }
 
-/// Commits exactly one command at pointer-up. A double click keeps the
-/// existing reset behavior; all other gestures use the full delta from origin.
+/// Commits exactly one command at pointer-up using Main geometry.
 pub(crate) fn finish_resize(
     controller: &Entity<DockController>,
     point: Point,
     click_count: usize,
+    app: &mut App,
+) {
+    finish_resize_with_geometry(controller, point, click_count, None, app);
+}
+
+/// Commits a resize using the geometry snapshot belonging to a Floating host.
+pub(crate) fn finish_resize_with_rects(
+    controller: &Entity<DockController>,
+    point: Point,
+    click_count: usize,
+    rects: &LayoutRects,
+    app: &mut App,
+) {
+    finish_resize_with_geometry(controller, point, click_count, Some(rects), app);
+}
+
+fn finish_resize_with_geometry(
+    controller: &Entity<DockController>,
+    point: Point,
+    click_count: usize,
+    rects: Option<&LayoutRects>,
     app: &mut App,
 ) {
     let command = controller.update(app, |controller, _| {
@@ -47,9 +82,9 @@ pub(crate) fn finish_resize(
         }
         let interaction = controller.resize_interaction()?;
         if click_count == 2 {
-            reset_command_for_interaction(controller, interaction)
+            reset_command_for_interaction(controller, interaction, rects)
         } else {
-            command_for_pointer(controller, interaction, point)
+            command_for_pointer(controller, interaction, point, rects)
         }
     });
 
@@ -76,6 +111,7 @@ fn command_for_pointer(
     controller: &mut DockController,
     interaction: ResizeInteraction,
     point: Point,
+    rects: Option<&LayoutRects>,
 ) -> Option<DockCommand> {
     let dx = pointer_delta_from_origin(interaction.origin, point, Axis::X);
     let dy = pointer_delta_from_origin(interaction.origin, point, Axis::Y);
@@ -107,7 +143,7 @@ fn command_for_pointer(
                     column: owner,
                     boundary_index,
                     delta: dy,
-                    available_height: available_group_height(controller, owner)?,
+                    available_height: available_group_height(controller, owner, rects)?,
                 })
             }
             Axis::X if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX => {
@@ -156,6 +192,7 @@ fn command_for_pointer(
 fn reset_command_for_interaction(
     controller: &mut DockController,
     interaction: crate::ResizeInteraction,
+    rects: Option<&LayoutRects>,
 ) -> Option<DockCommand> {
     let HitResult::Splitter {
         owner,
@@ -169,7 +206,7 @@ fn reset_command_for_interaction(
     match axis {
         Axis::Y => Some(DockCommand::ResetColumnRatios {
             column: owner,
-            available_height: available_group_height(controller, owner)?,
+            available_height: available_group_height(controller, owner, rects)?,
         }),
         Axis::X => {
             let side = if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX {
@@ -211,10 +248,17 @@ fn outer_column(layout: &dock_core::Layout, side: DockSide) -> Option<NodeId> {
     }
 }
 
-fn available_group_height(controller: &mut DockController, column: NodeId) -> Option<f32> {
+fn available_group_height(
+    controller: &mut DockController,
+    column: NodeId,
+    host_rects: Option<&LayoutRects>,
+) -> Option<f32> {
     let metrics = controller.metrics();
     let total_height = {
-        let rects = controller.geometry().ok()?;
+        let rects = match host_rects {
+            Some(rects) => rects,
+            None => controller.geometry().ok()?,
+        };
         rects
             .vertical_overflow
             .iter()
