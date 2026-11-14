@@ -429,7 +429,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 40);
+        assert_eq!(commands.len(), 41);
     }
 
     #[cfg(feature = "serde")]
