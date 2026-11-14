@@ -313,6 +313,8 @@ pub(crate) struct ResizePreview {
     pub kind: ResizePreviewKind,
     /// A column scroll owner whose content coordinates must be translated.
     pub scroll_owner: Option<NodeId>,
+    /// Identifies the original splitter whose static line is hidden during drag.
+    pub splitter: Option<(NodeId, usize, Axis)>,
 }
 
 pub(crate) fn resize_preview_for_interaction(
@@ -323,13 +325,18 @@ pub(crate) fn resize_preview_for_interaction(
     let dy = pointer_delta_from_origin(interaction.origin, point, Axis::Y);
 
     match interaction.hit {
-        HitResult::Splitter { owner, axis, .. } => {
+        HitResult::Splitter {
+            owner,
+            boundary_index,
+            axis,
+        } => {
             let start = interaction.start_splitter_rect?;
             let rect = splitter_preview_rect(start, axis, dx, dy)?;
             Some(ResizePreview {
                 rect,
                 kind: ResizePreviewKind::SplitterLine,
                 scroll_owner: (axis == Axis::Y).then_some(owner),
+                splitter: Some((owner, boundary_index, axis)),
             })
         }
         HitResult::FlyoutResizeEdge { edge, .. } => {
@@ -358,6 +365,7 @@ pub(crate) fn resize_preview_for_interaction(
                 rect,
                 kind: ResizePreviewKind::BoundsOutline,
                 scroll_owner: None,
+                splitter: None,
             })
         }
         // Only splitter and flyout-edge hits can start a resize.
