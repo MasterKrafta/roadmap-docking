@@ -1263,13 +1263,6 @@ impl FloatingWindowManager {
             controller.flush_events(controller_cx);
             controller_cx.notify();
         });
-        if let Err(error) = result {
-            tracing::warn!(
-                ?group,
-                %error,
-                "could not update the controller after native floating-window Resize"
-            );
-        }
     }
 
     fn finish_native_resize_transaction(
@@ -1798,7 +1791,7 @@ impl FloatingWindowManager {
                 insert_before,
                 cx,
             ),
-            drop_target if moving_windows.len() > 1 => {
+            _ if moving_windows.len() > 1 => {
                 // A chain header can move the chain, but cannot detach one
                 // member by dropping it into Main or onto empty desktop space.
                 let bounds = self.native_bounds_for_move_windows(&moving_windows, cx);
@@ -1966,14 +1959,10 @@ impl FloatingWindowManager {
                 controller.dispatch_sequence_in(commands, controller_cx)
             });
             match result {
-                Ok(Ok(_)) => {}
-                Ok(Err(error)) => tracing::warn!(
-                    %error,
-                    "could not compact a Window Chain after an empty FloatingGroup was removed"
-                ),
+                Ok(_) => {}
                 Err(error) => tracing::warn!(
                     %error,
-                    "could not update the controller while compacting a Window Chain"
+                    "could not compact a Window Chain after an empty FloatingGroup was removed"
                 ),
             }
         })
