@@ -75,6 +75,12 @@ impl PhysicalRect {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeHorizontalResizeEdge {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeWindowAtPoint {
     Known(NativeWindowId),
     Foreign,
@@ -228,6 +234,15 @@ pub trait NativeWindowOps {
         _minimum_client_widths: Option<(i32, i32)>,
     ) -> Result<(), NativeError> {
         Ok(())
+    }
+
+    /// Returns the horizontal side reported by the active native WM_SIZING message.
+    /// None means the current sizing operation is vertical or no side is known.
+    fn horizontal_resize_edge(
+        &self,
+        _window: NativeWindowId,
+    ) -> Result<Option<NativeHorizontalResizeEdge>, NativeError> {
+        Ok(None)
     }
 
     /// Finds the topmost window under a screen point. Foreign windows are
@@ -525,8 +540,19 @@ mod windows_impl {
 
     struct ResizeLoopState {
         active: bool,
+        horizontal_edge: Option<NativeHorizontalResizeEdge>,
         left_min_client_width: i32,
         right_min_client_width: i32,
+    }
+
+    fn horizontal_resize_edge_from_sizing_code(
+        sizing_edge: u32,
+    ) -> Option<NativeHorizontalResizeEdge> {
+        match sizing_edge {
+            1 | 4 | 7 => Some(NativeHorizontalResizeEdge::Left),
+            2 | 5 | 8 => Some(NativeHorizontalResizeEdge::Right),
+            _ => None,
+        }
     }
 
     /// Adjusts a proposed outer RECT while preserving the opposite window edge.
@@ -537,10 +563,10 @@ mod windows_impl {
         sizing_edge: u32,
         minimum_outer_width: i32,
     ) -> bool {
-        let anchor_left = match sizing_edge {
-            2 | 5 | 8 => true,
-            1 | 4 | 7 => false,
-            _ => return false,
+        let anchor_left = match horizontal_resize_edge_from_sizing_code(sizing_edge) {
+            Some(NativeHorizontalResizeEdge::Right) => true,
+            Some(NativeHorizontalResizeEdge::Left) => false,
+            None => return false,
         };
         if minimum_outer_width <= 0 {
             return false;
@@ -569,10 +595,10 @@ mod windows_impl {
             return false;
         }
 
-        let minimum_client_width = match sizing_edge {
-            1 | 4 | 7 => state.left_min_client_width,
-            2 | 5 | 8 => state.right_min_client_width,
-            _ => return false,
+        let minimum_client_width = match horizontal_resize_edge_from_sizing_code(sizing_edge) {
+            Some(NativeHorizontalResizeEdge::Left) => state.left_min_client_width,
+            Some(NativeHorizontalResizeEdge::Right) => state.right_min_client_width,
+            None => return false,
         };
         if minimum_client_width <= 0 {
             return false;
@@ -612,7 +638,15 @@ mod windows_impl {
         let state = reference_data as *mut ResizeLoopState;
         if message == WM_ENTERSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
-            unsafe { (*state).active = true };
+            unsafe {
+                (*state).active = true;
+                (*state).horizontal_edge = None;
+            };
+        }
+        if message == WM_SIZING {
+            let edge = horizontal_resize_edge_from_sizing_code(wparam.0 as u32);
+            // SAFETY: The subclass owns this live state allocation.
+            unsafe { (*state).horizontal_edge = edge };
         }
 
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
@@ -628,7 +662,10 @@ mod windows_impl {
 
         if message == WM_EXITSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
-            unsafe { (*state).active = false };
+            unsafe {
+                (*state).active = false;
+                (*state).horizontal_edge = None;
+            };
         }
         if message == WM_NCDESTROY {
             // SAFETY: Detach this callback before freeing its owned state.
@@ -1153,6 +1190,7 @@ mod windows_impl {
             if !tracking_installed {
                 let pointer = Box::into_raw(Box::new(ResizeLoopState {
                     active: false,
+                    horizontal_edge: None,
                     left_min_client_width: 0,
                     right_min_client_width: 0,
                 }));
@@ -1439,6 +1477,31 @@ mod windows_impl {
             Ok(())
         }
 
+        fn horizontal_resize_edge(
+            &self,
+            window: NativeWindowId,
+        ) -> Result<Option<NativeHorizontalResizeEdge>, NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Ok(None);
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            Ok(unsafe {
+                (*(reference_data as *const ResizeLoopState)).horizontal_edge
+            })
+        }
+
         fn window_from_point(
             &self,
             point: PhysicalPoint,
@@ -1533,6 +1596,36 @@ mod windows_impl {
     #[cfg(test)]
     mod native_resize_sizing_tests {
         use super::*;
+
+        #[test]
+        fn native_sizing_codes_report_the_selected_horizontal_edge() {
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(1),
+                Some(NativeHorizontalResizeEdge::Left)
+            );
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(4),
+                Some(NativeHorizontalResizeEdge::Left)
+            );
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(7),
+                Some(NativeHorizontalResizeEdge::Left)
+            );
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(2),
+                Some(NativeHorizontalResizeEdge::Right)
+            );
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(5),
+                Some(NativeHorizontalResizeEdge::Right)
+            );
+            assert_eq!(
+                horizontal_resize_edge_from_sizing_code(8),
+                Some(NativeHorizontalResizeEdge::Right)
+            );
+            assert_eq!(horizontal_resize_edge_from_sizing_code(3), None);
+            assert_eq!(horizontal_resize_edge_from_sizing_code(6), None);
+        }
 
         #[test]
         fn left_edge_minimum_preserves_the_right_side_of_the_window() {

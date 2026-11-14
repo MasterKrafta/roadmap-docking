@@ -781,25 +781,42 @@ impl FloatingWindowManager {
             return;
         }
 
-        // GPUI does not expose WM_SIZING's hit edge. Compare the live origin
-        // with the session's original bounds: a horizontal origin shift means
-        // the left edge (or left corner) is being dragged.
-        let edge = if (bounds.origin.x - state.start_bounds.origin.x).abs() > 0.5 {
-            dock_core::FloatingResizeEdge::Left
-        } else {
-            dock_core::FloatingResizeEdge::Right
-        };
-        let scale_factor = self
+        let native_window = self
             .panel_window_for_group(group)
-            .and_then(|entry| entry.native_window)
-            .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
+            .and_then(|entry| entry.native_window);
+        let native_edge = native_window
+            .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
+            .flatten()
+            .map(|edge| match edge {
+                platform::NativeHorizontalResizeEdge::Left => dock_core::FloatingResizeEdge::Left,
+                platform::NativeHorizontalResizeEdge::Right => dock_core::FloatingResizeEdge::Right,
+            });
+        // WM_SIZING is authoritative. Retain the origin comparison only as a
+        // fallback for platform adapters that cannot report a native hit edge.
+        let edge = native_edge.or_else(|| {
+            let width_changed = current.is_some_and(|current| {
+                (bounds.size.width - current.size.width).abs() > 0.5
+            });
+            width_changed.then(|| {
+                if (bounds.origin.x - state.start_bounds.origin.x).abs() > 0.5 {
+                    dock_core::FloatingResizeEdge::Left
+                } else {
+                    dock_core::FloatingResizeEdge::Right
+                }
+            })
+        });
+        let scale_factor = native_window
+            .and_then(|window| self.native_ops.scale_factor(window).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let command = DockCommand::ResizeFloatingBoundsFromEdge {
-            group,
-            bounds,
-            edge,
-            scale_factor,
+        let command = match edge {
+            Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
+                group,
+                bounds,
+                edge,
+                scale_factor,
+            },
+            None => DockCommand::ResizeFloatingBounds { group, bounds },
         };
         let result = self.controller.update(cx, |controller, controller_cx| {
             controller.dispatch_in(command, controller_cx)
