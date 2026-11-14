@@ -1608,16 +1608,22 @@ mod windows_impl {
 
         #[test]
         fn disabling_left_resize_turns_left_edges_and_corners_into_client_area() {
-            for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
-                assert_eq!(
-                    hit_test_code_for_resize(hit_test, false),
-                    HTCLIENT
-                );
+            for hit_test in [HTLEFT as i32, HTTOPLEFT as i32, HTBOTTOMLEFT as i32] {
+                assert_eq!(hit_test_code_for_resize(hit_test, false), HTCLIENT as i32);
             }
-            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT);
-            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT);
-            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT);
-            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTLEFT as i32, true), HTLEFT as i32);
+            assert_eq!(
+                hit_test_code_for_resize(HTRIGHT as i32, false),
+                HTRIGHT as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTTOPRIGHT as i32, false),
+                HTTOPRIGHT as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTBOTTOMRIGHT as i32, false),
+                HTBOTTOMRIGHT as i32
+            );
         }
 
         #[test]
