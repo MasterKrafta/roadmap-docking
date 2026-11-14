@@ -922,7 +922,7 @@ impl DragHostManager {
                         })
                     )
                     && matches!(target_window, Some(DockingWindowAtPoint::Floating { .. })));
-            let local_proposed_floating_bounds = needs_floating_bounds.then(|| {
+            let local_proposed_floating_bounds = if needs_floating_bounds {
                 crate::input::drag::floating_bounds_for_drag(
                     controller,
                     payload,
@@ -930,7 +930,9 @@ impl DragHostManager {
                     source_host,
                     source_window_id,
                 )
-            }).flatten();
+            } else {
+                None
+            };
             controller_cx.notify();
             Ok((target, local_proposed_floating_bounds))
         });
@@ -1024,7 +1026,7 @@ impl DragHostManager {
 
             let mut created_groups = Vec::new();
             if let Some(mut request) = request {
-                if let Some((_, _)) = chain_join {
+                if chain_join.is_some() {
                     // Whole Main DockArea side drops create independent native
                     // Floating windows. The destination window is joined at the
                     // WindowChain layer after those Core FloatingGroups exist.
@@ -1113,35 +1115,52 @@ impl DragHostManager {
             if promote_on_float
                 && can_promote_existing_window
                 && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
-                && self.promote_active_drag_host_to_floating(id, target_group, cx)
             {
-                if let Some((anchor, insert_before)) = chain_join {
-                    let joined = self.floating_manager.as_ref().map(|manager| {
-                        manager.update(cx, |manager, manager_cx| {
-                            manager.join_window_chain_at(
-                                anchor,
-                                &created_groups,
-                                insert_before,
-                                manager_cx,
-                            )
-                        })
-                    });
-                    match joined {
-                        Some(Ok(Ok(()))) => {}
-                        Some(Ok(Err(error))) => tracing::warn!(
-                            ?id,
-                            ?anchor,
-                            %error,
-                            "could not join the newly floated Main DockArea windows to the target WindowChain"
-                        ),
-                        _ => tracing::warn!(
-                            ?id,
-                            ?anchor,
-                            "FloatingWindowManager was unavailable after promoting the Main DockArea"
-                        ),
+                if self.promote_active_drag_host_to_floating(id, target_group, cx) {
+                    if let Some((anchor, insert_before)) = chain_join {
+                        let joined = self.floating_manager.as_ref().map(|manager| {
+                            manager.update(cx, |manager, manager_cx| {
+                                manager.join_window_chain_at(
+                                    anchor,
+                                    &created_groups,
+                                    insert_before,
+                                    manager_cx,
+                                )
+                            })
+                        });
+                        match joined {
+                            Some(Ok(Ok(()))) => {}
+                            Some(Ok(Err(error))) => tracing::warn!(
+                                ?id,
+                                ?anchor,
+                                %error,
+                                "could not join the newly floated Main DockArea windows to the target WindowChain"
+                            ),
+                            _ => tracing::warn!(
+                                ?id,
+                                ?anchor,
+                                "FloatingWindowManager was unavailable after promoting the Main DockArea"
+                            ),
+                        }
                     }
+                    return;
                 }
-                return;
+
+                if chain_join.is_some() {
+                    // The Core layout is already split into independent
+                    // FloatingGroups. Release the transport views so the normal
+                    // Floating hosts can render each group instead of handing
+                    // the complete DockArea to only the first group.
+                    self.flush_controller_events(cx);
+                    if let Err(error) = self.close(id, cx) {
+                        tracing::warn!(
+                            ?id,
+                            %error,
+                            "could not close the DockArea DragHost after Floating promotion failed"
+                        );
+                    }
+                    return;
+                }
             }
             if promote_on_float {
                 self.flush_controller_events(cx);
