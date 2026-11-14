@@ -2,19 +2,20 @@ use dock_core::{
     Axis, DockCommand, DockSide, HitResult, LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
     Rect, ResizeEdge, Size,
 };
-use gpui::{App, Entity};
+use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, ResizeInteraction};
 
 /// Starts a Core resize transaction from Main geometry.
 pub(crate) fn begin_resize_hit(
     controller: &Entity<DockController>,
+    window_id: WindowId,
     hit: HitResult,
     point: Point,
     app: &mut App,
 ) {
     if let Err(error) = controller.update(app, |controller, _| {
-        controller.begin_resize_interaction(hit, point)
+        controller.begin_resize_interaction_with_rects(window_id, hit, point, None)
     }) {
         tracing::debug!(%error, "could not begin dock resize");
     }
@@ -23,13 +24,14 @@ pub(crate) fn begin_resize_hit(
 /// Starts a resize from the geometry snapshot belonging to a Floating host.
 pub(crate) fn begin_resize_hit_with_rects(
     controller: &Entity<DockController>,
+    window_id: WindowId,
     hit: HitResult,
     point: Point,
     rects: &LayoutRects,
     app: &mut App,
 ) {
     if let Err(error) = controller.update(app, |controller, _| {
-        controller.begin_resize_interaction_with_rects(hit, point, Some(rects))
+        controller.begin_resize_interaction_with_rects(window_id, hit, point, Some(rects))
     }) {
         tracing::debug!(%error, "could not begin floating dock resize");
     }
@@ -37,12 +39,19 @@ pub(crate) fn begin_resize_hit_with_rects(
 
 /// Updates the transient preview point only. The Layout is not changed until
 /// pointer-up, so a complete gesture produces at most one resize command.
-pub(crate) fn update_resize(controller: &Entity<DockController>, point: Point, app: &mut App) {
+pub(crate) fn update_resize(
+    controller: &Entity<DockController>,
+    window_id: WindowId,
+    point: Point,
+    app: &mut App,
+) {
     controller.update(app, |controller, cx| {
-        if !controller.ensure_pointer_interaction_current() {
+        if controller.resize_interaction_for_window(window_id).is_none()
+            || !controller.ensure_pointer_interaction_current()
+        {
             return;
         }
-        if controller.set_resize_preview_point(point) {
+        if controller.set_resize_preview_point(window_id, point) {
             cx.notify();
         }
     });
@@ -51,36 +60,48 @@ pub(crate) fn update_resize(controller: &Entity<DockController>, point: Point, a
 /// Commits exactly one command at pointer-up using Main geometry.
 pub(crate) fn finish_resize(
     controller: &Entity<DockController>,
+    window_id: WindowId,
     point: Point,
     click_count: usize,
     app: &mut App,
 ) {
-    finish_resize_with_geometry(controller, point, click_count, None, app);
+    finish_resize_with_geometry(controller, window_id, point, click_count, None, app);
 }
 
 /// Commits a resize using the geometry snapshot belonging to a Floating host.
 pub(crate) fn finish_resize_with_rects(
     controller: &Entity<DockController>,
+    window_id: WindowId,
     point: Point,
     click_count: usize,
     rects: &LayoutRects,
     app: &mut App,
 ) {
-    finish_resize_with_geometry(controller, point, click_count, Some(rects), app);
+    finish_resize_with_geometry(controller, window_id, point, click_count, Some(rects), app);
 }
 
 fn finish_resize_with_geometry(
     controller: &Entity<DockController>,
+    window_id: WindowId,
     point: Point,
     click_count: usize,
     rects: Option<&LayoutRects>,
     app: &mut App,
 ) {
+    let owns_interaction = controller.update(app, |controller, _| {
+        controller.resize_interaction_for_window(window_id).is_some()
+    });
+    if !owns_interaction {
+        return;
+    }
+
     let command = controller.update(app, |controller, _| {
-        if !controller.ensure_pointer_interaction_current() {
+        if controller.resize_interaction_for_window(window_id).is_none()
+            || !controller.ensure_pointer_interaction_current()
+        {
             return None;
         }
-        let interaction = controller.resize_interaction()?;
+        let interaction = controller.resize_interaction_for_window(window_id)?;
         if click_count == 2 {
             reset_command_for_interaction(controller, interaction, rects)
         } else {
@@ -319,7 +340,11 @@ pub(crate) struct ResizePreview {
 
 pub(crate) fn resize_preview_for_interaction(
     interaction: ResizeInteraction,
+    window_id: WindowId,
 ) -> Option<ResizePreview> {
+    if interaction.window_id != window_id {
+        return None;
+    }
     let point = interaction.preview_point?;
     let dx = pointer_delta_from_origin(interaction.origin, point, Axis::X);
     let dy = pointer_delta_from_origin(interaction.origin, point, Axis::Y);

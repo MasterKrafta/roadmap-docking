@@ -390,8 +390,10 @@ impl Render for DockHost {
                 .filter(|preview| preview.target == Some(DropTarget::FreeArea))
                 .and_then(|preview| floating_bounds(controller, preview.payload, preview.point));
             let resize_preview = controller
-                .resize_interaction()
-                .and_then(resize_preview_for_interaction);
+                .resize_interaction_for_window(main_window_id)
+                .and_then(|interaction| {
+                    resize_preview_for_interaction(interaction, main_window_id)
+                });
             let metrics = controller.metrics();
 
             (
@@ -843,6 +845,15 @@ impl Render for DockHost {
             let pointer_press_for_escape = self.pointer_press.clone();
             workspace = workspace.capture_key_down(move |event, window, app| {
                 if context_menu_is_open || !event.keystroke.key.eq_ignore_ascii_case("escape") {
+                    return;
+                }
+                let window_id = window.window_handle().window_id();
+                let resize_owned_by_another_window = controller_for_escape.update(app, |controller, _| {
+                    controller
+                        .resize_interaction()
+                        .is_some_and(|interaction| interaction.window_id != window_id)
+                });
+                if resize_owned_by_another_window {
                     return;
                 }
                 if drag_host_for_escape.update(app, |manager, manager_cx| {

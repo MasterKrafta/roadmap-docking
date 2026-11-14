@@ -297,6 +297,8 @@ impl DragController {
 /// The target, pointer origin, and source geometry captured at pointer-down.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResizeInteraction {
+    /// The native GPUI window that owns this pointer gesture.
+    pub window_id: WindowId,
     pub hit: HitResult,
     pub origin: Point,
     /// Latest pointer position used only to render a visual preview.
@@ -314,6 +316,9 @@ pub struct ResizeInteraction {
 /// Invalid attempts to begin a resize interaction.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub enum ResizeInteractionError {
+    #[error("the resize gesture has no owning window")]
+    WindowUnavailable,
+
     #[error("a resize interaction is already active")]
     AlreadyActive,
 
@@ -444,6 +449,15 @@ impl DockController {
 
     pub fn resize_interaction(&self) -> Option<ResizeInteraction> {
         self.interaction
+    }
+
+    /// Returns the resize interaction only to the native window that owns it.
+    pub(crate) fn resize_interaction_for_window(
+        &self,
+        window_id: WindowId,
+    ) -> Option<ResizeInteraction> {
+        self.interaction
+            .filter(|interaction| interaction.window_id == window_id)
     }
 
     /// Returns whether the current content drag can transfer this cached PanelView.
@@ -892,14 +906,18 @@ impl DockController {
         hit: HitResult,
         origin: Point,
     ) -> Result<(), ResizeInteractionError> {
-        self.begin_resize_interaction_with_rects(hit, origin, None)
+        let window_id = self
+            .main_window_id
+            .ok_or(ResizeInteractionError::WindowUnavailable)?;
+        self.begin_resize_interaction_with_rects(window_id, hit, origin, None)
     }
 
     /// Starts a resize using the geometry produced by the host that owns the
-    /// pointer. Floating windows pass their local snapshot; Main uses the
-    /// controller's standard Layout geometry when no snapshot is supplied.
+    /// pointer. Every host supplies its WindowId and, for Floating, its local
+    /// geometry snapshot; Main uses the controller's standard Layout geometry.
     pub(crate) fn begin_resize_interaction_with_rects(
         &mut self,
+        window_id: WindowId,
         hit: HitResult,
         origin: Point,
         rects: Option<&LayoutRects>,
@@ -973,6 +991,7 @@ impl DockController {
         self.resize_frame.latest = None;
         self.drag.clear_resolver();
         self.interaction = Some(ResizeInteraction {
+            window_id,
             hit,
             origin,
             preview_point: None,
@@ -986,24 +1005,34 @@ impl DockController {
     }
 
     /// Updates only transient preview state; the Dock Layout remains untouched.
-    pub(crate) fn set_resize_preview_point(&mut self, point: Point) -> bool {
+    pub(crate) fn set_resize_preview_point(
+        &mut self,
+        window_id: WindowId,
+        point: Point,
+    ) -> bool {
         if point.validate().is_err() {
             return false;
         }
         let Some(interaction) = self.interaction.as_mut() else {
             return false;
         };
-        if interaction.preview_point == Some(point) {
+        if interaction.window_id != window_id || interaction.preview_point == Some(point) {
             return false;
         }
         interaction.preview_point = Some(point);
         true
     }
 
-    /// Stores the latest pointer position and reports whether the caller
-    /// should schedule the single frame callback for the active gesture.
-    pub(crate) fn queue_resize_frame_point(&mut self, point: Point) -> bool {
-        if self.interaction.is_none() {
+    /// Stores the latest pointer position only for the window that owns the gesture.
+    pub(crate) fn queue_resize_frame_point(
+        &mut self,
+        window_id: WindowId,
+        point: Point,
+    ) -> bool {
+        if !self
+            .interaction
+            .is_some_and(|interaction| interaction.window_id == window_id)
+        {
             return false;
         }
         self.resize_frame.latest = Some(point);
@@ -1015,15 +1044,26 @@ impl DockController {
         }
     }
 
-    /// Takes the most recent pointer position and frees the frame slot.
-    pub(crate) fn take_resize_frame_point(&mut self) -> Option<Point> {
+    /// Takes the most recent pointer position and frees the frame slot for its owner.
+    pub(crate) fn take_resize_frame_point(&mut self, window_id: WindowId) -> Option<Point> {
+        if !self
+            .interaction
+            .is_some_and(|interaction| interaction.window_id == window_id)
+        {
+            return None;
+        }
         self.resize_frame.scheduled = false;
         self.resize_frame.latest.take()
     }
 
-    /// Drops a pending pointer position when the gesture is explicitly finished.
-    pub(crate) fn clear_resize_frame_point(&mut self) {
-        self.resize_frame.latest = None;
+    /// Drops a pending pointer position only when called by the owning window.
+    pub(crate) fn clear_resize_frame_point(&mut self, window_id: WindowId) {
+        if self
+            .interaction
+            .is_some_and(|interaction| interaction.window_id == window_id)
+        {
+            self.resize_frame.latest = None;
+        }
     }
 
     /// Ends the active resize and commits its single history checkpoint.

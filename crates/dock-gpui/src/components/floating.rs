@@ -7,7 +7,7 @@ use std::{
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
     DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState,
-    GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect,
+    GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
@@ -458,8 +458,8 @@ fn floating_host_snapshot(
     let active_drop_zone =
         DropOverlay::resolve_active_zone(drag_resolver, drag_preview);
     let resize_preview = controller
-        .resize_interaction()
-        .and_then(resize_preview_for_interaction);
+        .resize_interaction_for_window(window_id)
+        .and_then(|interaction| resize_preview_for_interaction(interaction, window_id));
 
     Ok(Some(FloatingHostSnapshot {
         rects,
@@ -495,6 +495,7 @@ pub struct FloatingHost {
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
     controller_observed: bool,
     manager_observed: bool,
+    native_bounds_observed: bool,
     native_resize_observation_pending: bool,
     middle_click_closes_tabs: bool,
     /// Root focus boundary for cancelling gestures when this PanelWindow loses app focus.
@@ -546,6 +547,7 @@ impl FloatingHost {
             pointer_capture: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
+            native_bounds_observed: false,
             native_resize_observation_pending: false,
             middle_click_closes_tabs: true,
             root_focus_handle: None,
@@ -599,6 +601,28 @@ impl Render for FloatingHost {
             cx.observe(&manager, |_, _, host_cx| host_cx.notify())
                 .detach();
             self.manager_observed = true;
+        }
+        if !self.native_bounds_observed {
+            cx.observe_window_bounds(window, |host, window, host_cx| {
+                let Some(group) = host.group else {
+                    return;
+                };
+                let viewport = window.viewport_size();
+                let size = Size::new(viewport.width.as_f32(), viewport.height.as_f32());
+                let window_id = window.window_handle().window_id();
+                if let Some(manager) = host.manager.upgrade() {
+                    let _ = manager.update(host_cx, |manager, manager_cx| {
+                        manager.sync_native_resize_bounds_from_viewport(
+                            group,
+                            window_id,
+                            size,
+                            manager_cx,
+                        );
+                    });
+                }
+            })
+            .detach();
+            self.native_bounds_observed = true;
         }
 
         // Reuse the controller's persistent PanelId -> AnyView cache. This call
@@ -786,6 +810,7 @@ impl Render for FloatingHost {
                             if let Some(rects) = floating_rects {
                                 begin_resize_hit_with_rects(
                                     &controller_for_down,
+                                    input_window_id,
                                     resize_hit,
                                     point,
                                     &rects,
@@ -793,7 +818,9 @@ impl Render for FloatingHost {
                                 );
                                 let resize_started = controller_for_down
                                     .update(app, |controller, _| {
-                                        controller.resize_interaction().is_some()
+                                        controller
+                                            .resize_interaction_for_window(input_window_id)
+                                            .is_some()
                                     });
                                 if resize_started {
                                     if !DockInteractionCoordinator::capture(
@@ -991,8 +1018,14 @@ impl Render for FloatingHost {
                         if phase != DispatchPhase::Capture || !event.dragging() {
                             return;
                         }
-                        let resize_active = controller_for_move
-                            .update(app, |controller, _| controller.resize_interaction().is_some());
+                        let resize_owner = controller_for_move.update(app, |controller, _| {
+                            controller.resize_interaction().map(|interaction| interaction.window_id)
+                        });
+                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
+                            app.stop_propagation();
+                            return;
+                        }
+                        let resize_active = resize_owner == Some(input_window_id);
                         if resize_active {
                             if !DockInteractionCoordinator::ensure_current(
                                 &controller_for_move,
@@ -1022,17 +1055,16 @@ impl Render for FloatingHost {
                                 return;
                             };
                             let should_schedule = controller_for_move.update(app, |controller, _| {
-                                controller.queue_resize_frame_point(point)
+                                controller.queue_resize_frame_point(input_window_id, point)
                             });
                             if should_schedule {
                                 let controller = controller_for_move.clone();
                                 window.on_next_frame(move |_, app| {
-                                    let point = controller
-                                        .update(app, |controller, _| {
-                                            controller.take_resize_frame_point()
-                                        });
+                                    let point = controller.update(app, |controller, _| {
+                                        controller.take_resize_frame_point(input_window_id)
+                                    });
                                     if let Some(point) = point {
-                                        update_resize(&controller, point, app);
+                                        update_resize(&controller, input_window_id, point, app);
                                     }
                                 });
                             }
@@ -1337,8 +1369,14 @@ impl Render for FloatingHost {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
                             return;
                         }
-                        let resize_active = controller_for_up
-                            .update(app, |controller, _| controller.resize_interaction().is_some());
+                        let resize_owner = controller_for_up.update(app, |controller, _| {
+                            controller.resize_interaction().map(|interaction| interaction.window_id)
+                        });
+                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
+                            app.stop_propagation();
+                            return;
+                        }
+                        let resize_active = resize_owner == Some(input_window_id);
                         if resize_active {
                             if !DockInteractionCoordinator::ensure_current(
                                 &controller_for_up,
@@ -1381,11 +1419,12 @@ impl Render for FloatingHost {
                                     .cloned()
                             });
                             controller_for_up.update(app, |controller, _| {
-                                controller.clear_resize_frame_point();
+                                controller.clear_resize_frame_point(input_window_id);
                             });
                             if let Some(rects) = floating_rects {
                                 finish_resize_with_rects(
                                     &controller_for_up,
+                                    input_window_id,
                                     point,
                                     event.click_count,
                                     &rects,
@@ -2003,6 +2042,13 @@ impl Render for FloatingHost {
             {
                 return;
             }
+            let window_id = window.window_handle().window_id();
+            let resize_owner = controller_for_escape.update(app, |controller, _| {
+                controller.resize_interaction().map(|interaction| interaction.window_id)
+            });
+            if resize_owner.is_some_and(|owner| owner != window_id) {
+                return;
+            }
             if let Some(manager) = manager_for_escape.upgrade() {
                 if manager.update(app, |manager, _| manager.native_move_active()) {
                     return;
@@ -2025,6 +2071,7 @@ impl Render for FloatingHost {
             }
             if tab_press_for_escape.get().is_none()
                 && group_press_for_escape.get().is_none()
+                && resize_owner.is_none()
             {
                 return;
             }

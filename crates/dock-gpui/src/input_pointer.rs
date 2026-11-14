@@ -290,7 +290,7 @@ pub(crate) fn register_pointer_events(
                     }
                 }
                 PointerDownIntent::Resize => {
-                    begin_resize_hit(&controller, hit, core_point, app);
+                    begin_resize_hit(&controller, source_window_id, hit, core_point, app);
                     let resize_started = controller
                         .update(app, |controller, _| controller.resize_interaction().is_some());
                     if resize_started {
@@ -359,6 +359,16 @@ pub(crate) fn register_pointer_events(
                 return;
             }
             if phase != DispatchPhase::Capture {
+                return;
+            }
+
+            let window_id = window.window_handle().window_id();
+            let resize_owned_by_another_window = controller.update(app, |controller, _| {
+                controller
+                    .resize_interaction()
+                    .is_some_and(|interaction| interaction.window_id != window_id)
+            });
+            if resize_owned_by_another_window {
                 return;
             }
 
@@ -461,15 +471,16 @@ pub(crate) fn register_pointer_events(
 
             if resize_active {
                 let should_schedule = controller.update(app, |controller, _| {
-                    controller.queue_resize_frame_point(point)
+                    controller.queue_resize_frame_point(window_id, point)
                 });
                 if should_schedule {
                     let controller = controller.clone();
                     window.on_next_frame(move |_, app| {
-                        let point = controller
-                            .update(app, |controller, _| controller.take_resize_frame_point());
+                        let point = controller.update(app, |controller, _| {
+                            controller.take_resize_frame_point(window_id)
+                        });
                         if let Some(point) = point {
-                            update_resize(&controller, point, app);
+                            update_resize(&controller, window_id, point, app);
                         }
                     });
                 }
@@ -499,6 +510,15 @@ pub(crate) fn register_pointer_events(
             if manager.update(app, |manager, _| manager.native_move_active()) {
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
+                return;
+            }
+            let window_id = window.window_handle().window_id();
+            let resize_owned_by_another_window = controller.update(app, |controller, _| {
+                controller
+                    .resize_interaction()
+                    .is_some_and(|interaction| interaction.window_id != window_id)
+            });
+            if resize_owned_by_another_window {
                 return;
             }
             if !DockInteractionCoordinator::ensure_current(&controller, window, &pointer_capture, app) {
@@ -571,9 +591,9 @@ pub(crate) fn register_pointer_events(
             };
             if resize_active {
                 controller.update(app, |controller, _| {
-                    controller.clear_resize_frame_point();
+                    controller.clear_resize_frame_point(window_id);
                 });
-                finish_resize(&controller, point, event.click_count, app);
+                finish_resize(&controller, window_id, point, event.click_count, app);
             }
             DockInteractionCoordinator::release(window, &pointer_capture);
 
@@ -636,6 +656,15 @@ pub(crate) fn register_pointer_events(
             if manager.update(app, |manager, _| manager.native_move_active()) {
                 DockInteractionCoordinator::release(window, &pointer_capture);
                 pointer_press.set(None);
+                return;
+            }
+            let window_id = window.window_handle().window_id();
+            let resize_owned_by_another_window = controller.update(app, |controller, _| {
+                controller
+                    .resize_interaction()
+                    .is_some_and(|interaction| interaction.window_id != window_id)
+            });
+            if resize_owned_by_another_window {
                 return;
             }
             pointer_press.set(None);
