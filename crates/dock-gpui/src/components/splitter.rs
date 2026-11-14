@@ -18,6 +18,7 @@ impl SplitterView {
         metrics: DockMetrics,
         theme: Theme,
         _raise_floating: Option<FloatingGroupId>,
+        hide_line: bool,
     ) -> impl IntoElement {
         let hit_rect = splitter.rect;
         let thickness = metrics.splitter_thickness;
@@ -60,14 +61,18 @@ impl SplitterView {
             Axis::X => hitbox.cursor_col_resize(),
             Axis::Y => hitbox.cursor_row_resize(),
         };
-        hitbox.child(
-            div()
-                .absolute()
-                .left(px(line_left))
-                .top(px(line_top))
-                .w(px(line_width.max(0.0)))
-                .h(px(line_height.max(0.0)))
-                .bg(rgb(theme.colors.splitter_handle)),
-        )
+        if hide_line {
+            hitbox
+        } else {
+            hitbox.child(
+                div()
+                    .absolute()
+                    .left(px(line_left))
+                    .top(px(line_top))
+                    .w(px(line_width.max(0.0)))
+                    .h(px(line_height.max(0.0)))
+                    .bg(rgb(theme.colors.splitter_handle)),
+            )
+        }
     }
 }
