@@ -610,16 +610,26 @@ impl Render for FloatingHost {
                 let viewport = window.viewport_size();
                 let size = Size::new(viewport.width.as_f32(), viewport.height.as_f32());
                 let window_id = window.window_handle().window_id();
-                if let Some(manager) = host.manager.upgrade() {
-                    let _ = manager.update(host_cx, |manager, manager_cx| {
-                        manager.sync_native_resize_bounds_from_viewport(
-                            group,
-                            window_id,
-                            size,
-                            manager_cx,
-                        );
-                    });
-                }
+
+                // bounds_changed() can be invoked by FloatingWindowManager while
+                // it is already reconciling a native HWND. GPUI calls this
+                // observer synchronously, so re-entering manager.update here
+                // would panic. Defer until the current effect/update cycle ends.
+                host_cx.defer_in(window, move |host, _, deferred_cx| {
+                    if host.group != Some(group) {
+                        return;
+                    }
+                    if let Some(manager) = host.manager.upgrade() {
+                        let _ = manager.update(deferred_cx, |manager, manager_cx| {
+                            manager.sync_native_resize_bounds_from_viewport(
+                                group,
+                                window_id,
+                                size,
+                                manager_cx,
+                            );
+                        });
+                    }
+                });
             })
             .detach();
             self.native_bounds_observed = true;
