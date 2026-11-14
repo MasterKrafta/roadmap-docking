@@ -275,9 +275,6 @@ struct NativeMoveSession {
     threshold_crossed: bool,
     high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
-    /// Hide the opaque source window while the pointer is over another DockHost,
-    /// so the destination composition and its drop feedback remain visible.
-    source_hidden: bool,
 }
 
 #[derive(Clone)]
@@ -870,7 +867,6 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
-            source_hidden: false,
         });
         self.schedule_native_move(cx, group, window_id);
         if hide_header {
@@ -983,7 +979,6 @@ impl FloatingWindowManager {
             }
         });
         let Some(source) = source else {
-            self.show_dragged_window(state);
             state.drop_target = None;
             self.clear_native_drag_target(cx);
             return;
@@ -998,18 +993,13 @@ impl FloatingWindowManager {
         ) {
             Ok(NativeWindowAtPoint::Known(window)) => window,
             Ok(NativeWindowAtPoint::Foreign | NativeWindowAtPoint::Empty) | Err(_) => {
-                self.show_dragged_window(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             }
         };
         let resolved = if Some(target_window) == self.main_native_window {
-            // Main is rendered behind owned Floating windows. Hide the dragged
-            // source while it is over Main so the destination is not obscured.
-            self.hide_dragged_window(state);
             let Some(point) = self.core_point_for_main(cursor) else {
-                self.show_dragged_window(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
@@ -1037,17 +1027,11 @@ impl FloatingWindowManager {
                 (entry.native_window == Some(target_window) && *group != state.group)
                     .then_some((*group, entry.window_id))
             }) else {
-                self.show_dragged_window(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             };
-            // Both compositions are opaque native windows. Hide only the
-            // dragged source; keep its native bounds tracking the pointer so
-            // it can be restored immediately when the cursor leaves the target.
-            self.hide_dragged_window(state);
             let Some(point) = self.core_point_for_floating(target_window, cursor) else {
-                self.show_dragged_window(state);
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
@@ -1072,34 +1056,6 @@ impl FloatingWindowManager {
             })
         };
         state.drop_target = resolved;
-    }
-
-    fn hide_dragged_window(&self, state: &mut NativeMoveSession) {
-        if state.source_hidden {
-            return;
-        }
-        match self.native_ops.hide(state.native_window) {
-            Ok(()) => state.source_hidden = true,
-            Err(error) => tracing::debug!(
-                ?state.group,
-                %error,
-                "could not hide the dragged Floating window over a docking target"
-            ),
-        }
-    }
-
-    fn show_dragged_window(&self, state: &mut NativeMoveSession) {
-        if !state.source_hidden {
-            return;
-        }
-        match self.native_ops.show_no_activate(state.native_window) {
-            Ok(()) => state.source_hidden = false,
-            Err(error) => tracing::warn!(
-                ?state.group,
-                %error,
-                "could not restore the dragged Floating window after leaving a docking target"
-            ),
-        }
     }
 
 
@@ -1254,7 +1210,7 @@ impl FloatingWindowManager {
         DockGeometry::host_local_point_from_screen(screen, client, Point::ZERO, scale)
     }
 
-    fn finish_native_move(&mut self, mut state: NativeMoveSession, cx: &mut Context<Self>) {
+    fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -1295,21 +1251,11 @@ impl FloatingWindowManager {
             self.cancel_controller_move(cx);
         }
 
-        // Rejected/no-op drops leave the source floating; show it again.
-        // Successful docking removes its Floating root, so reconciliation
-        // keeps the now-unused source host hidden.
-        let source_still_floating = self.controller.update(cx, |controller, _| {
-            controller.layout().floating_group(state.group).is_some()
-        });
-        if source_still_floating {
-            self.show_dragged_window(&mut state);
-        }
-
         self.redraw_visible_hosts(cx);
         cx.notify();
     }
 
-    fn cancel_native_move(&mut self, mut state: NativeMoveSession, cx: &mut Context<Self>) {
+    fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
@@ -1325,7 +1271,6 @@ impl FloatingWindowManager {
         {
             tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
         }
-        self.show_dragged_window(&mut state);
         cx.notify();
     }
 
