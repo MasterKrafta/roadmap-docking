@@ -2384,6 +2384,89 @@ fn floating_native_edge_resize_only_updates_composition_bounds() {
 }
 
 #[test]
+fn floating_splitter_resizes_from_current_window_allocated_widths() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+    let constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(200.0, 160.0),
+        None,
+        false,
+    );
+
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("floating-splitter-current-left").unwrap(),
+        constraints.clone(),
+    );
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("floating-splitter-current-right").unwrap(),
+        constraints,
+    );
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        280.0,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.25, 0.75]);
+    let floating = builder.floating_group(
+        root,
+        Rect::new(Point::new(100.0, 50.0), Size::new(804.0, 320.0)),
+        1,
+    );
+    let mut layout = builder.build();
+
+    let before = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(before.columns[0].rect.size.width, 200.0);
+    assert_eq!(before.columns[1].rect.size.width, 600.0);
+
+    layout
+        .apply(
+            DockCommand::ResizeSplitColumnBoundary {
+                split: root,
+                boundary_index: 0,
+                delta: 50.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let after = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(after.columns[0].rect.size.width, 250.0);
+    assert_eq!(after.columns[1].rect.size.width, 550.0);
+    assert_eq!(after.columns[1].rect.origin.x, 254.0);
+    assert_eq!(
+        after.columns[1].rect.origin.x + after.columns[1].rect.size.width,
+        804.0,
+    );
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if (split.ratios[0] - 250.0 / 800.0).abs() < 1.0e-4
+                && (split.ratios[1] - 550.0 / 800.0).abs() < 1.0e-4
+    ));
+    assert!(matches!(
+        layout.node(left_column),
+        Some(Node::Column(column)) if column.width == 250.0
+    ));
+    assert!(matches!(
+        layout.node(right_column),
+        Some(Node::Column(column)) if column.width == 550.0
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_single_column_edge_resize_keeps_column_filling_the_window() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
