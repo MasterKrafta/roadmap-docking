@@ -7,8 +7,8 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
-    DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    Node, NodeId, PanelId, Point, Rect, Size,
+    DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId, Node, NodeId,
+    PanelId, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
