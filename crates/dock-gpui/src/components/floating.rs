@@ -452,6 +452,17 @@ fn apply_floating_window_resize_delta(
     }
 }
 
+fn floating_window_resize_delta(
+    start: platform::PhysicalPoint,
+    current: platform::PhysicalPoint,
+    scale_factor: f32,
+) -> Point {
+    Point::new(
+        (i64::from(current.x) - i64::from(start.x)) as f32 / scale_factor,
+        (i64::from(current.y) - i64::from(start.y)) as f32 / scale_factor,
+    )
+}
+
 fn update_floating_window_resize(
     controller: &Entity<DockController>,
     manager: &WeakEntity<FloatingWindowManager>,
@@ -465,12 +476,8 @@ fn update_floating_window_resize(
     }) else {
         return;
     };
-    let delta = Point::new(
-        (i64::from(cursor.x) - i64::from(press.start_cursor.x)) as f32
-            / press.scale_factor,
-        (i64::from(cursor.y) - i64::from(press.start_cursor.y)) as f32
-            / press.scale_factor,
-    );
+    let delta =
+        floating_window_resize_delta(press.start_cursor, cursor, press.scale_factor);
     apply_floating_window_resize_delta(controller, press, delta, app);
 }
 
@@ -2529,6 +2536,17 @@ mod floating_window_resize_tests {
             ),
             scale_factor: 1.5,
         }
+    }
+
+    #[test]
+    fn global_cursor_delta_is_converted_to_logical_pixels() {
+        let delta = super::floating_window_resize_delta(
+            platform::PhysicalPoint { x: 1_000, y: 500 },
+            platform::PhysicalPoint { x: 1_060, y: 530 },
+            1.5,
+        );
+
+        assert_eq!(delta, Point::new(40.0, 20.0));
     }
 
     #[test]
