@@ -628,14 +628,12 @@ impl FloatingWindowManager {
         self.ensure_native_resize_session(group, window_id, cx);
     }
 
-    /// Receives a fresh GPUI client viewport from the native window-bounds observer.
-    /// The native rect supplies the physical desktop origin; the viewport supplies
-    /// the logical client size sampled for this same resize frame.
-    pub(crate) fn sync_native_resize_bounds_from_viewport(
+    /// Samples current native bounds after the GPUI window-bounds observer fires.
+    /// All geometry components are read from the HWND at deferred execution time.
+    pub(crate) fn sync_native_resize_bounds(
         &mut self,
         group: FloatingGroupId,
         window_id: WindowId,
-        viewport: Size,
         cx: &mut Context<Self>,
     ) {
         if !self.ensure_native_resize_session(group, window_id, cx) {
@@ -647,7 +645,7 @@ impl FloatingWindowManager {
         else {
             return;
         };
-        let Some(bounds) = self.core_bounds_from_native_viewport(native_window, viewport) else {
+        let Some(bounds) = self.core_bounds_from_native_window(native_window) else {
             return;
         };
         let Some(mut state) = self.native_resize.filter(|state| {
@@ -854,21 +852,6 @@ impl FloatingWindowManager {
         let client_size = self.native_ops.client_size(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
-    }
-
-    fn core_bounds_from_native_viewport(
-        &self,
-        native_window: NativeWindowId,
-        viewport: Size,
-    ) -> Option<Rect> {
-        viewport.validate_positive().ok()?;
-        let rect = self.native_ops.window_rect(native_window).ok()?;
-        let bounds = Rect::new(
-            Point::new(rect.left as f32, rect.top as f32),
-            viewport,
-        );
-        bounds.validate_non_empty().ok()?;
-        Some(bounds)
     }
 
     /// Starts a thresholded native move from the shared floating DockAreaHeader.
