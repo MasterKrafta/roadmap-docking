@@ -2043,7 +2043,7 @@ impl FloatingWindowManager {
             arrange_contiguous_window_chain_bounds(member_bounds, &frame_geometries, anchor)
         else {
             return Err(dock_core::CommandError::InvalidTarget {
-                reason: "could not calculate physical widths for the Floating window chain",
+                reason: "could not calculate visible native frame geometry for the Floating window chain",
             });
         };
 
