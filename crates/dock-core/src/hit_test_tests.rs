@@ -114,15 +114,23 @@ fn hit_test_preserves_metric_validation_reason() {
 #[test]
 fn blank_space_in_frontmost_floating_window_does_not_leak_through() {
     let metrics = DockMetrics::default();
-    let (layout, rects, top_floating, _) = large_floating_fixture();
+    let (layout, computed_rects, top_floating, _) = large_floating_fixture();
     let blank_point = Point::new(700.0, 250.0);
-    let floating_rect = rects
+    let floating_rect = computed_rects
         .floating_groups
         .iter()
         .find(|floating| floating.group == top_floating)
         .unwrap()
         .rect;
     assert!(floating_rect.contains(blank_point).unwrap());
+
+    // Model an unoccupied client-area point without coupling the opacity
+    // assertion to whichever splitter or control happens to cover this
+    // coordinate in the current ratio-based composition.
+    let rects = LayoutRects {
+        floating_groups: computed_rects.floating_groups,
+        ..LayoutRects::default()
+    };
 
     assert_eq!(
         layout.hit_test(blank_point, &rects, &metrics).unwrap(),
