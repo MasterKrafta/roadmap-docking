@@ -314,42 +314,32 @@ fn floating_window_resize_edge(
     let near_top = top_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
     let near_bottom = bottom_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
 
-    let horizontal = match (near_left, near_right) {
-        (true, true) => Some(if left_distance <= right_distance {
+    // Keep the axes separate until the final match. This makes the four
+    // corner combinations explicit and avoids representing impossible
+    // vertical values as horizontal edges (and vice versa).
+    let horizontal_active = near_left || near_right;
+    let vertical_active = near_top || near_bottom;
+    let is_left = near_left && (!near_right || left_distance <= right_distance);
+    let is_top = near_top && (!near_bottom || top_distance <= bottom_distance);
+
+    match (horizontal_active, vertical_active) {
+        (true, true) => match (is_left, is_top) {
+            (true, true) => Some(FloatingWindowResizeEdge::TopLeft),
+            (false, true) => Some(FloatingWindowResizeEdge::TopRight),
+            (true, false) => Some(FloatingWindowResizeEdge::BottomLeft),
+            (false, false) => Some(FloatingWindowResizeEdge::BottomRight),
+        },
+        (true, false) => Some(if is_left {
             FloatingWindowResizeEdge::Left
         } else {
             FloatingWindowResizeEdge::Right
         }),
-        (true, false) => Some(FloatingWindowResizeEdge::Left),
-        (false, true) => Some(FloatingWindowResizeEdge::Right),
-        (false, false) => None,
-    };
-    let vertical = match (near_top, near_bottom) {
-        (true, true) => Some(if top_distance <= bottom_distance {
+        (false, true) => Some(if is_top {
             FloatingWindowResizeEdge::Top
         } else {
             FloatingWindowResizeEdge::Bottom
         }),
-        (true, false) => Some(FloatingWindowResizeEdge::Top),
-        (false, true) => Some(FloatingWindowResizeEdge::Bottom),
         (false, false) => None,
-    };
-
-    match (horizontal, vertical) {
-        (Some(FloatingWindowResizeEdge::Left), Some(FloatingWindowResizeEdge::Top)) => {
-            Some(FloatingWindowResizeEdge::TopLeft)
-        }
-        (Some(FloatingWindowResizeEdge::Right), Some(FloatingWindowResizeEdge::Top)) => {
-            Some(FloatingWindowResizeEdge::TopRight)
-        }
-        (Some(FloatingWindowResizeEdge::Left), Some(FloatingWindowResizeEdge::Bottom)) => {
-            Some(FloatingWindowResizeEdge::BottomLeft)
-        }
-        (Some(FloatingWindowResizeEdge::Right), Some(FloatingWindowResizeEdge::Bottom)) => {
-            Some(FloatingWindowResizeEdge::BottomRight)
-        }
-        (Some(edge), None) | (None, Some(edge)) => Some(edge),
-        (None, None) => None,
     }
 }
 
