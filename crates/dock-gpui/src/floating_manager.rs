@@ -642,12 +642,22 @@ impl FloatingWindowManager {
             return;
         };
 
+        // Observe_native_resize can start after Windows has already begun
+        // its modal sizing loop. Classify the active horizontal edge from the
+        // cursor immediately so a fast right-edge drag cannot fall back to a
+        // bounds-only resize before the first polling delta is observed.
+        let horizontal_edge = self
+            .native_ops
+            .cursor_position()
+            .ok()
+            .and_then(|cursor| horizontal_resize_edge_at_cursor(cursor, initial_native_bounds));
+
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
             transaction_started: false,
             last_native_bounds: initial_native_bounds,
-            horizontal_edge: None,
+            horizontal_edge,
         });
         self.schedule_native_resize(cx, group, window_id);
     }
@@ -2344,6 +2354,29 @@ impl FloatingWindowManager {
 }
 
 
+fn horizontal_resize_edge_at_cursor(
+    cursor: PhysicalPoint,
+    bounds: PhysicalRect,
+) -> Option<FloatingResizeEdge> {
+    if bounds.right <= bounds.left {
+        return None;
+    }
+
+    // Windows' non-client sizing border can sit just outside GetWindowRect.
+    // Use a small physical-pixel margin, including diagonal corner drags.
+    const EDGE_TOLERANCE: i64 = 32;
+    let left_distance = (i64::from(cursor.x) - i64::from(bounds.left)).abs();
+    let right_distance = (i64::from(cursor.x) - i64::from(bounds.right)).abs();
+
+    if left_distance <= EDGE_TOLERANCE && left_distance < right_distance {
+        Some(FloatingResizeEdge::Left)
+    } else if right_distance <= EDGE_TOLERANCE && right_distance < left_distance {
+        Some(FloatingResizeEdge::Right)
+    } else {
+        None
+    }
+}
+
 fn is_managed_foreground_window(
     foreground: NativeWindowId,
     main_window: Option<NativeWindowId>,
@@ -2460,6 +2493,55 @@ impl Drop for FloatingWindowManager {
         if self.native_move.is_some_and(|state| state.high_resolution_timer) {
             let _ = self.native_ops.end_high_resolution_timer();
         }
+    }
+}
+
+#[cfg(test)]
+mod native_resize_edge_tests {
+    use super::horizontal_resize_edge_at_cursor;
+    use dock_core::FloatingResizeEdge;
+    use platform::{PhysicalPoint, PhysicalRect};
+
+    fn bounds() -> PhysicalRect {
+        PhysicalRect {
+            left: 100,
+            top: 80,
+            right: 700,
+            bottom: 480,
+        }
+    }
+
+    #[test]
+    fn cursor_at_right_non_client_edge_selects_right_column_resize() {
+        assert_eq!(
+            horizontal_resize_edge_at_cursor(
+                PhysicalPoint { x: 704, y: 240 },
+                bounds(),
+            ),
+            Some(FloatingResizeEdge::Right),
+        );
+    }
+
+    #[test]
+    fn cursor_at_left_non_client_edge_selects_left_column_resize() {
+        assert_eq!(
+            horizontal_resize_edge_at_cursor(
+                PhysicalPoint { x: 96, y: 240 },
+                bounds(),
+            ),
+            Some(FloatingResizeEdge::Left),
+        );
+    }
+
+    #[test]
+    fn vertical_edge_drag_does_not_select_a_horizontal_resize_edge() {
+        assert_eq!(
+            horizontal_resize_edge_at_cursor(
+                PhysicalPoint { x: 400, y: 80 },
+                bounds(),
+            ),
+            None,
+        );
     }
 }
 
