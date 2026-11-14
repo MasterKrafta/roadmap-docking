@@ -1093,6 +1093,7 @@ fn dock_area_drag_handle_side(
             if CompositionDragArea::contains(
                 area_rect,
                 &area_columns,
+                &rects.splitters,
                 point,
                 metrics.column_header_height,
                 metrics.column_control_button_width,
@@ -1195,7 +1196,7 @@ fn flyout_title_grip_contains(
 mod hit_dispatch_tests {
     use dock_core::{
         Axis, DragHandle, DragPayload, DockSide, FloatingGroupId, HitResult, NodeId, PanelId,
-        Point, Rect, ResizeEdge,
+        Point, Rect, ResizeEdge, SplitterRect,
     };
     use slotmap::Key;
 
@@ -1331,6 +1332,7 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
+            &[],
             Point::new(100.0, 30.0),
             32.0,
             28.0,
@@ -1338,6 +1340,7 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
+            &[],
             Point::new(200.0, 30.0),
             32.0,
             28.0,
@@ -1345,6 +1348,7 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
+            &[],
             Point::new(240.0, 30.0),
             32.0,
             28.0,
@@ -1352,6 +1356,7 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
+            &[],
             Point::new(100.0, 52.0),
             32.0,
             28.0,
@@ -1368,6 +1373,7 @@ mod hit_dispatch_tests {
         assert!(crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
+            &[],
             Point::new(350.0, 30.0),
             32.0,
             28.0,
@@ -1375,7 +1381,23 @@ mod hit_dispatch_tests {
         assert!(!crate::dock_components::CompositionDragArea::contains(
             composition,
             &composition_columns,
+            &[],
             Point::new(490.0, 30.0),
+            32.0,
+            28.0,
+        ));
+
+        let splitters = [SplitterRect::new(
+            NodeId::null(),
+            0,
+            Axis::X,
+            Rect::new(Point::new(247.0, 20.0), dock_core::Size::new(6.0, 32.0)),
+        )];
+        assert!(!crate::dock_components::CompositionDragArea::contains(
+            composition,
+            &composition_columns,
+            &splitters,
+            Point::new(250.0, 30.0),
             32.0,
             28.0,
         ));
