@@ -245,6 +245,21 @@ pub trait NativeWindowOps {
         Ok(None)
     }
 
+    /// Returns the latest outer RECT supplied by WM_SIZING, after native minimum clamping.
+    ///
+    /// This can differ from GetWindowRect while Windows displays only a resize outline.
+    fn resize_preview_rect(
+        &self,
+        _window: NativeWindowId,
+    ) -> Result<Option<PhysicalRect>, NativeError> {
+        Ok(None)
+    }
+
+    /// Clears the last WM_SIZING preview after the resize transaction is committed.
+    fn clear_resize_preview(&self, _window: NativeWindowId) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Finds the topmost window under a screen point. Foreign windows are
     /// reported separately so callers cannot mistake them for empty desktop space.
     /// The dragged window can be excluded so it cannot become its own drop target.
@@ -538,6 +553,7 @@ mod windows_impl {
     struct ResizeLoopState {
         active: bool,
         horizontal_edge: Option<NativeHorizontalResizeEdge>,
+        sizing_rect: Option<PhysicalRect>,
         left_min_client_width: i32,
         right_min_client_width: i32,
     }
@@ -638,6 +654,7 @@ mod windows_impl {
             unsafe {
                 (*state).active = true;
                 (*state).horizontal_edge = None;
+                (*state).sizing_rect = None;
             };
         }
         if message == WM_SIZING {
@@ -656,6 +673,21 @@ mod windows_impl {
             && unsafe {
                 clamp_native_sizing_rect(window, wparam.0 as u32, lparam, &*state)
             };
+
+        if message == WM_SIZING && lparam.0 != 0 {
+            // Capture the post-clamp proposal, not GetWindowRect: when Windows
+            // uses outline-only resizing, the HWND itself remains at its old bounds
+            // until the modal sizing loop finishes.
+            // SAFETY: WM_SIZING supplies a valid RECT pointer for this callback.
+            let preview = unsafe { rect_from_native(*(lparam.0 as *const RECT)) };
+            // SAFETY: This subclass owns the live ResizeLoopState allocation.
+            unsafe { (*state).sizing_rect = Some(preview) };
+        }
+        if message == WM_CANCELMODE {
+            // Escape/cancellation must not commit the last preview rectangle.
+            // SAFETY: This subclass owns the live ResizeLoopState allocation.
+            unsafe { (*state).sizing_rect = None };
+        }
 
         if message == WM_EXITSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
@@ -1151,6 +1183,7 @@ mod windows_impl {
                 let pointer = Box::into_raw(Box::new(ResizeLoopState {
                     active: false,
                     horizontal_edge: None,
+                    sizing_rect: None,
                     left_min_client_width: 0,
                     right_min_client_width: 0,
                 }));
@@ -1422,6 +1455,52 @@ mod windows_impl {
             })
         }
 
+        fn resize_preview_rect(
+            &self,
+            window: NativeWindowId,
+        ) -> Result<Option<PhysicalRect>, NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Ok(None);
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            Ok(unsafe {
+                (*(reference_data as *const ResizeLoopState)).sizing_rect
+            })
+        }
+
+        fn clear_resize_preview(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Ok(());
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            unsafe { (*(reference_data as *mut ResizeLoopState)).sizing_rect = None };
+            Ok(())
+        }
+
         fn window_from_point(
             &self,
             point: PhysicalPoint,
@@ -1573,6 +1652,21 @@ mod windows_impl {
             assert_eq!(rect.left, 100);
             assert_eq!(rect.right, 660);
             assert_eq!(rect.right - rect.left, 560);
+        }
+
+        #[test]
+        fn outline_resize_preview_uses_the_post_clamp_rectangle() {
+            let mut rect = RECT {
+                left: 100,
+                top: 20,
+                right: 500,
+                bottom: 400,
+            };
+            assert!(clamp_sizing_rect(&mut rect, 1, 560));
+            let preview = rect_from_native(rect);
+            assert_eq!(preview.left, -60);
+            assert_eq!(preview.right, 500);
+            assert_eq!(preview.width(), 560);
         }
 
         #[test]
