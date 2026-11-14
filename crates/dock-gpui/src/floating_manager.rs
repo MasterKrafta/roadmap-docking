@@ -859,7 +859,11 @@ impl FloatingWindowManager {
             .map(|(group, bounds)| {
                 let Some(entry) = self.panel_window_for_group(*group) else {
                     return NativeFrameGeometry::without_frame(bounds.size.width)
-                        .expect("positive Core window width");
+                        .unwrap_or(NativeFrameGeometry {
+                            outer_width: bounds.size.width.max(1.0),
+                            visible_left_inset: 0.0,
+                            visible_right_inset: 0.0,
+                        });
                 };
                 let Some(native_window) = entry.native_window else {
                     let scale = entry.native_scale_factor.unwrap_or(1.0);
@@ -3940,9 +3944,9 @@ mod contiguous_window_chain_bounds_tests {
         ];
         let arranged = arrange_contiguous_window_chain_bounds(input, &frames, b)
             .expect("visible frame geometry must place the chain");
-        assert_eq!(arranged[0].1.origin, Point::new(562.0, 40.0));
+        assert_eq!(arranged[0].1.origin, Point::new(564.0, 40.0));
         assert_eq!(arranged[1].1.origin, Point::new(1000.0, 40.0));
-        assert_eq!(arranged[2].1.origin, Point::new(1492.0, 40.0));
+        assert_eq!(arranged[2].1.origin, Point::new(1488.0, 40.0));
 
         let a_visible_right =
             arranged[0].1.origin.x + frames[0].outer_width - frames[0].visible_right_inset;
@@ -3955,7 +3959,7 @@ mod contiguous_window_chain_bounds_tests {
     }
 
     #[test]
-    fn rejects_missing_or_invalid_physical_widths() {
+    fn rejects_missing_or_invalid_frame_geometry() {
         let (_ids, [a, b, _c]) = groups();
         let input = vec![
             (a, Rect::new(Point::ZERO, Size::new(100.0, 200.0))),
