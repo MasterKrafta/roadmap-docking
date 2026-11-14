@@ -422,6 +422,7 @@ fn floating_window_resize_command(
 
 fn apply_floating_window_resize_delta(
     controller: &Entity<DockController>,
+    manager: &WeakEntity<FloatingWindowManager>,
     press: FloatingWindowResizePress,
     delta: Point,
     app: &mut gpui::App,
@@ -439,6 +440,27 @@ fn apply_floating_window_resize_delta(
                 );
             }
         });
+    }
+
+    // Core remains the source of truth and its local geometry is refreshed
+    // immediately. Apply the resulting bounds once to the HWND; the manager's
+    // normal reconciliation skips this group until the gesture is committed.
+    let bounds = controller.update(app, |controller, _| {
+        controller
+            .layout()
+            .floating_group(press.group)
+            .map(|floating| floating.bounds)
+    });
+    if let (Some(bounds), Some(manager)) = (bounds, manager.upgrade()) {
+        let applied = manager.update(app, |manager, manager_cx| {
+            manager.update_custom_resize_bounds(press.group, bounds, manager_cx)
+        });
+        if !applied {
+            tracing::warn!(
+                ?press.group,
+                "could not apply floating-window resize bounds to the native window"
+            );
+        }
     }
 }
 
@@ -468,7 +490,7 @@ fn update_floating_window_resize(
     };
     let delta =
         floating_window_resize_delta(press.start_cursor, cursor, press.scale_factor);
-    apply_floating_window_resize_delta(controller, press, delta, app);
+    apply_floating_window_resize_delta(controller, manager, press, delta, app);
 }
 
 #[derive(Clone, Copy)]
@@ -980,9 +1002,15 @@ impl Render for FloatingHost {
                             if let (Some(start_bounds), Some((start_cursor, scale_factor))) =
                                 (start_bounds, pointer_start)
                             {
-                                let transaction_started = controller_for_down.update(app, |controller, _| {
-                                    controller.begin_native_resize_transaction()
+                                let manager_resize_started = manager_for_down.upgrade().is_some_and(|manager| {
+                                    manager.update(app, |manager, _| {
+                                        manager.begin_custom_resize(group)
+                                    })
                                 });
+                                let transaction_started = manager_resize_started
+                                    && controller_for_down.update(app, |controller, _| {
+                                        controller.begin_native_resize_transaction()
+                                    });
                                 if transaction_started {
                                     window_resize_press_for_down.set(Some(
                                         FloatingWindowResizePress {
@@ -1002,6 +1030,17 @@ impl Render for FloatingHost {
                                         controller_for_down.update(app, |controller, controller_cx| {
                                             controller.finish_native_resize_transaction();
                                             controller_cx.notify();
+                                        });
+                                        if let Some(manager) = manager_for_down.upgrade() {
+                                            manager.update(app, |manager, manager_cx| {
+                                                manager.finish_custom_resize(group, manager_cx);
+                                            });
+                                        }
+                                    }
+                                } else if manager_resize_started {
+                                    if let Some(manager) = manager_for_down.upgrade() {
+                                        manager.update(app, |manager, manager_cx| {
+                                            manager.finish_custom_resize(group, manager_cx);
                                         });
                                     }
                                 }
@@ -1273,6 +1312,11 @@ impl Render for FloatingHost {
                                     window,
                                     &pointer_capture_for_move,
                                 );
+                                if let Some(manager) = manager_for_move.upgrade() {
+                                    manager.update(app, |manager, manager_cx| {
+                                        manager.finish_custom_resize(press.group, manager_cx);
+                                    });
+                                }
                                 app.stop_propagation();
                                 return;
                             }
@@ -1649,6 +1693,11 @@ impl Render for FloatingHost {
                                 controller.finish_native_resize_transaction();
                                 controller_cx.notify();
                             });
+                            if let Some(manager) = manager_for_up.upgrade() {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.finish_custom_resize(press.group, manager_cx);
+                                });
+                            }
                             DockInteractionCoordinator::release(
                                 window,
                                 &pointer_capture_for_up,
@@ -2334,6 +2383,7 @@ impl Render for FloatingHost {
             if let Some(press) = window_resize_press_for_escape.get() {
                 apply_floating_window_resize_delta(
                     &controller_for_escape,
+                    &manager_for_escape,
                     press,
                     Point::ZERO,
                     app,
@@ -2343,6 +2393,11 @@ impl Render for FloatingHost {
                     controller.finish_native_resize_transaction();
                     controller_cx.notify();
                 });
+                if let Some(manager) = manager_for_escape.upgrade() {
+                    manager.update(app, |manager, manager_cx| {
+                        manager.finish_custom_resize(press.group, manager_cx);
+                    });
+                }
                 DockInteractionCoordinator::release(
                     window,
                     &pointer_capture_for_escape,
