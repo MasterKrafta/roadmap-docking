@@ -3961,8 +3961,8 @@ mod window_chain_registry_tests {
 
     #[test]
     fn inserts_a_new_window_sequence_before_or_after_an_existing_chain() {
-        let [left, anchor, right, source_a, source_b] =
-            groups(5).try_into().expect("five group ids");
+        let [left, anchor, right, source_a, source_b, new_right_a, new_right_b] =
+            groups(7).try_into().expect("seven group ids");
         let mut chains = WindowChainRegistry::default();
         assert!(chains.link_after(anchor, right));
         assert!(chains.link_before(anchor, left));
@@ -3973,8 +3973,6 @@ mod window_chain_registry_tests {
             vec![left, source_a, source_b, anchor, right]
         );
 
-        let [new_right_a, new_right_b] =
-            groups(2).try_into().expect("two group ids");
         assert!(chains.link_sequence_at(anchor, &[new_right_a, new_right_b], false));
         assert_eq!(
             chains.members_for(anchor),
