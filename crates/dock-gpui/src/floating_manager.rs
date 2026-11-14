@@ -704,6 +704,7 @@ impl FloatingWindowManager {
         {
             entry.native_bounds_dirty = true;
         }
+        self.sync_native_resize_constraints(group, window_id, cx);
         self.schedule_native_resize(cx, group, window_id);
         true
     }
@@ -759,6 +760,9 @@ impl FloatingWindowManager {
             if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
                 self.apply_native_resize_bounds(group, bounds, &mut state, cx);
             }
+            // Refresh even when HWND bounds did not change: that can mean a
+            // stale Win32 minimum is clamping the proposed edge in both directions.
+            self.sync_native_resize_constraints(group, window_id, cx);
             self.native_resize = Some(state);
             return true;
         }
@@ -2358,6 +2362,50 @@ impl FloatingWindowManager {
                 ),
             }
         }
+    }
+
+    /// Recomputes native minimum sizes from the live Core layout during an OS resize.
+    ///
+    /// LayoutChanged notifications can be coalesced with an active reconciliation.
+    /// Polling the constraints alongside HWND bounds prevents Win32 from retaining
+    /// an obsolete minimum width after one edge has already changed the composition.
+    fn sync_native_resize_constraints(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let layout = controller.layout();
+            let metrics = controller.metrics();
+            let floating = layout.floating_group(group)?;
+
+            Some(FloatingGroupSnapshot {
+                id: group,
+                bounds: floating.bounds,
+                z_order: floating.z_order,
+                minimum_size: layout.floating_minimum_size(group, &metrics).ok(),
+                horizontal_resize_minimum_widths: layout
+                    .floating_horizontal_resize_minimum_widths(group, &metrics)
+                    .ok()
+                    .flatten(),
+                panels: Vec::new(),
+            })
+        });
+        let Some(snapshot) = snapshot else {
+            return;
+        };
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return;
+        };
+        let Some(mut entry) = self.registry.windows.remove(&panel) else {
+            return;
+        };
+
+        if entry.window_id == window_id {
+            self.sync_native_resize(&mut entry, &snapshot);
+        }
+        self.registry.windows.insert(panel, entry);
     }
 
     fn sync_window_bounds(
