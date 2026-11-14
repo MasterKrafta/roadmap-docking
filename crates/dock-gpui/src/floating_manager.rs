@@ -76,7 +76,6 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Requests a redraw from the exact GPUI window that owns this host.
     /// Detaches this composition and confirms the old host rendered a frame before its views move.
     fn set_group_after_next_frame(
         &self,
@@ -109,6 +108,7 @@ impl PanelWindowHandle {
         }
     }
 
+    /// Requests a redraw from the exact GPUI window that owns this host.
     fn notify_host(&self, cx: &mut Context<FloatingWindowManager>) -> Result<(), String> {
         match self {
             Self::Floating(window) => window
@@ -1528,7 +1528,7 @@ impl FloatingWindowManager {
                         cx,
                     ) {
                         Ok(()) => {
-                            started_handoffs.push((panel, handoff_panels.unwrap_or_default()));
+                            started_handoffs.push((panel, handoff_panels.clone().unwrap_or_default()));
                             true
                         }
                         Err(error) => {
