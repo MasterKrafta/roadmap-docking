@@ -1952,7 +1952,9 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     assert_eq!(resized_rects.splitters.len(), 1);
     assert_eq!(
         resized_rects.splitters[0].rect.origin.x,
-        metrics.default_column_width + 24.0,
+        metrics.default_column_width
+            + 24.0
+            + (metrics.splitter_thickness - metrics.splitter_hit_zone) * 0.5,
     );
 
     assert!(matches!(
