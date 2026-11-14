@@ -428,21 +428,47 @@ impl DockController {
             bounds: floating_bounds,
         });
 
+        self.finish_native_window_move_commands(std::iter::once(command), cx)
+    }
+
+    /// Commits position changes for every member of one merged chain as one Undo.
+    pub(crate) fn finish_floating_window_chain_move_in(
+        &mut self,
+        bounds: &[(FloatingGroupId, Rect)],
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if bounds.is_empty() {
+            return Err(CommandError::InvalidValue {
+                field: "window_chain_bounds",
+                reason: "a window-chain move must include at least one FloatingGroup",
+            });
+        }
+
+        let commands = bounds.iter().map(|(group, bounds)| {
+            DockCommand::ResizeFloatingBounds {
+                group: *group,
+                bounds: *bounds,
+            }
+        });
+        self.finish_native_window_move_commands(commands, cx)
+    }
+
+    fn finish_native_window_move_commands(
+        &mut self,
+        commands: impl IntoIterator<Item = DockCommand>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if !self.native_window_move_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "native_floating_move",
+                reason: "there is no active native floating-window move transaction",
+            });
+        }
+
         let before_panels = self.panel_keys();
         let previous_version = self.layout.version();
-        match self.history.apply(&mut self.layout, command, &self.metrics) {
-            Ok(_) => {
-                self.finish_success(before_panels, previous_version, std::iter::empty());
-                self.history.commit_transaction(&self.layout);
-                self.native_window_move_transaction_active = false;
-                self.drag.cancel_gesture();
-                self.drag.clear_layout_version();
-                self.drag.finish_host_session();
-                self.flush_events(cx);
-                cx.notify();
-                Ok(())
-            }
-            Err(error) => {
+        for command in commands {
+            if let Err(error) = self.history.apply(&mut self.layout, command, &self.metrics) {
                 self.finish_failure(&error);
                 let cancel_result = self.history.cancel_transaction(&mut self.layout, &self.metrics);
                 self.native_window_move_transaction_active = false;
@@ -456,9 +482,19 @@ impl DockController {
                 }
                 self.flush_events(cx);
                 cx.notify();
-                Err(error)
+                return Err(error);
             }
         }
+
+        self.finish_success(before_panels, previous_version, std::iter::empty());
+        self.history.commit_transaction(&self.layout);
+        self.native_window_move_transaction_active = false;
+        self.drag.cancel_gesture();
+        self.drag.clear_layout_version();
+        self.drag.finish_host_session();
+        self.flush_events(cx);
+        cx.notify();
+        Ok(())
     }
 
     /// Publishes a Core drop-resolution failure without applying a command.

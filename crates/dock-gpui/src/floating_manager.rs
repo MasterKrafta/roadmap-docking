@@ -261,9 +261,15 @@ impl DockingWindowAtPoint {
 }
 
 #[derive(Clone, Copy)]
-struct NativeMoveTarget {
-    target: DropTarget,
-    point: Point,
+enum NativeMoveTarget {
+    MainDock {
+        target: DropTarget,
+        point: Point,
+    },
+    FloatingChain {
+        anchor: FloatingGroupId,
+        insert_before: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -300,12 +306,44 @@ struct NativeResizeSession {
 }
 
 
+fn contiguous_window_chain_bounds(
+    layout: &dock_core::Layout,
+    members: &[FloatingGroupId],
+    anchor: FloatingGroupId,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    let anchor_index = members.iter().position(|member| *member == anchor)?;
+    let mut bounds = members
+        .iter()
+        .map(|group| {
+            layout
+                .floating_group(*group)
+                .map(|floating| (*group, floating.bounds))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let anchor_origin = bounds[anchor_index].1.origin;
+
+    for index in (0..anchor_index).rev() {
+        let next = bounds[index + 1].1;
+        let current = &mut bounds[index].1;
+        current.origin.x = next.origin.x - current.size.width;
+        current.origin.y = anchor_origin.y;
+    }
+    for index in anchor_index + 1..bounds.len() {
+        let previous = bounds[index - 1].1;
+        let current = &mut bounds[index].1;
+        current.origin.x = previous.origin.x + previous.size.width;
+        current.origin.y = anchor_origin.y;
+    }
+
+    Some(bounds)
+}
+
 /// Ordered groups of independent native Floating windows.
 ///
 /// The first member is used as the registry key. Removing that member simply
 /// re-keys the remaining chain; no additional runtime identifier is required.
 /// Single windows are intentionally not stored as chains.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct WindowChainRegistry {
     chains: HashMap<FloatingGroupId, Vec<FloatingGroupId>>,
     chain_by_group: HashMap<FloatingGroupId, FloatingGroupId>,
@@ -1291,10 +1329,10 @@ impl FloatingWindowManager {
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 controller_cx.notify();
-                target.map(|target| NativeMoveTarget { target, point })
+                target.map(|target| NativeMoveTarget::MainDock { target, point })
             })
         } else {
-            let Some((target_group, target_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
+            let Some((target_group, _target_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
                 let entry = self.registry.windows.get(panel)?;
                 (entry.native_window == Some(target_window) && *group != state.group)
                     .then_some((*group, entry.window_id))
@@ -1303,28 +1341,21 @@ impl FloatingWindowManager {
                 self.clear_native_drag_target(cx);
                 return;
             };
-            let Some(point) = self.core_point_for_floating(target_window, cursor) else {
+            let Ok(target_rect) = self.native_ops.window_rect(target_window) else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             };
-            self.controller.update(cx, |controller, controller_cx| {
-                let target = match controller
-                    .prepare_floating_window_drop_resolver(target_id, target_group, source)
-                    .and_then(|resolver| resolver.resolve(point))
-                {
-                    Ok(target) => target,
-                    Err(_) => {
-                        controller.drag_mut().clear_resolver();
-                        let _ = controller.drag_mut().session_mut().pointer_move(point);
-                        let _ = controller.drag_mut().session_mut().set_drop_target(None);
-                        return None;
-                    }
-                };
-                controller.drag_mut().session_mut().pointer_move(point).ok()?;
-                controller.drag_mut().session_mut().set_drop_target(target).ok()?;
-                controller_cx.notify();
-                target.map(|target| NativeMoveTarget { target, point })
+            let midpoint = i64::from(target_rect.left)
+                + (i64::from(target_rect.right) - i64::from(target_rect.left)) / 2;
+            let insert_before = i64::from(cursor.x) < midpoint;
+
+            // Whole-window drags are not Core Dock operations. Clear the Core
+            // resolver/preview and retain only the destination window + side.
+            self.clear_native_drag_target(cx);
+            Some(NativeMoveTarget::FloatingChain {
+                anchor: target_group,
+                insert_before,
             })
         };
         state.drop_target = resolved;
@@ -1487,9 +1518,6 @@ impl FloatingWindowManager {
             let _ = self.native_ops.end_high_resolution_timer();
         }
 
-        // The target may belong to the main window or another floating window.
-        // Both have already resolved their own local coordinates into a Core target.
-        let drop_target = state.drop_target.map(|target| (target.target, target.point));
         let mut floating_bounds = self.controller.update(cx, |controller, _| {
             controller
                 .layout()
@@ -1498,33 +1526,101 @@ impl FloatingWindowManager {
         }).unwrap_or(state.start_bounds);
 
         // The native move can cross onto a monitor with a different DPI.
-        // Capture both the actual outer origin and the current client size at
-        // that monitor's scale, rather than preserving a potentially stale
-        // logical size from the source monitor.
+        // Read the actual outer origin and client size before deciding whether
+        // this is a normal move or a chain insertion.
         if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
             floating_bounds = native_bounds;
         } else if let Ok(rect) = self.native_ops.window_rect(state.native_window) {
-            // Keep the final native position even if client-size/DPI querying
-            // failed; the last valid Core size remains a safe fallback.
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
         self.native_move = None;
-        let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.finish_floating_window_move_in(
+        let result = match state.drop_target {
+            Some(NativeMoveTarget::FloatingChain {
+                anchor,
+                insert_before,
+            }) => self.finish_floating_window_chain_move(
                 state.group,
-                floating_bounds,
-                drop_target,
-                controller_cx,
-            )
-        });
+                anchor,
+                insert_before,
+                cx,
+            ),
+            drop_target => {
+                let dock_target = match drop_target {
+                    Some(NativeMoveTarget::MainDock { target, point }) => Some((target, point)),
+                    _ => None,
+                };
+                self.controller.update(cx, |controller, controller_cx| {
+                    controller.finish_floating_window_move_in(
+                        state.group,
+                        floating_bounds,
+                        dock_target,
+                        controller_cx,
+                    )
+                })
+            }
+        };
+
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
+            self.reconcile(cx);
             self.cancel_controller_move(cx);
         }
 
         self.redraw_visible_hosts(cx);
         cx.notify();
+    }
+
+    /// Joins whole native Floating windows without changing their Core ownership.
+    /// The candidate chain becomes live only after all contiguous Core bounds have
+    /// committed as one history transaction.
+    fn finish_floating_window_chain_move(
+        &mut self,
+        moving: FloatingGroupId,
+        anchor: FloatingGroupId,
+        insert_before: bool,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        let mut next_chains = self.window_chains.clone();
+        let linked = if insert_before {
+            next_chains.link_before(anchor, moving)
+        } else {
+            next_chains.link_after(anchor, moving)
+        };
+        if !linked {
+            // Dropping inside the same chain does not redefine membership. Until
+            // chain-wide movement is enabled, restore the dragged member rather
+            // than leaving its neighbours detached from their stored order.
+            let current = self.controller.update(cx, |controller, _| {
+                controller.layout().floating_group(moving).map(|group| group.bounds)
+            });
+            if let Some(bounds) = current
+                && let Some(position) = self.physical_origin_for_bounds(bounds)
+                && let Some(entry) = self.panel_window_for_group(moving)
+                && let Some(native_window) = entry.native_window
+            {
+                let _ = self.native_ops.move_window(native_window, position);
+            }
+            self.cancel_controller_move(cx);
+            return Ok(());
+        }
+
+        let members = next_chains.members_for(anchor);
+        let Some(bounds) = self.controller.update(cx, |controller, _| {
+            contiguous_window_chain_bounds(controller.layout(), &members, anchor)
+        }) else {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "window chain contains a FloatingGroup that no longer exists",
+            });
+        };
+
+        let result = self.controller.update(cx, |controller, controller_cx| {
+            controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
+        });
+        if result.is_ok() {
+            self.window_chains = next_chains;
+        }
+        result
     }
 
     fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
