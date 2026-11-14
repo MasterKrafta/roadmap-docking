@@ -1408,9 +1408,15 @@ impl Layout {
         group: FloatingGroupId,
         bounds: Rect,
         _edge: crate::FloatingResizeEdge,
-        _scale_factor: f32,
+        scale_factor: f32,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "scale_factor",
+                reason: "floating resize scale factor must be finite and positive",
+            });
+        }
         self.apply_resize_floating_bounds_command(group, bounds, metrics)
     }
 
