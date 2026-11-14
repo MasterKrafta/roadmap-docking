@@ -169,7 +169,37 @@ fn layout_split_inner(
                         })
                         .collect::<Result<Vec<f32>, ComputeRectsError>>()?
                 };
-                weighted_sizes(&split.ratios, content_width, &minimum_widths, Axis::X)?
+                let all_columns_are_rails = direct_columns
+                    && split.children.iter().all(|child| {
+                        matches!(
+                            layout.node(*child),
+                            Some(Node::Column(column)) if column.mode.is_rail()
+                        )
+                    });
+                if all_columns_are_rails {
+                    minimum_widths
+                } else {
+                    let weights = if direct_columns {
+                        split
+                            .children
+                            .iter()
+                            .enumerate()
+                            .map(|(index, child)| {
+                                if matches!(
+                                    layout.node(*child),
+                                    Some(Node::Column(column)) if column.mode.is_rail()
+                                ) {
+                                    0.0
+                                } else {
+                                    split.ratios[index]
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    } else {
+                        split.ratios.clone()
+                    };
+                    weighted_sizes(&weights, content_width, &minimum_widths, Axis::X)?
+                }
             };
             let required = widths.iter().sum::<f32>() + gap_total;
             if !required.is_finite() {
