@@ -81,6 +81,7 @@ pub enum NativeResizeEdge {
     Right,
 }
 
+#[cfg(any(windows, test))]
 fn horizontal_resize_edge_from_sizing_code(code: usize) -> Option<NativeResizeEdge> {
     match code {
         1 | 4 | 7 => Some(NativeResizeEdge::Left),
