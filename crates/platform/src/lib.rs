@@ -220,6 +220,16 @@ pub trait NativeWindowOps {
         size: Option<PhysicalSize>,
     ) -> Result<(), NativeError>;
 
+    /// Sets client minimum widths for left- and right-edge native resizing.
+    /// Values are physical pixels and exclude the non-client frame.
+    fn set_horizontal_resize_min_widths(
+        &self,
+        _window: NativeWindowId,
+        _minimum_client_widths: Option<(i32, i32)>,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Finds the topmost window under a screen point. Foreign windows are
     /// reported separately so callers cannot mistake them for empty desktop space.
     /// The dragged window can be excluded so it cannot become its own drop target.
@@ -515,6 +525,75 @@ mod windows_impl {
 
     struct ResizeLoopState {
         active: bool,
+        left_min_client_width: i32,
+        right_min_client_width: i32,
+    }
+
+    /// Adjusts a proposed outer RECT while preserving the opposite window edge.
+    /// WMSZ_LEFT/TOPLEFT/BOTTOMLEFT use the left-composition minimum; right-side
+    /// resize messages use the right-composition minimum.
+    fn clamp_sizing_rect(
+        rect: &mut RECT,
+        sizing_edge: u32,
+        minimum_outer_width: i32,
+    ) -> bool {
+        let anchor_left = match sizing_edge {
+            2 | 5 | 8 => true,
+            1 | 4 | 7 => false,
+            _ => return false,
+        };
+        if minimum_outer_width <= 0 {
+            return false;
+        }
+
+        let proposed_width = rect.right.saturating_sub(rect.left);
+        if proposed_width >= minimum_outer_width {
+            return false;
+        }
+
+        if anchor_left {
+            rect.right = rect.left.saturating_add(minimum_outer_width);
+        } else {
+            rect.left = rect.right.saturating_sub(minimum_outer_width);
+        }
+        true
+    }
+
+    unsafe fn clamp_native_sizing_rect(
+        window: HWND,
+        sizing_edge: u32,
+        lparam: LPARAM,
+        state: &ResizeLoopState,
+    ) -> bool {
+        if lparam.0 == 0 {
+            return false;
+        }
+
+        let minimum_client_width = match sizing_edge {
+            1 | 4 | 7 => state.left_min_client_width,
+            2 | 5 | 8 => state.right_min_client_width,
+            _ => return false,
+        };
+        if minimum_client_width <= 0 {
+            return false;
+        }
+
+        let mut window_rect = RECT::default();
+        let mut client_rect = RECT::default();
+        // SAFETY: Both RECT outputs belong to this live HWND.
+        if unsafe { GetWindowRect(window, &mut window_rect) }.is_err()
+            || unsafe { GetClientRect(window, &mut client_rect) }.is_err()
+        {
+            return false;
+        }
+        let outer_width = window_rect.right.saturating_sub(window_rect.left);
+        let client_width = client_rect.right.saturating_sub(client_rect.left);
+        let frame_width = outer_width.saturating_sub(client_width).max(0);
+        let minimum_outer_width = minimum_client_width.saturating_add(frame_width);
+
+        // SAFETY: WM_SIZING supplies a writable RECT pointer through lParam.
+        let proposed = unsafe { &mut *(lparam.0 as *mut RECT) };
+        clamp_sizing_rect(proposed, sizing_edge, minimum_outer_width)
     }
 
     unsafe extern "system" fn resize_loop_subclass_proc(
@@ -539,6 +618,14 @@ mod windows_impl {
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
         let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
 
+        // WM_SIZING carries a mutable outer-window RECT. Clamp it after the
+        // downstream handler so no later handler can undo the composition floor.
+        let sizing_was_clamped = message == WM_SIZING
+            // SAFETY: This subclass owns the live ResizeLoopState until WM_NCDESTROY.
+            && unsafe {
+                clamp_native_sizing_rect(window, wparam.0 as u32, lparam, &*state)
+            };
+
         if message == WM_EXITSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
             unsafe { (*state).active = false };
@@ -551,7 +638,11 @@ mod windows_impl {
             }
         }
 
-        result
+        if sizing_was_clamped {
+            LRESULT(1)
+        } else {
+            result
+        }
     }
 
     unsafe extern "system" fn resize_redraw_timer_proc(
@@ -1060,7 +1151,11 @@ mod windows_impl {
             }
             .as_bool();
             if !tracking_installed {
-                let pointer = Box::into_raw(Box::new(ResizeLoopState { active: false }));
+                let pointer = Box::into_raw(Box::new(ResizeLoopState {
+                    active: false,
+                    left_min_client_width: 0,
+                    right_min_client_width: 0,
+                }));
                 // SAFETY: The window subclass owns this allocation until it is
                 // explicitly removed or WM_NCDESTROY is received.
                 if !unsafe {
@@ -1310,6 +1405,40 @@ mod windows_impl {
             }
         }
 
+        fn set_horizontal_resize_min_widths(
+            &self,
+            window: NativeWindowId,
+            minimum_client_widths: Option<(i32, i32)>,
+        ) -> Result<(), NativeError> {
+            if minimum_client_widths.is_some_and(|(left, right)| left <= 0 || right <= 0) {
+                return Err(NativeError::InvalidSize);
+            }
+
+            let native = hwnd(window);
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    native,
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            let (left_width, right_width) = minimum_client_widths.unwrap_or((0, 0));
+            // SAFETY: This allocation is owned by the live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).left_min_client_width = left_width;
+                (*(reference_data as *mut ResizeLoopState)).right_min_client_width = right_width;
+            }
+            Ok(())
+        }
+
         fn window_from_point(
             &self,
             point: PhysicalPoint,
@@ -1536,6 +1665,52 @@ pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
     false
 }
 
+
+#[cfg(all(test, windows))]
+mod native_resize_sizing_tests {
+    use super::windows_impl::{clamp_sizing_rect, RECT};
+
+    #[test]
+    fn left_edge_minimum_preserves_the_right_side_of_the_window() {
+        let mut rect = RECT {
+            left: 100,
+            top: 20,
+            right: 500,
+            bottom: 400,
+        };
+        assert!(clamp_sizing_rect(&mut rect, 1, 560));
+        assert_eq!(rect.left, -60);
+        assert_eq!(rect.right, 500);
+        assert_eq!(rect.right - rect.left, 560);
+    }
+
+    #[test]
+    fn right_edge_minimum_preserves_the_left_side_of_the_window() {
+        let mut rect = RECT {
+            left: 100,
+            top: 20,
+            right: 500,
+            bottom: 400,
+        };
+        assert!(clamp_sizing_rect(&mut rect, 2, 560));
+        assert_eq!(rect.left, 100);
+        assert_eq!(rect.right, 660);
+        assert_eq!(rect.right - rect.left, 560);
+    }
+
+    #[test]
+    fn vertical_resize_does_not_apply_a_horizontal_minimum() {
+        let mut rect = RECT {
+            left: 100,
+            top: 20,
+            right: 500,
+            bottom: 400,
+        };
+        assert!(!clamp_sizing_rect(&mut rect, 6, 560));
+        assert_eq!(rect.left, 100);
+        assert_eq!(rect.right, 500);
+    }
+}
 
 #[cfg(test)]
 mod drop_window_target_tests {

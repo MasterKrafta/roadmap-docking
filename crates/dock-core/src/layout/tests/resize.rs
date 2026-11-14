@@ -1248,6 +1248,24 @@ fn floating_splitter_screen_x(
 }
 
 #[test]
+fn floating_edge_minimum_width_keeps_non_edge_columns_at_current_widths() {
+    let metrics = DockMetrics::default();
+    let (layout, floating, _, columns) = three_column_floating_layout(&metrics);
+    let first_minimum = layout.minimum_column_width(columns[0], &metrics).unwrap();
+    let last_minimum = layout.minimum_column_width(columns[2], &metrics).unwrap();
+    let splitter_width = metrics.splitter_thickness * 2.0;
+
+    let expected_left = first_minimum + 300.0 + 340.0 + splitter_width;
+    let expected_right = 260.0 + 300.0 + last_minimum + splitter_width;
+    assert_eq!(
+        layout
+            .floating_horizontal_resize_minimum_widths(floating, &metrics)
+            .unwrap(),
+        Some((expected_left, expected_right))
+    );
+}
+
+#[test]
 fn floating_left_edge_resize_changes_only_first_column_and_keeps_inner_splitters_still() {
     let metrics = DockMetrics::default();
     let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);

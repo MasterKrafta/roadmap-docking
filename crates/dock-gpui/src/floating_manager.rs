@@ -127,6 +127,7 @@ struct PanelWindowEntry {
     native_window: Option<NativeWindowId>,
     bounds: Rect,
     native_min_size: Option<PhysicalSize>,
+    native_horizontal_resize_min_widths: Option<(i32, i32)>,
     native_scale_factor: Option<f32>,
     resize_enabled: bool,
     host_group: Option<FloatingGroupId>,
@@ -283,6 +284,7 @@ struct FloatingGroupSnapshot {
     bounds: Rect,
     z_order: i32,
     minimum_size: Option<Size>,
+    horizontal_resize_minimum_widths: Option<(f32, f32)>,
     panels: Vec<PanelId>,
 }
 
@@ -391,6 +393,7 @@ impl FloatingWindowManager {
                 native_window: Some(native_window),
                 bounds: current_native_bounds,
                 native_min_size: None,
+                native_horizontal_resize_min_widths: None,
                 native_scale_factor: scale,
                 resize_enabled: false,
                 host_group: Some(group),
@@ -1416,6 +1419,10 @@ impl FloatingWindowManager {
                         bounds: group.bounds,
                         z_order: group.z_order,
                         minimum_size: layout.floating_minimum_size(id, &metrics).ok(),
+                        horizontal_resize_minimum_widths: layout
+                            .floating_horizontal_resize_minimum_widths(id, &metrics)
+                            .ok()
+                            .flatten(),
                         panels,
                     });
                 }
@@ -1557,6 +1564,18 @@ impl FloatingWindowManager {
                 }
 
                 if let Some(native_window) = entry.native_window {
+                    if entry.native_horizontal_resize_min_widths.is_some() {
+                        if let Err(error) =
+                            self.native_ops.set_horizontal_resize_min_widths(native_window, None)
+                        {
+                            tracing::warn!(
+                                ?panel,
+                                %error,
+                                "could not clear native edge minimums after a panel stopped hosting"
+                            );
+                        }
+                        entry.native_horizontal_resize_min_widths = None;
+                    }
                     if entry.resize_enabled {
                         if let Err(error) = self.native_ops.disable_resize(native_window) {
                             tracing::warn!(
@@ -2003,6 +2022,18 @@ impl FloatingWindowManager {
         };
 
         if let Some(native_window) = entry.native_window {
+            if entry.native_horizontal_resize_min_widths.is_some() {
+                if let Err(error) =
+                    self.native_ops.set_horizontal_resize_min_widths(native_window, None)
+                {
+                    tracing::warn!(
+                        ?panel,
+                        %error,
+                        "could not clear native edge minimums before destroying a panel window"
+                    );
+                }
+                entry.native_horizontal_resize_min_widths = None;
+            }
             if entry.resize_enabled {
                 if let Err(error) = self.native_ops.disable_resize(native_window) {
                     tracing::warn!(
@@ -2172,6 +2203,7 @@ impl FloatingWindowManager {
             native_window,
             bounds,
             native_min_size: None,
+            native_horizontal_resize_min_widths: None,
             native_scale_factor: None,
             resize_enabled: false,
             host_group: None,
@@ -2281,6 +2313,28 @@ impl FloatingWindowManager {
                     ?group.id,
                     %error,
                     "could not synchronize native floating-window minimum size"
+                ),
+            }
+        }
+
+        let desired_edge_minimums = group.horizontal_resize_minimum_widths.and_then(
+            |(left_width, right_width)| {
+                Some((
+                    DockGeometry::physical_coordinate(left_width, scale)?,
+                    DockGeometry::physical_coordinate(right_width, scale)?,
+                ))
+            },
+        );
+        if entry.native_horizontal_resize_min_widths != desired_edge_minimums {
+            match self
+                .native_ops
+                .set_horizontal_resize_min_widths(native_window, desired_edge_minimums)
+            {
+                Ok(()) => entry.native_horizontal_resize_min_widths = desired_edge_minimums,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not synchronize side-specific native minimum widths"
                 ),
             }
         }

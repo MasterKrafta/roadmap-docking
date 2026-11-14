@@ -731,6 +731,80 @@ impl Layout {
         self.minimum_floating_size_with_cache(node_id, metrics, &mut HashMap::new())
     }
 
+    /// Computes the minimum client width for resizing either horizontal edge
+    /// while keeping all non-edge Columns at their current effective widths.
+    ///
+    /// The result is (left-edge minimum, right-edge minimum) for a Photoshop
+    /// horizontal composition rooted at Split(X) of Columns.
+    pub fn floating_horizontal_resize_minimum_widths(
+        &self,
+        group_id: crate::FloatingGroupId,
+        metrics: &DockMetrics,
+    ) -> Result<Option<(f32, f32)>, CommandError> {
+        if self.profile != Profile::Photoshop {
+            return Ok(None);
+        }
+
+        let floating = self
+            .floating_groups
+            .get(group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group: group_id })?;
+        let root = self
+            .dock_areas
+            .get(floating.area)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?
+            .root;
+        let split = match self.nodes.get(root) {
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.len() >= 2
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) => split,
+            _ => return Ok(None),
+        };
+
+        let widths = split
+            .children
+            .iter()
+            .map(|child| match self.nodes.get(*child) {
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split contains a non-Column child",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let minimums = split
+            .children
+            .iter()
+            .map(|child| self.minimum_column_width(*child, metrics))
+            .collect::<Result<Vec<_>, _>>()?;
+        let splitter_width =
+            metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
+
+        let fixed_after_first = widths.iter().skip(1).sum::<f32>();
+        let fixed_before_last = widths.iter().take(widths.len() - 1).sum::<f32>();
+        let left_minimum = minimums[0] + fixed_after_first + splitter_width;
+        let right_minimum =
+            fixed_before_last + minimums[minimums.len() - 1] + splitter_width;
+
+        if !left_minimum.is_finite()
+            || !right_minimum.is_finite()
+            || left_minimum <= 0.0
+            || right_minimum <= 0.0
+        {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "edge-specific floating minimum width is invalid",
+            });
+        }
+
+        Ok(Some((left_minimum, right_minimum)))
+    }
+
     /// Computes floating minimum size while reusing per-node minimums in one
     /// immutable geometry operation. The caller owns the cache, so it cannot
     /// survive a mutation or accidentally mix layouts or metrics.
