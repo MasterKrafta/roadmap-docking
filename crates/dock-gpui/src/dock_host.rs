@@ -1015,7 +1015,7 @@ impl Render for DockHost {
     }
 }
 
-fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoElement {
+pub(crate) fn render_resize_preview(preview: ResizePreview, theme: DockTheme) -> impl IntoElement {
     let rect = preview.rect;
     let mut marker = div()
         .absolute()
