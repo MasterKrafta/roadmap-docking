@@ -1461,7 +1461,7 @@ fn floating_left_edge_resize_keeps_right_edge_anchored_after_repeated_minimum_cl
     let scale_factor = 1.5;
     let widths = [260.0_f32, 340.0];
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
-    let columns = std::array::from_fn(|index| {
+    let columns: [NodeId; 2] = std::array::from_fn(|index| {
         let (_, panel) = builder.panel(
             PanelKey::new(if index == 0 {
                 "floating-minimum-anchor-left"
