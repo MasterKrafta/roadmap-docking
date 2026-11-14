@@ -309,9 +309,6 @@ mod windows_impl {
         },
     };
 
-    const RESIZE_REDRAW_TIMER_ID: usize = 2;
-    const RESIZE_REDRAW_INTERVAL_MS: u32 = 8;
-    const WM_GPUI_FORCE_UPDATE_WINDOW: u32 = WM_USER + 5;
     const MIN_SIZE_SUBCLASS_ID: usize = 0x444f_434b;
     const RESIZE_LOOP_SUBCLASS_ID: usize = 0x5253_495a;
 
@@ -679,43 +676,6 @@ mod windows_impl {
             LRESULT(1)
         } else {
             result
-        }
-    }
-
-    unsafe extern "system" fn resize_redraw_timer_proc(
-        window: HWND,
-        _message: u32,
-        _timer_id: usize,
-        _time: u32,
-    ) {
-        let mut reference_data = 0usize;
-        // SAFETY: Query the resize-loop subclass attached to this same HWND.
-        let tracking_installed = unsafe {
-            GetWindowSubclass(
-                window,
-                Some(resize_loop_subclass_proc),
-                RESIZE_LOOP_SUBCLASS_ID,
-                Some(&mut reference_data as *mut usize),
-            )
-        }
-        .as_bool();
-        let resizing = tracking_installed
-            && reference_data != 0
-            // SAFETY: The subclass retains this state until it is removed or
-            // WM_NCDESTROY runs on the same UI thread.
-            && unsafe { (*(reference_data as *const ResizeLoopState)).active };
-
-        if resizing {
-            // SAFETY: window is the HWND supplied by SetTimer. This message ID
-            // is handled by the pinned GPUI Windows backend.
-            let _ = unsafe {
-                PostMessageW(
-                    Some(window),
-                    WM_GPUI_FORCE_UPDATE_WINDOW,
-                    WPARAM(0),
-                    LPARAM(0),
-                )
-            };
         }
     }
 
@@ -1178,7 +1138,7 @@ mod windows_impl {
 
             let mut reference_data = 0usize;
             // SAFETY: Query whether the resize-loop state is already attached.
-            let mut tracking_installed = unsafe {
+            let tracking_installed = unsafe {
                 GetWindowSubclass(
                     native,
                     Some(resize_loop_subclass_proc),
@@ -1214,52 +1174,14 @@ mod windows_impl {
                     return Err(error);
                 }
                 reference_data = pointer as usize;
-                tracking_installed = true;
             }
 
-            // SAFETY: Attach an 8 ms UI-thread timer to this GPUI window.
-            let timer = unsafe {
-                SetTimer(
-                    Some(native),
-                    RESIZE_REDRAW_TIMER_ID,
-                    RESIZE_REDRAW_INTERVAL_MS,
-                    Some(resize_redraw_timer_proc),
-                )
-            };
-            if timer == 0 {
-                let error = last_error("SetTimer(resize redraw)");
-                // SAFETY: A failed SetTimer may follow successful subclass
-                // installation. Remove the timer defensively, then detach and
-                // release the subclass state only if detaching succeeds.
-                unsafe {
-                    let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID);
-                }
-                if tracking_installed
-                    && unsafe {
-                        RemoveWindowSubclass(
-                            native,
-                            Some(resize_loop_subclass_proc),
-                            RESIZE_LOOP_SUBCLASS_ID,
-                        )
-                    }
-                    .as_bool()
-                    && reference_data != 0
-                {
-                    // SAFETY: The subclass was detached, so it no longer owns
-                    // or accesses this state allocation.
-                    unsafe { drop(Box::from_raw(reference_data as *mut ResizeLoopState)) };
-                }
-                restore_non_resizable_frame(native);
-                return Err(error);
-            }
+            let _ = tracking_installed;
             Ok(())
         }
 
         fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
             let native = hwnd(window);
-            // SAFETY: Stop the timer before detaching its resize-loop state.
-            unsafe { let _ = KillTimer(Some(native), RESIZE_REDRAW_TIMER_ID); }
-
             let mut reference_data = 0usize;
             // SAFETY: Query the exact subclass callback and ID installed above.
             let tracking_installed = unsafe {
