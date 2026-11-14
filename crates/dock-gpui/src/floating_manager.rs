@@ -129,6 +129,9 @@ struct PanelWindowEntry {
     native_min_size: Option<PhysicalSize>,
     native_horizontal_resize_min_widths: Option<(i32, i32)>,
     native_scale_factor: Option<f32>,
+    /// The HWND may differ from Core bounds after the OS-owned resize loop.
+    /// A final reconciliation must write Core's canonical bounds back.
+    native_bounds_dirty: bool,
     resize_enabled: bool,
     host_group: Option<FloatingGroupId>,
     visibility: PanelWindowVisibility,
@@ -288,6 +291,14 @@ struct FloatingGroupSnapshot {
     panels: Vec<PanelId>,
 }
 
+#[derive(Clone, Copy)]
+struct NativeResizeSession {
+    group: FloatingGroupId,
+    window_id: WindowId,
+    start_bounds: Rect,
+    transaction_started: bool,
+}
+
 /// Reconciles the native-window registry with the current Core Layout.
 pub struct FloatingWindowManager {
     controller: Entity<DockController>,
@@ -295,7 +306,7 @@ pub struct FloatingWindowManager {
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
-    custom_resize_group: Option<FloatingGroupId>,
+    native_resize: Option<NativeResizeSession>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
     registry: PanelWindowRegistry,
@@ -312,7 +323,7 @@ impl FloatingWindowManager {
             main_native_window: None,
             main_host_origin: Point::ZERO,
             native_move: None,
-            custom_resize_group: None,
+            native_resize: None,
             drag_host_manager: None,
             reconciling: false,
             registry: PanelWindowRegistry::default(),
@@ -387,6 +398,7 @@ impl FloatingWindowManager {
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
                 native_scale_factor: scale,
+            native_bounds_dirty: false,
                 resize_enabled: false,
                 host_group: Some(group),
                 visibility: PanelWindowVisibility::Visible,
@@ -409,25 +421,6 @@ impl FloatingWindowManager {
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
         let panel = self.host_registry.panel_for_group(group)?;
         self.registry.windows.get(&panel)
-    }
-
-    /// Reads the current physical cursor position and destination monitor scale.
-    ///
-    /// The pointer is sampled in desktop coordinates because the floating HWND
-    /// itself moves during a custom edge resize; window-local event coordinates
-    /// would shift with it and no longer describe the actual drag delta.
-    pub(crate) fn native_pointer_for_group(
-        &self,
-        group: FloatingGroupId,
-    ) -> Option<(PhysicalPoint, f32)> {
-        let native_window = self.panel_window_for_group(group)?.native_window?;
-        let cursor = self.native_ops.cursor_position().ok()?;
-        let scale = self
-            .native_ops
-            .scale_factor(native_window)
-            .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0)?;
-        Some((cursor, scale))
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -554,73 +547,6 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
-    /// Marks a floating window as being resized by the client-area gesture.
-    /// Core still receives live bounds so its geometry stays current, but the
-    /// reconciliation pass must not send the same bounds back to the HWND.
-    pub(crate) fn begin_custom_resize(&mut self, group: FloatingGroupId) -> bool {
-        if self.custom_resize_group.is_some() || self.native_move.is_some() {
-            return false;
-        }
-        let Some(entry) = self.panel_window_for_group(group) else {
-            return false;
-        };
-        if entry.native_window.is_none() {
-            return false;
-        }
-        self.custom_resize_group = Some(group);
-        true
-    }
-
-    /// Applies the current Core resize bounds to the native window without
-    /// going through the normal LayoutChanged reconciliation feedback path.
-    pub(crate) fn update_custom_resize_bounds(
-        &mut self,
-        group: FloatingGroupId,
-        bounds: Rect,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.custom_resize_group != Some(group) {
-            return false;
-        }
-        let Some(panel) = self.host_registry.panel_for_group(group) else {
-            return false;
-        };
-        let Some(mut entry) = self.registry.windows.remove(&panel) else {
-            return false;
-        };
-        if entry.host_group != Some(group) {
-            self.registry.windows.insert(panel, entry);
-            return false;
-        }
-
-        let snapshot = FloatingGroupSnapshot {
-            id: group,
-            bounds,
-            z_order: 0,
-            minimum_size: None,
-            horizontal_resize_minimum_widths: None,
-            panels: Vec::new(),
-        };
-        self.sync_window_bounds(&mut entry, &snapshot, cx);
-        let applied = entry.bounds == bounds;
-        self.registry.windows.insert(panel, entry);
-        applied
-    }
-
-    /// Ends the custom resize transaction and performs one final reconciliation.
-    pub(crate) fn finish_custom_resize(
-        &mut self,
-        group: FloatingGroupId,
-        cx: &mut Context<Self>,
-    ) {
-        if self.custom_resize_group != Some(group) {
-            return;
-        }
-        self.custom_resize_group = None;
-        self.reconcile(cx);
-        cx.notify();
-    }
-
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
         self.native_move
             .is_some_and(|state| state.group == group && state.hide_header)
@@ -650,10 +576,10 @@ impl FloatingWindowManager {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        // Native Floating-window moves are tracked independently of GPUI focus.
-        // Moving over another managed host can transfer foreground activation;
-        // the native move loop must keep running until mouse-up or Escape.
-        if self.native_move_active() || self.custom_resize_group.is_some() {
+        // Native Floating-window moves and OS-owned resizes are tracked
+        // independently of GPUI focus. Both must survive transient activation
+        // changes while Windows owns the pointer interaction.
+        if self.native_move_active() || self.native_resize.is_some() {
             return true;
         }
 
@@ -697,6 +623,252 @@ impl FloatingWindowManager {
     }
 
 
+    /// Ensures the OS sizing loop is tracked after the first GPUI redraw.
+    pub(crate) fn observe_native_resize(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_native_resize_session(group, window_id, cx);
+    }
+
+    /// Samples current native bounds after the GPUI window-bounds observer fires.
+    /// All geometry components are read from the HWND at deferred execution time.
+    pub(crate) fn sync_native_resize_bounds(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_native_resize_session(group, window_id, cx) {
+            return;
+        }
+        let Some(native_window) = self
+            .panel_window_for_group(group)
+            .and_then(|entry| (entry.window_id == window_id).then_some(entry.native_window).flatten())
+        else {
+            return;
+        };
+        let Some(bounds) = self.core_bounds_from_native_window(native_window) else {
+            return;
+        };
+        let Some(mut state) = self.native_resize.filter(|state| {
+            state.group == group && state.window_id == window_id
+        }) else {
+            return;
+        };
+        self.apply_native_resize_bounds(group, bounds, &mut state, cx);
+    }
+
+    fn ensure_native_resize_session(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() {
+            return false;
+        }
+        if let Some(state) = self.native_resize {
+            return state.group == group && state.window_id == window_id;
+        }
+        let Some(entry) = self.panel_window_for_group(group) else {
+            return false;
+        };
+        if entry.window_id != window_id {
+            return false;
+        }
+        let Some(native_window) = entry.native_window else {
+            return false;
+        };
+        if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            return false;
+        }
+        let Some(start_bounds) = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
+        }) else {
+            return false;
+        };
+        self.native_resize = Some(NativeResizeSession {
+            group,
+            window_id,
+            start_bounds,
+            transaction_started: false,
+        });
+        // The OS may have changed the HWND before the first Core resize sample.
+        // Force one canonical Core -> HWND reconciliation when the modal loop ends,
+        // even if all intermediate samples were clamped to the existing layout.
+        if let Some(panel) = self.host_registry.panel_for_group(group)
+            && let Some(entry) = self.registry.windows.get_mut(&panel)
+            && entry.window_id == window_id
+        {
+            entry.native_bounds_dirty = true;
+        }
+        self.sync_native_resize_constraints(group, window_id, cx);
+        self.schedule_native_resize(cx, group, window_id);
+        true
+    }
+
+    fn schedule_native_resize(
+        &self,
+        cx: &mut Context<Self>,
+        group: FloatingGroupId,
+        window_id: WindowId,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor().timer(Duration::from_millis(8)).await;
+                let Ok(keep_polling) = manager.update(app, |manager, manager_cx| {
+                    manager.tick_native_resize(group, window_id, manager_cx)
+                }) else {
+                    break;
+                };
+                if !keep_polling {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn tick_native_resize(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(mut state) = self.native_resize.filter(|state| {
+            state.group == group && state.window_id == window_id
+        }) else {
+            return false;
+        };
+
+        let native_window = self.panel_window_for_group(group).and_then(|entry| {
+            (entry.window_id == window_id).then_some(entry.native_window).flatten()
+        });
+        let Some(native_window) = native_window else {
+            self.finish_native_resize_transaction(state, cx);
+            return false;
+        };
+
+        // The bounds observer is the fast path, but rapid native sizing
+        // messages can be coalesced before GPUI reports a viewport change.
+        // Sample the HWND here as a fallback so Core cannot lag behind the
+        // actual client size during short, repeated resize movements.
+        if self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+                self.apply_native_resize_bounds(group, bounds, &mut state, cx);
+            }
+            // Refresh even when HWND bounds did not change: that can mean a
+            // stale Win32 minimum is clamping the proposed edge in both directions.
+            self.sync_native_resize_constraints(group, window_id, cx);
+            self.native_resize = Some(state);
+            return true;
+        }
+
+        if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+            self.apply_native_resize_bounds(group, bounds, &mut state, cx);
+        }
+        self.finish_native_resize_transaction(state, cx);
+        false
+    }
+
+    fn apply_native_resize_bounds(
+        &mut self,
+        group: FloatingGroupId,
+        bounds: Rect,
+        state: &mut NativeResizeSession,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
+        });
+        if current == Some(bounds) {
+            return;
+        }
+
+        if !state.transaction_started {
+            state.transaction_started = self.controller.update(cx, |controller, _| {
+                controller.begin_native_resize_transaction()
+            });
+        }
+        // Mark the OS sizing loop authoritative before dispatch: reconciliation
+        // must not write Core geometry back to the HWND during the drag.
+        self.native_resize = Some(*state);
+        if !state.transaction_started {
+            return;
+        }
+
+        let native_window = self
+            .panel_window_for_group(group)
+            .and_then(|entry| entry.native_window);
+        let native_edge = native_window
+            .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
+            .flatten()
+            .map(|edge| match edge {
+                platform::NativeHorizontalResizeEdge::Left => dock_core::FloatingResizeEdge::Left,
+                platform::NativeHorizontalResizeEdge::Right => dock_core::FloatingResizeEdge::Right,
+            });
+        // WM_SIZING is authoritative. Retain the origin comparison only as a
+        // fallback for platform adapters that cannot report a native hit edge.
+        let edge = native_edge.or_else(|| {
+            let width_changed = current.is_some_and(|current| {
+                (bounds.size.width - current.size.width).abs() > 0.5
+            });
+            width_changed.then(|| {
+                if (bounds.origin.x - state.start_bounds.origin.x).abs() > 0.5 {
+                    dock_core::FloatingResizeEdge::Left
+                } else {
+                    dock_core::FloatingResizeEdge::Right
+                }
+            })
+        });
+        let scale_factor = native_window
+            .and_then(|window| self.native_ops.scale_factor(window).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let command = match edge {
+            Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
+                group,
+                bounds,
+                edge,
+                scale_factor,
+            },
+            None => DockCommand::ResizeFloatingBounds { group, bounds },
+        };
+        let result = self.controller.update(cx, |controller, controller_cx| {
+            controller.dispatch_in(command, controller_cx)
+        });
+        if let Err(error) = result {
+            tracing::warn!(
+                ?group,
+                %error,
+                "could not synchronize native floating-window bounds with Core"
+            );
+        }
+    }
+
+    fn finish_native_resize_transaction(
+        &mut self,
+        state: NativeResizeSession,
+        cx: &mut Context<Self>,
+    ) {
+        self.native_resize = None;
+        if state.transaction_started {
+            self.controller.update(cx, |controller, controller_cx| {
+                controller.finish_native_resize_transaction();
+                controller_cx.notify();
+            });
+        }
+
+        // A resize can finish on a monitor with a different DPI. Re-read the
+        // final window scale after the modal loop has exited and resize the
+        // native frame to the preserved Core logical size at that scale.
+        self.reconcile(cx);
+    }
+
     fn core_bounds_from_native_window(&self, native_window: NativeWindowId) -> Option<Rect> {
         let rect = self.native_ops.window_rect(native_window).ok()?;
         let client_size = self.native_ops.client_size(native_window).ok()?;
@@ -721,7 +893,7 @@ impl FloatingWindowManager {
         hide_header: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.native_move.is_some() {
+        if self.native_move.is_some() || self.native_resize.is_some() {
             return false;
         }
         let Some(entry) = self.panel_window_for_group(group) else {
@@ -1295,15 +1467,6 @@ impl FloatingWindowManager {
             .collect::<HashMap<_, _>>();
         let desired_panels = next_hosts.values().copied().collect::<HashSet<_>>();
 
-        // A host transfer or a removed floating group invalidates an in-progress
-        // client resize. Do not leave reconciliation permanently suspended.
-        if let Some(group) = self.custom_resize_group {
-            let previous_host = self.host_registry.panel_for_group(group);
-            if next_hosts.get(&group).copied() != previous_host {
-                self.custom_resize_group = None;
-            }
-        }
-
         let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
                 Ok(areas) => Some(areas),
@@ -1500,9 +1663,7 @@ impl FloatingWindowManager {
                 }
             }
 
-            if self.custom_resize_group != Some(group.id) {
-                self.sync_window_bounds(&mut entry, group, cx);
-            }
+            self.sync_window_bounds(&mut entry, group, cx);
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
                     self.restore_native_window_to_monitor(&mut entry, areas)
@@ -1510,6 +1671,7 @@ impl FloatingWindowManager {
                 monitor_corrections.push((group.id, corrected_bounds));
                 entry.bounds = corrected_bounds;
             }
+            self.sync_native_resize(&mut entry, group);
             self.registry.windows.insert(panel, entry);
             active_hosts.insert(group.id, panel);
         }
@@ -1597,7 +1759,7 @@ impl FloatingWindowManager {
     ) {
         for group in groups {
             if self.native_move.is_some_and(|session| session.group == group.id)
-                || self.custom_resize_group == Some(group.id)
+                || self.native_resize.is_some_and(|session| session.group == group.id)
             {
                 continue;
             }
@@ -1950,9 +2112,7 @@ impl FloatingWindowManager {
             kind: WindowKind::Floating,
             is_movable: true,
             app_owns_titlebar_drag: true,
-            // Floating composition resize is handled by the same client-area
-            // gesture model as Qt's QWidgetResizeHandler, not by WS_THICKFRAME.
-            is_resizable: false,
+            is_resizable: true,
             is_minimizable: false,
             ..Default::default()
         };
@@ -2069,6 +2229,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_scale_factor: None,
+            native_bounds_dirty: false,
             resize_enabled: false,
             host_group: None,
             visibility: PanelWindowVisibility::Hidden,
@@ -2142,6 +2303,114 @@ impl FloatingWindowManager {
         work_areas.first().copied()
     }
 
+    fn sync_native_resize(
+        &self,
+        entry: &mut PanelWindowEntry,
+        group: &FloatingGroupSnapshot,
+    ) {
+        let Some(native_window) = entry.native_window else {
+            return;
+        };
+
+        if !entry.resize_enabled {
+            match self.native_ops.enable_resize(native_window) {
+                Ok(()) => entry.resize_enabled = true,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not enable native floating-window resize"
+                ),
+            }
+        }
+
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let desired_minimum = group
+            .minimum_size
+            .and_then(|minimum| DockGeometry::physical_size_from_logical(minimum, scale));
+
+        if entry.native_min_size != desired_minimum {
+            match self.native_ops.set_min_size(native_window, desired_minimum) {
+                Ok(()) => entry.native_min_size = desired_minimum,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not synchronize native floating-window minimum size"
+                ),
+            }
+        }
+
+        let desired_edge_minimums = group.horizontal_resize_minimum_widths.and_then(
+            |(left_width, right_width)| {
+                Some((
+                    DockGeometry::physical_coordinate(left_width, scale)?,
+                    DockGeometry::physical_coordinate(right_width, scale)?,
+                ))
+            },
+        );
+        if entry.native_horizontal_resize_min_widths != desired_edge_minimums {
+            match self
+                .native_ops
+                .set_horizontal_resize_min_widths(native_window, desired_edge_minimums)
+            {
+                Ok(()) => entry.native_horizontal_resize_min_widths = desired_edge_minimums,
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not synchronize side-specific native minimum widths"
+                ),
+            }
+        }
+    }
+
+    /// Recomputes native minimum sizes from the live Core layout during an OS resize.
+    ///
+    /// LayoutChanged notifications can be coalesced with an active reconciliation.
+    /// Polling the constraints alongside HWND bounds prevents Win32 from retaining
+    /// an obsolete minimum width after one edge has already changed the composition.
+    fn sync_native_resize_constraints(
+        &mut self,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let layout = controller.layout();
+            let metrics = controller.metrics();
+            let floating = layout.floating_group(group)?;
+
+            Some(FloatingGroupSnapshot {
+                id: group,
+                bounds: floating.bounds,
+                z_order: floating.z_order,
+                minimum_size: layout.floating_minimum_size(group, &metrics).ok(),
+                horizontal_resize_minimum_widths: layout
+                    .floating_horizontal_resize_minimum_widths(group, &metrics)
+                    .ok()
+                    .flatten(),
+                panels: Vec::new(),
+            })
+        });
+        let Some(snapshot) = snapshot else {
+            return;
+        };
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return;
+        };
+        let Some(mut entry) = self.registry.windows.remove(&panel) else {
+            return;
+        };
+
+        if entry.window_id == window_id {
+            self.sync_native_resize(&mut entry, &snapshot);
+        }
+        self.registry.windows.insert(panel, entry);
+    }
+
     fn sync_window_bounds(
         &self,
         entry: &mut PanelWindowEntry,
@@ -2150,6 +2419,7 @@ impl FloatingWindowManager {
     ) {
         let Some(native_window) = entry.native_window else {
             entry.native_scale_factor = None;
+            entry.native_bounds_dirty = false;
             entry.bounds = group.bounds;
             return;
         };
@@ -2166,7 +2436,19 @@ impl FloatingWindowManager {
             (previous - scale).abs() > 0.001
         });
 
-        if entry.bounds == group.bounds && !scale_changed {
+        // While Windows owns the sizing loop, do not send Core bounds back to
+        // the HWND. The final reconciliation applies the canonical Core bounds.
+        if self
+            .native_resize
+            .is_some_and(|session| session.group == group.id)
+        {
+            entry.bounds = group.bounds;
+            entry.native_scale_factor = Some(scale);
+            entry.native_bounds_dirty = true;
+            return;
+        }
+
+        if entry.bounds == group.bounds && !scale_changed && !entry.native_bounds_dirty {
             return;
         }
 
@@ -2250,6 +2532,7 @@ impl FloatingWindowManager {
 
         entry.native_scale_factor = Some(effective_scale);
         entry.bounds = group.bounds;
+        entry.native_bounds_dirty = false;
     }
 }
 
