@@ -1123,17 +1123,32 @@ impl Layout {
             children.extend(source_columns.iter().copied());
         }
 
-        // Split(X) lays out Columns from their requested widths. Size the
-        // surviving native window for every Column plus the newly introduced
-        // splitter; otherwise Core geometry rejects the frame and the host
-        // renders only its background.
+        // Floating compositions fill their native client area. When two
+        // windows are joined, preserve the widths currently visible in both
+        // windows rather than reverting to each Column's saved preferred width.
+        let source_rects = self
+            .compute_floating_rects(source_group_id, metrics)
+            .map_err(|_| CommandError::InvalidTarget {
+                reason: "source Floating composition geometry could not be computed",
+            })?;
+        let target_rects = self
+            .compute_floating_rects(target_group_id, metrics)
+            .map_err(|_| CommandError::InvalidTarget {
+                reason: "target Floating composition geometry could not be computed",
+            })?;
+
         let column_widths = children
             .iter()
-            .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "Floating composition must contain only Columns",
-                }),
+            .map(|column_id| {
+                source_rects
+                    .columns
+                    .iter()
+                    .chain(target_rects.columns.iter())
+                    .find(|column| column.column == *column_id)
+                    .map(|column| column.rect.size.width)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "Floating composition is missing a current Column rectangle",
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let total_column_width = column_widths.iter().sum::<f32>();
@@ -1142,11 +1157,15 @@ impl Layout {
         let required_width = total_column_width + splitter_width;
         let source_column_widths = source_columns
             .iter()
-            .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "source Floating composition must contain only Columns",
-                }),
+            .map(|column_id| {
+                source_rects
+                    .columns
+                    .iter()
+                    .find(|column| column.column == *column_id)
+                    .map(|column| column.rect.size.width)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "source Floating composition is missing a current Column rectangle",
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let source_composition_width = source_column_widths.iter().sum::<f32>()
