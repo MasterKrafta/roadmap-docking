@@ -760,9 +760,15 @@ fn resize_preview_does_not_mutate_layout_until_pointer_up() {
 
     let layout_before = format!("{:?}", controller.layout());
     let version_before = controller.layout().version();
-    controller.begin_resize_interaction(hit, origin).unwrap();
+    let window_id = WindowId::from(76);
+    controller
+        .begin_resize_interaction_with_rects(window_id, hit, origin, None)
+        .unwrap();
 
-    assert!(controller.set_resize_preview_point(Point::new(origin.x + 64.0, origin.y + 32.0,)));
+    assert!(controller.set_resize_preview_point(
+        window_id,
+        Point::new(origin.x + 64.0, origin.y + 32.0,)
+    ));
     assert_eq!(format!("{:?}", controller.layout()), layout_before);
     assert_eq!(controller.layout().version(), version_before);
     assert_eq!(
@@ -834,7 +840,10 @@ fn resize_sequence_uses_core_actual_values_and_one_undo_checkpoint() {
     };
     let version_before = controller.layout().version();
 
-    controller.begin_resize_interaction(hit, origin).unwrap();
+    let window_id = WindowId::from(77);
+    controller
+        .begin_resize_interaction_with_rects(window_id, hit, origin, None)
+        .unwrap();
     let outcomes = controller
         .dispatch_sequence(vec![
             DockCommand::ResizeGroups {
