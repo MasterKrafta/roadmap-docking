@@ -1391,6 +1391,7 @@ impl Layout {
                 bounds.size.width - floating.bounds.size.width;
             let requested_width_delta =
                 actual_bounds.size.width - floating.bounds.size.width;
+            let mut actual_width_delta = 0.0;
             if requested_width_delta != 0.0 {
                 let current_rects = self
                     .compute_floating_rects(group, metrics)
@@ -1444,18 +1445,22 @@ impl Layout {
                     current_width + requested_width_delta,
                     metrics,
                 )?;
-                let actual_width_delta = actual_width - current_width;
+                actual_width_delta = actual_width - current_width;
                 if actual_width_delta != 0.0 {
                     self.sync_split_column_ratios(root)?;
                 }
 
-                // Keep the untouched window edge anchored if Column constraints
-                // prevent the native frame from reaching its requested width.
+                // Keep the Core window width aligned with the actual edge Column.
                 actual_bounds.size.width = floating.bounds.size.width + actual_width_delta;
-                if edge == crate::FloatingResizeEdge::Left {
-                    actual_bounds.origin.x +=
-                        (requested_native_width_delta - actual_width_delta) * scale_factor;
-                }
+            }
+
+            // A native frame can briefly report a width below Core's already
+            // reached minimum. Even when the clamped Core width does not change,
+            // compensate the physical origin so the untouched right edge stays
+            // anchored to the same screen coordinate.
+            if edge == crate::FloatingResizeEdge::Left {
+                actual_bounds.origin.x +=
+                    (requested_native_width_delta - actual_width_delta) * scale_factor;
             }
         }
 
