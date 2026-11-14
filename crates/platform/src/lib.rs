@@ -229,6 +229,14 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
+    /// Controls whether the top edge and top corners initiate OS resizing.
+    fn set_top_resize_enabled(
+        &self,
+        _window: NativeWindowId,
+        _enabled: bool,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
     /// Stores the chain order (left-to-right) for activation-time native Z-order
     /// correction. Activation of any member must not invert overlapping resize edges.
     fn set_window_chain_z_order(
@@ -565,6 +573,7 @@ mod windows_impl {
         active: bool,
         horizontal_edge: Option<NativeHorizontalResizeEdge>,
         left_resize_enabled: bool,
+        top_resize_enabled: bool,
         chain_z_order: Vec<HWND>,
         left_min_client_width: i32,
         right_min_client_width: i32,
@@ -591,11 +600,18 @@ mod windows_impl {
         Ok(())
     }
 
-    fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> i32 {
+    fn hit_test_code_for_resize(
+        hit_test: u32,
+        left_resize_enabled: bool,
+        top_resize_enabled: bool,
+    ) -> i32 {
         if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
-            // HTTRANSPARENT is signed (-1); preserve that value all the way
-            // into LRESULT so Windows can continue hit-testing underneath.
+            // A disabled shared left edge passes through to the previous chain member.
             HTTRANSPARENT
+        } else if !top_resize_enabled && matches!(hit_test, HTTOP | HTTOPLEFT | HTTOPRIGHT) {
+            // Keep the top border available to client hit-testing so the native
+            // frame cannot start resizing through a joined composition header.
+            HTCLIENT as i32
         } else {
             hit_test as i32
         }
@@ -723,10 +739,15 @@ mod windows_impl {
             // A secondary Window Chain member must not expose a left resize
             // handle: that edge is the join with its preceding native window.
             // SAFETY: The subclass owns this state for the lifetime of the HWND.
-            let left_resize_enabled = unsafe { (*state).left_resize_enabled };
+            let (left_resize_enabled, top_resize_enabled) = unsafe {
+                ((*state).left_resize_enabled, (*state).top_resize_enabled)
+            };
             let hit_test = result.0 as u32;
-            let adjusted_hit_test =
-                hit_test_code_for_resize(hit_test, left_resize_enabled);
+            let adjusted_hit_test = hit_test_code_for_resize(
+                hit_test,
+                left_resize_enabled,
+                top_resize_enabled,
+            );
             if adjusted_hit_test != hit_test as i32 {
                 return LRESULT(adjusted_hit_test as isize);
             }
@@ -1257,6 +1278,7 @@ mod windows_impl {
                     active: false,
                     horizontal_edge: None,
                     left_resize_enabled: true,
+                    top_resize_enabled: true,
                     chain_z_order: Vec::new(),
                     left_min_client_width: 0,
                     right_min_client_width: 0,
@@ -1497,6 +1519,33 @@ mod windows_impl {
             Ok(())
         }
 
+        fn set_top_resize_enabled(
+            &self,
+            window: NativeWindowId,
+            enabled: bool,
+        ) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).top_resize_enabled = enabled;
+            }
+            Ok(())
+        }
+
         fn set_window_chain_z_order(
             &self,
             window: NativeWindowId,
@@ -1712,12 +1761,12 @@ mod windows_impl {
         #[test]
         fn disabling_left_resize_passes_overlapping_edges_to_the_previous_window() {
             for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
-                assert_eq!(hit_test_code_for_resize(hit_test, false), HTTRANSPARENT);
+                assert_eq!(hit_test_code_for_resize(hit_test, false, true), HTTRANSPARENT);
             }
-            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT as i32);
-            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT as i32);
-            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT as i32);
-            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT as i32);
+            assert_eq!(hit_test_code_for_resize(HTLEFT, true, true), HTLEFT as i32);
+            assert_eq!(hit_test_code_for_resize(HTRIGHT, false, false), HTRIGHT as i32);
+            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false, true), HTTOPRIGHT as i32);
+            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false, false), HTBOTTOMRIGHT as i32);
         }
 
         #[test]
