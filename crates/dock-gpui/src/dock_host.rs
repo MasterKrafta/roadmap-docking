@@ -930,6 +930,7 @@ impl Render for DockHost {
                 toggle_context_menu.clone(),
                 middle_click_closes_tabs,
                 &rects.splitters,
+                resize_preview.and_then(|preview| preview.splitter),
                 &rects.vertical_overflow,
                 &main_node_ids,
                 &main_node_sides,
