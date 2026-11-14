@@ -886,19 +886,18 @@ impl DockController {
         }
     }
 
-    /// Starts tracking a resize from a Core hit-test result using Main geometry.
+    /// Starts tracking a resize from a Core hit-test result.
     pub fn begin_resize_interaction(
         &mut self,
         hit: HitResult,
         origin: Point,
     ) -> Result<(), ResizeInteractionError> {
-        let rects = self.geometry().ok().cloned();
-        self.begin_resize_interaction_with_rects(hit, origin, rects.as_ref())
+        self.begin_resize_interaction_with_rects(hit, origin, None)
     }
 
     /// Starts a resize using the geometry produced by the host that owns the
-    /// pointer. Floating windows have their own local geometry snapshot, while
-    /// Main continues to use the standard Layout geometry above.
+    /// pointer. Floating windows pass their local snapshot; Main uses the
+    /// controller's standard Layout geometry when no snapshot is supplied.
     pub(crate) fn begin_resize_interaction_with_rects(
         &mut self,
         hit: HitResult,
@@ -915,6 +914,13 @@ impl DockController {
         ) {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
+
+        let owned_rects = if rects.is_none() {
+            self.geometry().ok().cloned()
+        } else {
+            None
+        };
+        let rects = rects.or(owned_rects.as_ref());
 
         let start_splitter_rect = match hit {
             HitResult::Splitter {
