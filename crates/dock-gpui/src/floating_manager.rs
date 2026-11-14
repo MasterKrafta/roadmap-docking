@@ -583,6 +583,43 @@ impl WindowChainRegistry {
         true
     }
 
+    /// Inserts an ordered group of independent windows before/after an anchor.
+    ///
+    /// The entire operation is applied to a clone so a failed link cannot leave
+    /// either the source sequence or destination chain partially rewritten.
+    fn link_sequence_at(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: &[FloatingGroupId],
+        insert_before: bool,
+    ) -> bool {
+        if moving.is_empty() {
+            return false;
+        }
+        let mut seen = HashSet::new();
+        if moving.iter().any(|group| *group == anchor || !seen.insert(*group)) {
+            return false;
+        }
+
+        let mut next = self.clone();
+        for pair in moving.windows(2) {
+            if !next.link_after(pair[0], pair[1]) {
+                return false;
+            }
+        }
+        let linked = if insert_before {
+            next.link_before(anchor, moving[0])
+        } else {
+            next.link_after(anchor, moving[0])
+        };
+        if !linked {
+            return false;
+        }
+
+        *self = next;
+        true
+    }
+
     /// Removes one window from its chain. The remaining members keep their
     /// order; zero- and one-member results are not retained as chains.
     fn remove_member(&mut self, group: FloatingGroupId) -> bool {
@@ -768,6 +805,92 @@ impl FloatingWindowManager {
         }
         self.window_chains = next;
         true
+    }
+
+    /// Joins newly-created Floating windows to an existing native window chain.
+    ///
+    /// The source groups remain separate Core FloatingGroups and separate HWNDs.
+    /// Their final positions are calculated from each native frame so the visible
+    /// DWM edges touch the selected side of the anchor window.
+    pub(crate) fn join_window_chain_at(
+        &mut self,
+        anchor: FloatingGroupId,
+        groups: &[FloatingGroupId],
+        insert_before: bool,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        let mut next_chains = self.window_chains.clone();
+        if !next_chains.link_sequence_at(anchor, groups, insert_before) {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "could not insert the new Floating windows into the target WindowChain",
+            });
+        }
+
+        let members = next_chains.members_for(anchor);
+        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
+            members
+                .iter()
+                .map(|member| {
+                    controller
+                        .layout()
+                        .floating_group(*member)
+                        .map(|floating| (*member, floating.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
+        }) else {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "WindowChain contains a FloatingGroup that no longer exists",
+            });
+        };
+
+        let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
+        let Some(bounds) =
+            arrange_contiguous_window_chain_bounds(member_bounds, &frame_geometries, anchor)
+        else {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "could not calculate native frame geometry for the new WindowChain",
+            });
+        };
+
+        let current_bounds = self.controller.update(cx, |controller, _| {
+            bounds
+                .iter()
+                .map(|(group, _)| {
+                    controller
+                        .layout()
+                        .floating_group(*group)
+                        .map(|floating| (*group, floating.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
+        }).ok_or(dock_core::CommandError::InvalidTarget {
+            reason: "WindowChain changed while preparing its native bounds",
+        })?;
+        let commands = bounds
+            .iter()
+            .filter_map(|(group, bounds)| {
+                current_bounds
+                    .iter()
+                    .find(|(current_group, _)| current_group == group)
+                    .filter(|(_, current)| current != bounds)
+                    .map(|_| DockCommand::ResizeFloatingBounds {
+                        group: *group,
+                        bounds: *bounds,
+                    })
+            })
+            .collect::<Vec<_>>();
+
+        if !commands.is_empty() {
+            self.controller.update(cx, |controller, controller_cx| {
+                controller
+                    .dispatch_sequence_in(commands, controller_cx)
+                    .map(|_| ())
+            })?;
+        }
+
+        self.window_chains = next_chains;
+        self.reconcile(cx);
+        cx.notify();
+        Ok(())
     }
 
     /// Connects the temporary transport manager without creating an ownership cycle.
@@ -1815,32 +1938,6 @@ impl FloatingWindowManager {
         ) else {
             return Some(DockingWindowAtPoint::ForeignWindow);
         };
-        Some(DockingWindowAtPoint::Floating {
-            group,
-            window_id: entry.window_id,
-            point,
-        })
-    }
-
-    /// Resolves the previously targeted Floating host if native Z-order hit-testing
-    /// transiently reports empty desktop space while the pointer remains inside it.
-    ///
-    /// The point must still be inside that exact visible HWND. Foreign windows
-    /// are handled by the primary hit-test and are never bypassed by this fallback.
-    pub(crate) fn floating_window_at_point(
-        &self,
-        group: FloatingGroupId,
-        screen: PhysicalPoint,
-    ) -> Option<DockingWindowAtPoint> {
-        let entry = self.panel_window_for_group(group)?;
-        if entry.visibility != PanelWindowVisibility::Visible {
-            return None;
-        }
-        let native_window = entry.native_window?;
-        if !self.native_ops.window_rect(native_window).ok()?.contains(screen) {
-            return None;
-        }
-        let point = self.core_point_for_floating(native_window, screen)?;
         Some(DockingWindowAtPoint::Floating {
             group,
             window_id: entry.window_id,
@@ -3860,6 +3957,29 @@ mod window_chain_registry_tests {
         assert!(!chains.link_before(a, b));
         assert_eq!(chains.members_for(c), vec![c]);
         assert_eq!(chains.members_for(a), vec![a, b]);
+    }
+
+    #[test]
+    fn inserts_a_new_window_sequence_before_or_after_an_existing_chain() {
+        let [left, anchor, right, source_a, source_b] =
+            groups(5).try_into().expect("five group ids");
+        let mut chains = WindowChainRegistry::default();
+        assert!(chains.link_after(anchor, right));
+        assert!(chains.link_before(anchor, left));
+
+        assert!(chains.link_sequence_at(anchor, &[source_a, source_b], true));
+        assert_eq!(
+            chains.members_for(anchor),
+            vec![left, source_a, source_b, anchor, right]
+        );
+
+        let [new_right_a, new_right_b] =
+            groups(2).try_into().expect("two group ids");
+        assert!(chains.link_sequence_at(anchor, &[new_right_a, new_right_b], false));
+        assert_eq!(
+            chains.members_for(anchor),
+            vec![left, source_a, source_b, anchor, new_right_a, new_right_b, right]
+        );
     }
 
     #[test]
