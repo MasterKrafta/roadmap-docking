@@ -560,14 +560,13 @@ mod windows_impl {
         right_min_client_width: i32,
     }
 
-    fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> u32 {
+    fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> i32 {
         if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
-            // The invisible left resize border overlaps the previous chain
-            // member's visible right edge. Let Windows hit-test the window
-            // beneath this HWND so its right edge can start native resizing.
+            // HTTRANSPARENT is signed (-1); preserve that value all the way
+            // into LRESULT so Windows can continue hit-testing underneath.
             HTTRANSPARENT
         } else {
-            hit_test
+            hit_test as i32
         }
     }
 
@@ -686,7 +685,7 @@ mod windows_impl {
             let hit_test = result.0 as u32;
             let adjusted_hit_test =
                 hit_test_code_for_resize(hit_test, left_resize_enabled);
-            if adjusted_hit_test != hit_test {
+            if adjusted_hit_test != hit_test as i32 {
                 return LRESULT(adjusted_hit_test as isize);
             }
         }
@@ -1644,10 +1643,10 @@ mod windows_impl {
             for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
                 assert_eq!(hit_test_code_for_resize(hit_test, false), HTTRANSPARENT);
             }
-            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT);
-            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT);
-            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT);
-            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT as i32);
+            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT as i32);
+            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT as i32);
+            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT as i32);
         }
 
         #[test]
