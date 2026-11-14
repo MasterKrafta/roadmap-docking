@@ -1295,6 +1295,15 @@ impl FloatingWindowManager {
             .collect::<HashMap<_, _>>();
         let desired_panels = next_hosts.values().copied().collect::<HashSet<_>>();
 
+        // A host transfer or a removed floating group invalidates an in-progress
+        // client resize. Do not leave reconciliation permanently suspended.
+        if let Some(group) = self.custom_resize_group {
+            let previous_host = self.host_registry.panel_for_group(group);
+            if next_hosts.get(&group).copied() != previous_host {
+                self.custom_resize_group = None;
+            }
+        }
+
         let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
                 Ok(areas) => Some(areas),
@@ -1587,7 +1596,9 @@ impl FloatingWindowManager {
         transferred_panels: &[PanelId],
     ) {
         for group in groups {
-            if self.native_move.is_some_and(|session| session.group == group.id) {
+            if self.native_move.is_some_and(|session| session.group == group.id)
+                || self.custom_resize_group == Some(group.id)
+            {
                 continue;
             }
             let Some(panel) = active_hosts.get(&group.id).copied() else {
