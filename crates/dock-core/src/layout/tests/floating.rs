@@ -1902,6 +1902,19 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
 
     assert!(layout.floating_group(source_floating).is_none());
     let target = layout.floating_group(target_floating).unwrap();
+    assert_eq!(
+        target.bounds,
+        Rect::new(
+            Point::new(
+                420.0 - 300.0 - metrics.splitter_thickness,
+                60.0,
+            ),
+            Size::new(
+                300.0 + 420.0 + metrics.splitter_thickness,
+                280.0,
+            ),
+        ),
+    );
     let root = layout.dock_area(target.area).unwrap().root;
     assert!(matches!(
         layout.node(root),
@@ -1911,6 +1924,11 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
                 && (split.ratios[0] - 300.0 / 720.0).abs() < 1.0e-4
                 && (split.ratios[1] - 420.0 / 720.0).abs() < 1.0e-4
     ));
+    let rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
+    assert_eq!(rects.splitters.len(), 1);
+    assert_eq!(rects.splitters[0].owner, root);
+    assert_eq!(rects.splitters[0].boundary_index, 0);
+    assert_eq!(rects.splitters[0].axis, Axis::X);
     assert!(matches!(
         layout.node(source_column),
         Some(Node::Column(column)) if column.groups == vec![source_tabs]
