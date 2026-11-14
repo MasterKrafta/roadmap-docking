@@ -1173,10 +1173,8 @@ mod windows_impl {
                     restore_non_resizable_frame(native);
                     return Err(error);
                 }
-                reference_data = pointer as usize;
             }
 
-            let _ = tracking_installed;
             Ok(())
         }
 
