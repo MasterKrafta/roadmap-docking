@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use dock_core::{
     Axis, CommandError, CommandValue, DockCommand, DockMetrics, DockSide, DragCancelReason, DragHandle,
@@ -357,6 +357,8 @@ pub struct DockController {
     /// activation only change which host receives a clone; they never replace
     /// the cached entity. Replacing the Layout resets this cache.
     panel_views: PanelViewCache<AnyView>,
+    /// Panel views temporarily withheld until their previous FloatingHost has rendered empty.
+    pending_panel_view_handoffs: HashSet<PanelId>,
     last_error: Option<CommandError>,
     pending_events: VecDeque<DockEvent>,
 }
@@ -395,6 +397,7 @@ impl DockController {
             initial_monitor_recovery_pending,
             registry,
             panel_views: PanelViewCache::default(),
+            pending_panel_view_handoffs: HashSet::new(),
             last_error: None,
             pending_events: VecDeque::new(),
         })
@@ -596,6 +599,16 @@ impl DockController {
             DragPayload::DockArea { side } => Some(side),
             _ => None,
         }
+    }
+
+    /// Prevents a cached PanelView from being mounted in a destination until its old host renders empty.
+    pub(crate) fn begin_panel_view_handoff(&mut self, panel: PanelId) -> bool {
+        self.pending_panel_view_handoffs.insert(panel)
+    }
+
+    /// Allows a PanelView to be mounted after its previous host has rendered an empty frame.
+    pub(crate) fn finish_panel_view_handoff(&mut self, panel: PanelId) -> bool {
+        self.pending_panel_view_handoffs.remove(&panel)
     }
 
     /// Returns the original cached AnyView after the source placeholder frame has rendered.
