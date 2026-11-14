@@ -874,6 +874,11 @@ impl Render for FloatingHost {
                         controller.finish_native_resize_transaction();
                         controller_cx.notify();
                     });
+                    if let Some(manager) = manager.upgrade() {
+                        manager.update(app, |manager, manager_cx| {
+                            manager.finish_custom_resize(group, manager_cx);
+                        });
+                    }
                 }
                 DockInteractionCoordinator::cancel_on_focus_loss(
                     &controller,
