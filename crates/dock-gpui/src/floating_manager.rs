@@ -394,7 +394,12 @@ fn floating_groups_in_native_z_order(
     blocks.sort_by_key(|(z_order, _)| *z_order);
     blocks
         .into_iter()
-        .flat_map(|(_, members)| members)
+        .flat_map(|(_, mut members)| {
+            // The sequence is applied back-to-front with HWND_TOP. Reverse each
+            // left-to-right chain so the left member ends above its right neighbour.
+            members.reverse();
+            members
+        })
         .collect()
 }
 
@@ -2564,12 +2569,12 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Applies Core's floating z-order to the native windows.
+    /// Applies Core's floating z-order to native windows and stores each chain's
+    /// left-to-right order for activation-time correction.
     ///
-    /// The snapshots arrive sorted from back to front. Showing each existing
-    /// composition with SW_SHOWNOACTIVATE preserves that order without stealing
-    /// keyboard focus from the window the user is currently interacting with.
-    /// This is the only place that reconciles native floating-window z-order.
+    /// Windows are raised from back to front without activation. Members inside
+    /// one chain are raised right-to-left so the left member owns the overlapping
+    /// seam and its right Resize edge remains reachable.
     fn synchronize_native_z_order(
         &mut self,
         groups: &[FloatingGroupSnapshot],
@@ -2594,28 +2599,76 @@ impl FloatingWindowManager {
             let Some(panel) = active_hosts.get(&group.id).copied() else {
                 continue;
             };
-            let Some(entry) = self.registry.windows.get_mut(&panel) else {
-                continue;
-            };
-            // A newly-created FloatingHost for a transferred composition stays
-            // hidden until DragHost has rendered its empty placeholder and
-            // released the cached AnyViews. Already-visible hosts remain visible.
-            if entry.visibility == PanelWindowVisibility::Hidden
-                && group.panels.iter().any(|panel| transferred_panels.contains(panel))
-            {
-                continue;
-            }
-            let Some(native_window) = entry.native_window else {
-                continue;
+            let native_window = {
+                let Some(entry) = self.registry.windows.get_mut(&panel) else {
+                    continue;
+                };
+                // A newly-created FloatingHost for a transferred composition stays
+                // hidden until DragHost has rendered its empty placeholder and
+                // released the cached AnyViews. Already-visible hosts remain visible.
+                if entry.visibility == PanelWindowVisibility::Hidden
+                    && group.panels.iter().any(|panel| transferred_panels.contains(panel))
+                {
+                    continue;
+                }
+                let Some(native_window) = entry.native_window else {
+                    continue;
+                };
+
+                match self.native_ops.show_no_activate(native_window) {
+                    Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?panel,
+                            ?group.id,
+                            %error,
+                            "could not show the native window hosting a floating composition"
+                        );
+                        continue;
+                    }
+                }
+                native_window
             };
 
-            match self.native_ops.show_no_activate(native_window) {
-                Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
-                Err(error) => tracing::warn!(
-                    ?panel,
-                    ?group.id,
+            let chain_windows = self
+                .window_chains
+                .members_for(group_id)
+                .into_iter()
+                .filter_map(|member| self.panel_window_for_group(member)?.native_window)
+                .collect::<Vec<_>>();
+            if let Err(error) = self
+                .native_ops
+                .set_window_chain_z_order(native_window, &chain_windows)
+            {
+                tracing::warn!(
+                    ?group_id,
                     %error,
-                    "could not show the native window hosting a floating composition"
+                    "could not register native Floating chain Z-order"
+                );
+            }
+
+            // ShowWindow(SW_SHOWNOACTIVATE) does not reorder an already-visible
+            // HWND. Explicitly apply back-to-front order without changing focus.
+            match self.native_ops.window_rect(native_window) {
+                Ok(rect) => {
+                    if let Err(error) = self.native_ops.move_window_to_top(
+                        native_window,
+                        PhysicalPoint {
+                            x: rect.left,
+                            y: rect.top,
+                        },
+                    ) {
+                        tracing::warn!(
+                            ?group_id,
+                            %error,
+                            "could not apply native Floating window Z-order"
+                        );
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    ?group_id,
+                    %error,
+                    "could not read native Floating bounds while applying Z-order"
                 ),
             }
         }
@@ -4103,8 +4156,8 @@ mod native_z_order_tests {
 
         assert_eq!(
             floating_groups_in_native_z_order(&groups, &chains),
-            vec![c, d, e, a, b],
-            "each chain is ordered internally and ranked by its frontmost member"
+            vec![d, c, e, b, a],
+            "chains are raised back-to-front internally and ranked by their frontmost member"
         );
     }
 
