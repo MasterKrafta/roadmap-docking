@@ -23,7 +23,7 @@ mod split_layout;
 use split_layout::{layout_floating_root, layout_split, push_splitter};
 
 use crate::{
-    Axis, Column, ColumnMode, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
+    Axis, Column, ColumnRect, ComputeRectsError, DockMetrics, DockSide,
     FloatingGroupRect, FlyoutRect, GeometryError, GroupRect, Layout,
     LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, PanelRect, Point, Rect,
     Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, Tabs,
