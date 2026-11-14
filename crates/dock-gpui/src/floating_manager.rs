@@ -673,7 +673,7 @@ impl FloatingWindowManager {
         window_id: WindowId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(mut state) = self.native_resize.filter(|state| {
+        let Some(state) = self.native_resize.filter(|state| {
             state.group == group && state.window_id == window_id
         }) else {
             return false;
