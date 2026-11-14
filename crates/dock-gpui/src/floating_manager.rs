@@ -1906,6 +1906,14 @@ impl FloatingWindowManager {
         });
         if result.is_ok() {
             self.window_chains = next_chains;
+            for member in members {
+                if let Some(panel) = self.host_registry.panel_for_group(member)
+                    && let Some(mut entry) = self.registry.windows.remove(&panel)
+                {
+                    self.sync_native_left_resize_policy(&mut entry, member);
+                    self.registry.windows.insert(panel, entry);
+                }
+            }
         }
         result
     }
@@ -2975,6 +2983,36 @@ impl FloatingWindowManager {
         work_areas.first().copied()
     }
 
+    fn sync_native_left_resize_policy(
+        &self,
+        entry: &mut PanelWindowEntry,
+        group: FloatingGroupId,
+    ) {
+        let Some(native_window) = entry.native_window else {
+            return;
+        };
+        if !entry.resize_enabled {
+            return;
+        }
+
+        let desired_enabled = self.window_chains.members_for(group).first() == Some(&group);
+        if entry.native_left_resize_enabled == Some(desired_enabled) {
+            return;
+        }
+
+        match self
+            .native_ops
+            .set_left_resize_enabled(native_window, desired_enabled)
+        {
+            Ok(()) => entry.native_left_resize_enabled = Some(desired_enabled),
+            Err(error) => tracing::warn!(
+                ?group,
+                %error,
+                "could not synchronize the native left-edge resize policy"
+            ),
+        }
+    }
+
     fn sync_native_resize(
         &self,
         entry: &mut PanelWindowEntry,
@@ -2995,23 +3033,7 @@ impl FloatingWindowManager {
             }
         }
 
-        let desired_left_resize_enabled =
-            self.window_chains.members_for(group.id).first() == Some(&group.id);
-        if entry.native_left_resize_enabled != Some(desired_left_resize_enabled) {
-            match self
-                .native_ops
-                .set_left_resize_enabled(native_window, desired_left_resize_enabled)
-            {
-                Ok(()) => {
-                    entry.native_left_resize_enabled = Some(desired_left_resize_enabled);
-                }
-                Err(error) => tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not synchronize the native left-edge resize policy"
-                ),
-            }
-        }
+        self.sync_native_left_resize_policy(entry, group.id);
 
         let scale = self
             .native_ops
