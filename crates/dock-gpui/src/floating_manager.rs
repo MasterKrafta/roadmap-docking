@@ -129,6 +129,7 @@ struct PanelWindowEntry {
     native_min_size: Option<PhysicalSize>,
     native_horizontal_resize_min_widths: Option<(i32, i32)>,
     native_left_resize_enabled: Option<bool>,
+    native_top_resize_enabled: Option<bool>,
     native_scale_factor: Option<f32>,
     /// The HWND may differ from Core bounds after the OS-owned resize loop.
     /// A final reconciliation must write Core's canonical bounds back.
@@ -826,6 +827,7 @@ impl FloatingWindowManager {
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
                 native_left_resize_enabled: None,
+                native_top_resize_enabled: None,
                 native_scale_factor: scale,
             native_bounds_dirty: false,
                 resize_enabled: false,
@@ -2061,7 +2063,7 @@ impl FloatingWindowManager {
                 if let Some(panel) = self.host_registry.panel_for_group(member)
                     && let Some(mut entry) = self.registry.windows.remove(&panel)
                 {
-                    self.sync_native_left_resize_policy(&mut entry, member);
+                    self.sync_native_resize_edge_policy(&mut entry, member);
                     self.registry.windows.insert(panel, entry);
                 }
             }
@@ -3111,6 +3113,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
+            native_top_resize_enabled: None,
             native_scale_factor: None,
             native_bounds_dirty: false,
             resize_enabled: false,
@@ -3186,7 +3189,7 @@ impl FloatingWindowManager {
         work_areas.first().copied()
     }
 
-    fn sync_native_left_resize_policy(
+    fn sync_native_resize_edge_policy(
         &self,
         entry: &mut PanelWindowEntry,
         group: FloatingGroupId,
@@ -3198,21 +3201,36 @@ impl FloatingWindowManager {
             return;
         }
 
-        let desired_enabled = self.window_chains.members_for(group).first() == Some(&group);
-        if entry.native_left_resize_enabled == Some(desired_enabled) {
-            return;
+        let members = self.window_chains.members_for(group);
+        let desired_left_enabled = members.first() == Some(&group);
+        let desired_top_enabled = members.len() <= 1;
+
+        if entry.native_left_resize_enabled != Some(desired_left_enabled) {
+            match self
+                .native_ops
+                .set_left_resize_enabled(native_window, desired_left_enabled)
+            {
+                Ok(()) => entry.native_left_resize_enabled = Some(desired_left_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    %error,
+                    "could not synchronize the native left-edge resize policy"
+                ),
+            }
         }
 
-        match self
-            .native_ops
-            .set_left_resize_enabled(native_window, desired_enabled)
-        {
-            Ok(()) => entry.native_left_resize_enabled = Some(desired_enabled),
-            Err(error) => tracing::warn!(
-                ?group,
-                %error,
-                "could not synchronize the native left-edge resize policy"
-            ),
+        if entry.native_top_resize_enabled != Some(desired_top_enabled) {
+            match self
+                .native_ops
+                .set_top_resize_enabled(native_window, desired_top_enabled)
+            {
+                Ok(()) => entry.native_top_resize_enabled = Some(desired_top_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    %error,
+                    "could not synchronize the native top-edge resize policy"
+                ),
+            }
         }
     }
 
@@ -3236,7 +3254,7 @@ impl FloatingWindowManager {
             }
         }
 
-        self.sync_native_left_resize_policy(entry, group.id);
+        self.sync_native_resize_edge_policy(entry, group.id);
 
         let scale = self
             .native_ops
