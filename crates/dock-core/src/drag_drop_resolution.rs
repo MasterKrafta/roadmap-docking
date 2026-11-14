@@ -1535,9 +1535,13 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         )
         .unwrap();
     assert!(layout.floating_group(source_float).is_none());
-    assert!(layout.floating_group(target_float).is_some());
+    let target_floating = layout.floating_group(target_float).unwrap();
+    assert_eq!(
+        target_floating.bounds.size.width,
+        310.0 + 290.0 + metrics.splitter_thickness,
+    );
     let new_root = layout
-        .dock_area(layout.floating_group(target_float).unwrap().area)
+        .dock_area(target_floating.area)
         .unwrap()
         .root;
     assert!(matches!(
@@ -1554,6 +1558,9 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         Some(Node::Column(column))
             if column.groups == vec![source_group] && column.width == 310.0
     ));
+    let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
+    assert_eq!(rects.splitters.len(), 1);
+    assert_eq!(rects.splitters[0].owner, new_root);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
