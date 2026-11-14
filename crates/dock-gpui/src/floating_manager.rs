@@ -16,7 +16,7 @@ use gpui::{
 };
 use platform::{
     hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId,
-    NativeWindowOps, PhysicalPoint, PhysicalRect, PhysicalSize, SystemNativeWindowOps,
+    NativeWindowOps, PhysicalPoint, PhysicalSize, SystemNativeWindowOps,
 };
 
 use crate::{
