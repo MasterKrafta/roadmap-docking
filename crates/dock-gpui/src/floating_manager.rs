@@ -1822,6 +1822,32 @@ impl FloatingWindowManager {
         })
     }
 
+    /// Resolves the previously targeted Floating host when native Z-order hit-testing
+    /// transiently reports empty desktop space at the release edge.
+    ///
+    /// The point must still be inside that exact visible HWND. Foreign windows
+    /// are handled by the primary hit-test and are never bypassed by this fallback.
+    pub(crate) fn floating_window_at_point(
+        &self,
+        group: FloatingGroupId,
+        screen: PhysicalPoint,
+    ) -> Option<DockingWindowAtPoint> {
+        let entry = self.panel_window_for_group(group)?;
+        if entry.visibility != PanelWindowVisibility::Visible {
+            return None;
+        }
+        let native_window = entry.native_window?;
+        if !self.native_ops.window_rect(native_window).ok()?.contains(screen) {
+            return None;
+        }
+        let point = self.core_point_for_floating(native_window, screen)?;
+        Some(DockingWindowAtPoint::Floating {
+            group,
+            window_id: entry.window_id,
+            point,
+        })
+    }
+
     /// Returns true when the cursor is over a registered FloatingHost above MainHost.
     pub(crate) fn cursor_over_floating_window_from_main(&self) -> bool {
         let Some(main) = self.main_native_window else {
