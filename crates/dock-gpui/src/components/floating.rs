@@ -73,6 +73,7 @@ impl FloatingWindowContent {
         column_modes: &HashMap<NodeId, ColumnMode>,
         rail_display_orders: &HashMap<NodeId, Vec<ColumnDisplayItem>>,
         splitters: &[SplitterRect],
+        active_splitter: Option<(NodeId, usize, dock_core::Axis)>,
         vertical_overflow: &[VerticalOverflow],
         scroll_handles: &HashMap<NodeId, ScrollHandle>,
         active_flyout: Option<FlyoutState>,
@@ -143,6 +144,7 @@ impl FloatingWindowContent {
                 context_menu.clone(),
                 middle_click_closes_tabs,
                 splitters,
+                active_splitter,
                 vertical_overflow,
                 scroll_handles.get(&column.column).cloned(),
                 controller.clone(),
@@ -217,6 +219,8 @@ impl FloatingWindowContent {
                 metrics,
                 theme,
                 Some(floating.group),
+                active_splitter
+                    == Some((splitter.owner, splitter.boundary_index, splitter.axis)),
             ));
         }
 
@@ -1917,6 +1921,7 @@ impl Render for FloatingHost {
             &snapshot.column_modes,
             &snapshot.rail_display_orders,
             &snapshot.rects.splitters,
+            snapshot.resize_preview.and_then(|preview| preview.splitter),
             &snapshot.rects.vertical_overflow,
             &self.column_scroll_handles,
             None,
