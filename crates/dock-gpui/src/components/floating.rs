@@ -24,6 +24,7 @@ use crate::{
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
+        render_resize_preview,
     },
     input::{
         drag::{
@@ -32,6 +33,10 @@ use crate::{
             update_drag_at, update_floating_tab_drag, FloatingTabDrag,
         },
         interaction::DockInteractionCoordinator,
+        resize::{
+            begin_resize_hit_with_rects, finish_resize_with_rects, update_resize,
+        },
+        resize_preview_for_interaction, ResizePreview,
     },
     DockController, DragSourceHost, FloatingWindowManager,
 };
@@ -277,6 +282,7 @@ struct FloatingHostSnapshot {
     drag_preview: Option<DragPreview>,
     drag_zones: Vec<DropZoneRect>,
     active_drop_zone: Option<dock_core::DropZoneRect>,
+    resize_preview: Option<ResizePreview>,
 }
 
 /// Floating tab drags transfer one Panel to DragHost after leaving the source strip
@@ -446,6 +452,9 @@ fn floating_host_snapshot(
         .unwrap_or_default();
     let active_drop_zone =
         DropOverlay::resolve_active_zone(drag_resolver, drag_preview);
+    let resize_preview = controller
+        .resize_interaction()
+        .and_then(resize_preview_for_interaction);
 
     Ok(Some(FloatingHostSnapshot {
         rects,
@@ -459,6 +468,7 @@ fn floating_host_snapshot(
         drag_preview,
         drag_zones,
         active_drop_zone,
+        resize_preview,
     }))
 }
 
@@ -758,6 +768,47 @@ impl Render for FloatingHost {
                             });
                         let hit = dock_component_tab_hit.or(core_hit);
 
+                        if let Some(resize_hit @ dock_core::HitResult::Splitter { .. }) =
+                            hit.clone()
+                        {
+                            let floating_rects = controller_for_down.update(app, |controller, _| {
+                                controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .cloned()
+                            });
+                            if let Some(rects) = floating_rects {
+                                begin_resize_hit_with_rects(
+                                    &controller_for_down,
+                                    resize_hit,
+                                    point,
+                                    &rects,
+                                    app,
+                                );
+                                let resize_started = controller_for_down
+                                    .update(app, |controller, _| {
+                                        controller.resize_interaction().is_some()
+                                    });
+                                if resize_started {
+                                    if !DockInteractionCoordinator::capture(
+                                        window,
+                                        hitbox,
+                                        &pointer_capture_for_down,
+                                    ) {
+                                        DockInteractionCoordinator::cancel(
+                                            &controller_for_down,
+                                            window,
+                                            &pointer_capture_for_down,
+                                            app,
+                                        );
+                                        return;
+                                    }
+                                    app.stop_propagation();
+                                    return;
+                                }
+                            }
+                        }
+
                         // The remaining CompositionHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
@@ -931,6 +982,54 @@ impl Render for FloatingHost {
                     let pointer_capture_for_move = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || !event.dragging() {
+                            return;
+                        }
+                        let resize_active = controller_for_move
+                            .update(app, |controller, _| controller.resize_interaction().is_some());
+                        if resize_active {
+                            if !DockInteractionCoordinator::ensure_current(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            ) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_move,
+                            ) {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                crate::geometry::DockGeometry::point_from_gpui(event.position)
+                            else {
+                                return;
+                            };
+                            let should_schedule = controller_for_move.update(app, |controller, _| {
+                                controller.queue_resize_frame_point(point)
+                            });
+                            if should_schedule {
+                                let controller = controller_for_move.clone();
+                                window.on_next_frame(move |_, app| {
+                                    let point = controller
+                                        .update(app, |controller, _| {
+                                            controller.take_resize_frame_point()
+                                        });
+                                    if let Some(point) = point {
+                                        update_resize(&controller, point, app);
+                                    }
+                                });
+                            }
+                            app.stop_propagation();
                             return;
                         }
                         if let Some(group_press) = group_press_for_move.get() {
@@ -1229,6 +1328,75 @@ impl Render for FloatingHost {
                     let pointer_capture_for_up = pointer_capture.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let resize_active = controller_for_up
+                            .update(app, |controller, _| controller.resize_interaction().is_some());
+                        if resize_active {
+                            if !DockInteractionCoordinator::ensure_current(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            ) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_up,
+                            ) {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                crate::geometry::DockGeometry::point_from_gpui(event.position)
+                            else {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            };
+                            let floating_rects = controller_for_up.update(app, |controller, _| {
+                                controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .cloned()
+                            });
+                            controller_for_up.update(app, |controller, _| {
+                                controller.clear_resize_frame_point();
+                            });
+                            if let Some(rects) = floating_rects {
+                                finish_resize_with_rects(
+                                    &controller_for_up,
+                                    point,
+                                    event.click_count,
+                                    &rects,
+                                    app,
+                                );
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                            } else {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                            }
+                            app.stop_propagation();
                             return;
                         }
                         if let Some(manager) = manager_for_up.upgrade() {
@@ -1758,6 +1926,18 @@ impl Render for FloatingHost {
             self.controller.clone(),
             self.theme,
         ));
+
+        if let Some(mut preview) = snapshot.resize_preview {
+            if let Some(owner) = preview.scroll_owner {
+                let scroll_offset = self
+                    .column_scroll_handles
+                    .get(&owner)
+                    .map(|handle| handle.offset().y.as_f32().max(0.0))
+                    .unwrap_or(0.0);
+                preview.rect.origin.y -= scroll_offset;
+            }
+            root = root.child(render_resize_preview(preview, self.theme));
+        }
 
         if let Some(preview) = snapshot.drag_preview {
             root = root.child(DropOverlay::render(
