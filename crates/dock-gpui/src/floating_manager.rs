@@ -11,7 +11,7 @@ use dock_core::{
     FloatingResizeEdge, Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
+    AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
@@ -66,38 +66,6 @@ impl PanelWindowHandle {
                 match window.update(cx, |surface, window, host_cx| {
                     let updated = surface.set_floating_group(group, window, host_cx);
                     host_cx.notify();
-                    updated
-                }) {
-                    Ok(true) => Ok(()),
-                    Ok(false) => Err("DragHost could not switch its Floating composition".into()),
-                    Err(error) => Err(error.to_string()),
-                }
-            }
-        }
-    }
-
-    /// Detaches this composition and confirms the old host rendered a frame before its views move.
-    fn set_group_after_next_frame(
-        &self,
-        group: Option<FloatingGroupId>,
-        after_frame: impl FnOnce(&mut App) + 'static,
-        cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Floating(window) => window
-                .update(cx, |host, window, host_cx| {
-                    host.set_host_group(group, window);
-                    host_cx.notify();
-                    window.on_next_frame(move |_, app| after_frame(app));
-                })
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => {
-                match window.update(cx, |surface, window, host_cx| {
-                    let updated = surface.set_floating_group(group, window, host_cx);
-                    host_cx.notify();
-                    if updated {
-                        window.on_next_frame(move |_, app| after_frame(app));
-                    }
                     updated
                 }) {
                     Ok(true) => Ok(()),
@@ -341,8 +309,6 @@ pub struct FloatingWindowManager {
     host_registry: CompositionHostRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
-    /// Old host windows kept alive until their PanelViews are safe to mount elsewhere.
-    pending_panel_window_detaches: HashMap<PanelId, Vec<PanelId>>,
 }
 
 impl FloatingWindowManager {
@@ -360,7 +326,6 @@ impl FloatingWindowManager {
             host_registry: CompositionHostRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
-            pending_panel_window_detaches: HashMap::new(),
         }
     }
 
@@ -1344,7 +1309,6 @@ impl FloatingWindowManager {
             return;
         }
         self.reconciling = true;
-        let previous_panel_locations = self.registry.panel_locations.clone();
 
         let (mut groups, panel_locations, recover_initial_bounds, transferred_panels) =
             self.controller.update(cx, |controller, _| {
@@ -1478,81 +1442,24 @@ impl FloatingWindowManager {
                     .filter(|_| entry.host_group.is_some())
             })
             .collect::<Vec<_>>();
-        // If a FloatingHost is replaced, withhold every still-open PanelView
-        // from its destination until the old host has rendered an empty frame.
-        let mut detach_handoffs = HashMap::<PanelId, Vec<PanelId>>::new();
-        for panel in &detached_panels {
-            let Some(entry) = self.registry.windows.get(panel) else {
-                continue;
-            };
-            if !matches!(entry.window, PanelWindowHandle::Floating(_)) {
-                continue;
-            }
-            let Some(previous_group) = entry.host_group else {
-                continue;
-            };
-            let transferred_panels = previous_panel_locations
-                .iter()
-                .filter_map(|(candidate, location)| {
-                    (*location == PanelLayoutLocation::Floating(previous_group)
-                        && panel_locations.contains_key(candidate))
-                    .then_some(*candidate)
-                })
-                .collect::<Vec<_>>();
-            if !transferred_panels.is_empty() {
-                detach_handoffs.insert(*panel, transferred_panels);
-            }
-        }
-
         // A failed GPUI detach must not be followed by mounting the same
         // composition in another window. Keep that group without an active host
         // for this pass and retry the detach on the next reconciliation.
         let mut blocked_groups = HashSet::new();
         let mut hide_attempted_panels = HashSet::new();
-        let mut started_handoffs = Vec::new();
         for panel in detached_panels {
             if let Some(entry) = self.registry.windows.get_mut(&panel) {
                 let previous_group = entry.host_group;
-                let handoff_panels = detach_handoffs.get(&panel).cloned();
-                let detached = if handoff_panels.is_some() {
-                    let manager = cx.entity().downgrade();
-                    match entry.window.set_group_after_next_frame(
-                        None,
-                        move |app| {
-                            if let Some(manager) = manager.upgrade() {
-                                let _ = manager.update(app, |manager, manager_cx| {
-                                    manager.finish_panel_window_detach(panel, manager_cx);
-                                });
-                            }
-                        },
-                        cx,
-                    ) {
-                        Ok(()) => {
-                            started_handoffs.push((panel, handoff_panels.clone().unwrap_or_default()));
-                            true
-                        }
-                        Err(error) => {
-                            tracing::warn!(
-                                ?panel,
-                                ?previous_group,
-                                %error,
-                                "could not schedule the floating host view handoff"
-                            );
-                            false
-                        }
-                    }
-                } else {
-                    match entry.window.set_group(None, cx) {
-                        Ok(()) => true,
-                        Err(error) => {
-                            tracing::warn!(
-                                ?panel,
-                                ?previous_group,
-                                %error,
-                                "could not detach a panel window; composition host transfer is deferred"
-                            );
-                            false
-                        }
+                let detached = match entry.window.set_group(None, cx) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?panel,
+                            ?previous_group,
+                            %error,
+                            "could not detach a panel window; composition host transfer is deferred"
+                        );
+                        false
                     }
                 };
 
@@ -1564,12 +1471,7 @@ impl FloatingWindowManager {
                     }
                 }
 
-                // Keep a handoff source visible for its one empty frame. It is
-                // hidden and removed by finish_panel_window_detach afterwards.
-                let defer_hide = detached && handoff_panels.is_some();
-                let hidden = if defer_hide {
-                    false
-                } else if let Some(native_window) = entry.native_window {
+                let hidden = if let Some(native_window) = entry.native_window {
                     hide_attempted_panels.insert(panel);
                     match self.native_ops.hide(native_window) {
                         Ok(()) => true,
@@ -1622,20 +1524,6 @@ impl FloatingWindowManager {
             }
         }
 
-        for (source_panel, transferred_panels) in started_handoffs {
-            self.pending_panel_window_detaches
-                .insert(source_panel, transferred_panels.clone());
-            self.controller.update(cx, |controller, controller_cx| {
-                let mut changed = false;
-                for panel in transferred_panels {
-                    changed |= controller.begin_panel_view_handoff(panel);
-                }
-                if changed {
-                    controller_cx.notify();
-                }
-            });
-        }
-
         self.registry.panel_locations = panel_locations;
 
         // Publish only hosts whose GPUI view has actually been assigned. A
@@ -1686,9 +1574,6 @@ impl FloatingWindowManager {
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
 
         for (panel, entry) in &mut self.registry.windows {
-            if self.pending_panel_window_detaches.contains_key(panel) {
-                continue;
-            }
             if entry.host_group.is_none()
                 && entry.visibility == PanelWindowVisibility::Visible
                 && !hide_attempted_panels.contains(panel)
@@ -1723,7 +1608,6 @@ impl FloatingWindowManager {
             .keys()
             .filter(|panel| {
                 !desired_panels.contains(panel)
-                    && !self.pending_panel_window_detaches.contains_key(panel)
             })
             .copied()
             .collect::<Vec<_>>();
@@ -2045,34 +1929,6 @@ impl FloatingWindowManager {
             .min(max_y);
 
         Rect::new(Point::new(x, y), preferred_size)
-    }
-
-    fn finish_panel_window_detach(
-        &mut self,
-        source_panel: PanelId,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(transferred_panels) =
-            self.pending_panel_window_detaches.remove(&source_panel)
-        else {
-            return;
-        };
-
-        self.controller.update(cx, |controller, controller_cx| {
-            let mut changed = false;
-            for panel in transferred_panels {
-                changed |= controller.finish_panel_view_handoff(panel);
-            }
-            if changed {
-                controller_cx.notify();
-            }
-        });
-
-        if self.registry.windows.get(&source_panel).is_some_and(|entry| entry.host_group.is_none()) {
-            self.release_panel_window(source_panel, cx);
-        }
-        self.redraw_visible_hosts(cx);
-        cx.notify();
     }
 
     fn release_panel_window(&mut self, panel: PanelId, cx: &mut Context<Self>) {
