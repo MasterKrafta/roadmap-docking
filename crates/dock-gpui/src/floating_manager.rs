@@ -315,6 +315,42 @@ struct NativeResizeSession {
 }
 
 
+fn native_resize_right_edge_delta(
+    previous: Rect,
+    actual: Rect,
+    scale_factor: f32,
+) -> Option<f32> {
+    if !scale_factor.is_finite() || scale_factor <= 0.0 {
+        return None;
+    }
+    let previous_right = previous.origin.x + previous.size.width * scale_factor;
+    let actual_right = actual.origin.x + actual.size.width * scale_factor;
+    let delta = actual_right - previous_right;
+    delta.is_finite().then_some(delta)
+}
+
+/// Shifts only the members after the resized window. Origins are stored in
+/// physical desktop pixels; every member's own logical dimensions stay intact.
+fn shift_window_chain_after_resize(
+    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    resized_group: FloatingGroupId,
+    right_edge_delta: f32,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    if !right_edge_delta.is_finite() {
+        return None;
+    }
+    let resized_index = bounds
+        .iter()
+        .position(|(group, _)| *group == resized_group)?;
+    for (_, bounds) in bounds.iter_mut().skip(resized_index + 1) {
+        bounds.origin.x += right_edge_delta;
+        if !bounds.origin.x.is_finite() {
+            return None;
+        }
+    }
+    Some(bounds)
+}
+
 fn contiguous_window_chain_bounds(
     layout: &dock_core::Layout,
     members: &[FloatingGroupId],
@@ -1063,7 +1099,10 @@ impl FloatingWindowManager {
         let current = self.controller.update(cx, |controller, _| {
             controller.layout().floating_group(group).map(|floating| floating.bounds)
         });
-        if current == Some(bounds) {
+        let Some(current_bounds) = current else {
+            return;
+        };
+        if current_bounds == bounds {
             return;
         }
 
@@ -1092,9 +1131,7 @@ impl FloatingWindowManager {
         // WM_SIZING is authoritative. Retain the origin comparison only as a
         // fallback for platform adapters that cannot report a native hit edge.
         let edge = native_edge.or_else(|| {
-            let width_changed = current.is_some_and(|current| {
-                (bounds.size.width - current.size.width).abs() > 0.5
-            });
+            let width_changed = (bounds.size.width - current_bounds.size.width).abs() > 0.5;
             width_changed.then(|| {
                 if (bounds.origin.x - state.start_bounds.origin.x).abs() > 0.5 {
                     dock_core::FloatingResizeEdge::Left
@@ -1116,14 +1153,75 @@ impl FloatingWindowManager {
             },
             None => DockCommand::ResizeFloatingBounds { group, bounds },
         };
+        let chain_members = self.window_chains.members_for(group);
         let result = self.controller.update(cx, |controller, controller_cx| {
-            controller.dispatch_in(command, controller_cx)
+            let primary_result = controller.dispatch(command);
+            match primary_result {
+                Ok(_) => {
+                    let actual_bounds = controller
+                        .layout()
+                        .floating_group(group)
+                        .map(|floating| floating.bounds);
+                    if let Some(actual_bounds) = actual_bounds
+                        && let Some(right_edge_delta) = native_resize_right_edge_delta(
+                            current_bounds,
+                            actual_bounds,
+                            scale_factor,
+                        )
+                        && right_edge_delta.abs() > 0.01
+                    {
+                        let chain_bounds = chain_members
+                            .iter()
+                            .map(|member| {
+                                controller
+                                    .layout()
+                                    .floating_group(*member)
+                                    .map(|floating| (*member, floating.bounds))
+                            })
+                            .collect::<Option<Vec<_>>>();
+                        if let Some(chain_bounds) = chain_bounds
+                            && let Some(shifted_bounds) = shift_window_chain_after_resize(
+                                chain_bounds,
+                                group,
+                                right_edge_delta,
+                            )
+                        {
+                            let neighbor_commands = shifted_bounds
+                                .into_iter()
+                                .skip_while(|(member, _)| *member != group)
+                                .skip(1)
+                                .map(|(member, bounds)| DockCommand::ResizeFloatingBounds {
+                                    group: member,
+                                    bounds,
+                                })
+                                .collect::<Vec<_>>();
+                            if let Err(error) = controller.dispatch_sequence(neighbor_commands) {
+                                tracing::warn!(
+                                    ?group,
+                                    %error,
+                                    "could not shift later Window Chain members after native Resize"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(
+                    ?group,
+                    %error,
+                    "could not synchronize native floating-window bounds with Core"
+                ),
+            }
+
+            // The current resize and every dependent neighbour shift stay inside
+            // the same open native-resize history transaction and one event flush.
+            controller.flush_events(controller_cx);
+            controller_cx.notify();
         });
         if let Err(error) = result {
             tracing::warn!(
                 ?group,
                 %error,
-                "could not synchronize native floating-window bounds with Core"
+                "could not update the controller after native floating-window Resize"
             );
         }
     }
@@ -3555,6 +3653,62 @@ mod contiguous_window_chain_bounds_tests {
         assert_eq!(arranged[2].1.origin, Point::new(280.0, 8.0));
 
         assert!(arrange_contiguous_window_chain_bounds(input, FloatingGroupId::null()).is_none());
+    }
+}
+
+
+#[cfg(test)]
+mod native_resize_chain_geometry_tests {
+    use super::{native_resize_right_edge_delta, shift_window_chain_after_resize};
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::{Key, SlotMap};
+
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let groups = [ids.insert(()), ids.insert(()), ids.insert(())];
+        (ids, groups)
+    }
+
+    #[test]
+    fn right_edge_resize_moves_later_windows_by_physical_width_delta_only() {
+        let (_ids, [a, b, c]) = groups();
+        let before = Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0));
+        let actual = Rect::new(Point::new(100.0, 20.0), Size::new(340.0, 400.0));
+        let delta = native_resize_right_edge_delta(before, actual, 1.5)
+            .expect("valid monitor scale");
+        assert_eq!(delta, 60.0);
+
+        let bounds = vec![
+            (a, Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0))),
+            (b, actual),
+            (c, Rect::new(Point::new(760.0, 20.0), Size::new(220.0, 320.0))),
+        ];
+        let shifted = shift_window_chain_after_resize(bounds, b, delta)
+            .expect("resized member must belong to chain");
+        assert_eq!(shifted[0].1.origin, Point::new(100.0, 20.0));
+        assert_eq!(shifted[1].1.origin, Point::new(100.0, 20.0));
+        assert_eq!(shifted[2].1.origin, Point::new(820.0, 20.0));
+        assert_eq!(shifted[2].1.size, Size::new(220.0, 320.0));
+    }
+
+    #[test]
+    fn left_edge_resize_with_anchored_right_edge_does_not_move_neighbours() {
+        let before = Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0));
+        let actual = Rect::new(Point::new(160.0, 20.0), Size::new(260.0, 400.0));
+        assert_eq!(native_resize_right_edge_delta(before, actual, 1.5), Some(0.0));
+    }
+
+    #[test]
+    fn resizing_last_member_does_not_change_earlier_windows() {
+        let (_ids, [a, b, c]) = groups();
+        let bounds = vec![
+            (a, Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0))),
+            (b, Rect::new(Point::new(400.0, 20.0), Size::new(240.0, 360.0))),
+            (c, Rect::new(Point::new(640.0, 20.0), Size::new(220.0, 320.0))),
+        ];
+        let shifted = shift_window_chain_after_resize(bounds.clone(), c, 80.0)
+            .expect("last member must belong to chain");
+        assert_eq!(shifted, bounds);
     }
 }
 
