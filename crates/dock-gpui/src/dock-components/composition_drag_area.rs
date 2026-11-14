@@ -1,4 +1,4 @@
-use dock_core::{Point, Rect};
+use dock_core::{Axis, Point, Rect, SplitterRect};
 use gpui::{IntoElement, InteractiveElement, Styled, div, rgb};
 use ui::Theme;
 
@@ -11,6 +11,7 @@ impl CompositionDragArea {
     pub(crate) fn contains(
         area_rect: Rect,
         columns: &[dock_core::ColumnRect],
+        splitters: &[SplitterRect],
         point: Point,
         header_height: f32,
         button_width: f32,
@@ -27,6 +28,14 @@ impl CompositionDragArea {
 
         let close_left = area_right - button_width;
         if point.x >= close_left {
+            return false;
+        }
+
+        // The shared CompositionHeader spans every Column, but an X splitter
+        // remains an independent resize handle even where it crosses the header.
+        if splitters.iter().any(|splitter| {
+            splitter.axis == Axis::X && matches!(splitter.rect.contains(point), Ok(true))
+        }) {
             return false;
         }
 
