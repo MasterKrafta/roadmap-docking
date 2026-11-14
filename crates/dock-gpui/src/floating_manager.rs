@@ -129,6 +129,9 @@ struct PanelWindowEntry {
     native_min_size: Option<PhysicalSize>,
     native_horizontal_resize_min_widths: Option<(i32, i32)>,
     native_scale_factor: Option<f32>,
+    /// The HWND may differ from Core bounds after the OS-owned resize loop.
+    /// A final reconciliation must write Core's canonical bounds back.
+    native_bounds_dirty: bool,
     resize_enabled: bool,
     host_group: Option<FloatingGroupId>,
     visibility: PanelWindowVisibility,
@@ -395,6 +398,7 @@ impl FloatingWindowManager {
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
                 native_scale_factor: scale,
+                native_bounds_dirty: false,
                 resize_enabled: false,
                 host_group: Some(group),
                 visibility: PanelWindowVisibility::Visible,
@@ -2209,6 +2213,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_scale_factor: None,
+            native_bounds_dirty: false,
             resize_enabled: false,
             host_group: None,
             visibility: PanelWindowVisibility::Hidden,
@@ -2354,6 +2359,7 @@ impl FloatingWindowManager {
     ) {
         let Some(native_window) = entry.native_window else {
             entry.native_scale_factor = None;
+            entry.native_bounds_dirty = false;
             entry.bounds = group.bounds;
             return;
         };
@@ -2369,19 +2375,22 @@ impl FloatingWindowManager {
         let scale_changed = entry.native_scale_factor.is_none_or(|previous| {
             (previous - scale).abs() > 0.001
         });
-        if entry.bounds == group.bounds && !scale_changed {
-            return;
-        }
 
         // During an OS-owned modal resize the native frame is authoritative.
-        // Core has just received that frame's latest bounds; sending SetWindowPos
-        // back to the same HWND here can fight the active sizing loop.
+        // Do not call SetWindowPos while Windows owns the sizing loop, but mark
+        // the cached bounds dirty: Core may clamp a sample differently from the
+        // actual HWND, so the final reconciliation must apply Core's result.
         if self
             .native_resize
             .is_some_and(|session| session.group == group.id)
         {
             entry.bounds = group.bounds;
             entry.native_scale_factor = Some(scale);
+            entry.native_bounds_dirty = true;
+            return;
+        }
+
+        if entry.bounds == group.bounds && !scale_changed && !entry.native_bounds_dirty {
             return;
         }
 
@@ -2465,6 +2474,7 @@ impl FloatingWindowManager {
 
         entry.native_scale_factor = Some(effective_scale);
         entry.bounds = group.bounds;
+        entry.native_bounds_dirty = false;
     }
 }
 
