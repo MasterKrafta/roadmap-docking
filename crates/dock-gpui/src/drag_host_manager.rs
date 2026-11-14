@@ -1644,7 +1644,7 @@ impl DragHostManager {
     }
 
     /// Returns the proposed persistent Floating bounds in virtual-desktop pixels.
-    pub fn active_proposed_floating_bounds(&self) -> Option<Rect> {
+    pub fn active_free_area_bounds(&self) -> Option<Rect> {
         self.active.as_ref()?.proposed_floating_bounds
     }
 
