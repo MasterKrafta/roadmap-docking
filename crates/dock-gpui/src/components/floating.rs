@@ -214,7 +214,6 @@ impl FloatingWindowContent {
             root = root.child(SplitterView::render(
                 *splitter,
                 origin,
-                Point::ZERO,
                 controller.clone(),
                 metrics,
                 theme,
