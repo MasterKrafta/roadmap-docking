@@ -1200,7 +1200,7 @@ impl FloatingWindowManager {
             None => DockCommand::ResizeFloatingBounds { group, bounds },
         };
         let chain_members = self.window_chains.members_for(group);
-        let result = self.controller.update(cx, |controller, controller_cx| {
+        self.controller.update(cx, |controller, controller_cx| {
             let primary_result = controller.dispatch(command);
             match primary_result {
                 Ok(_) => {
