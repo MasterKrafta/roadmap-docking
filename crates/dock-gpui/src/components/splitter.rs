@@ -13,7 +13,6 @@ impl SplitterView {
     pub(crate) fn render(
         splitter: SplitterRect,
         content_origin: Point,
-        _pointer_offset: Point,
         _controller: Entity<DockController>,
         metrics: DockMetrics,
         theme: Theme,
