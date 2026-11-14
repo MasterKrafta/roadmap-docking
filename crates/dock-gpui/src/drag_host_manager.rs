@@ -70,7 +70,7 @@ struct ActiveDragHost {
     visible: bool,
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
-    proposed_floating_bounds: Option<Rect>,
+    free_area_bounds: Option<Rect>,
     promote_on_float: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
@@ -582,7 +582,7 @@ impl DragHostManager {
             visible,
             drop_target: None,
             target_role: None,
-            proposed_floating_bounds: None,
+            free_area_bounds: None,
             promote_on_float,
             pending_release_cursor: None,
             source_detach_subscription: None,
@@ -922,7 +922,7 @@ impl DragHostManager {
                         })
                     )
                     && matches!(target_window, Some(DockingWindowAtPoint::Floating { .. })));
-            let local_proposed_floating_bounds = if needs_floating_bounds {
+            let local_free_area_bounds = if needs_floating_bounds {
                 crate::input::drag::floating_bounds_for_drag(
                     controller,
                     payload,
@@ -934,9 +934,9 @@ impl DragHostManager {
                 None
             };
             controller_cx.notify();
-            Ok((target, local_proposed_floating_bounds))
+            Ok((target, local_free_area_bounds))
         });
-        let (target, local_proposed_floating_bounds) = match update {
+        let (target, local_free_area_bounds) = match update {
             Ok(update) => update,
             Err(error) => {
                 tracing::warn!(
@@ -948,7 +948,7 @@ impl DragHostManager {
                 return false;
             }
         };
-        let screen_proposed_floating_bounds = local_proposed_floating_bounds.and_then(|bounds| {
+        let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
             floating_manager.update(cx, |manager, _| {
                 manager.screen_bounds_for_drag_source(source_host, bounds)
             })
@@ -956,7 +956,7 @@ impl DragHostManager {
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
             active.target_role = target_window.and_then(DockingWindowAtPoint::role);
-            active.proposed_floating_bounds = screen_proposed_floating_bounds;
+            active.free_area_bounds = screen_free_area_bounds;
         }
 
         match self.native_ops.left_button_down() {
@@ -978,7 +978,7 @@ impl DragHostManager {
             return;
         };
         let target = active.drop_target;
-        let proposed_floating_bounds = active.proposed_floating_bounds;
+        let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
         let promote_on_float = active.promote_on_float;
         let drag_handle = self.controller.update(cx, |controller, _| {
@@ -986,7 +986,7 @@ impl DragHostManager {
         });
         let chain_join =
             dock_area_window_chain_target(drag_handle, target, active.target_role);
-        let restored_proposed_floating_bounds = if promote_on_float
+        let restored_free_area_bounds = if promote_on_float
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
@@ -999,8 +999,8 @@ impl DragHostManager {
         } else {
             None
         };
-        let proposed_floating_bounds = restored_proposed_floating_bounds.or(proposed_floating_bounds);
-        let can_promote_existing_window = restored_proposed_floating_bounds.is_some();
+        let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
+        let can_promote_existing_window = restored_free_area_bounds.is_some();
 
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -1031,9 +1031,9 @@ impl DragHostManager {
                     // Floating windows. The destination window is joined at the
                     // WindowChain layer after those Core FloatingGroups exist.
                     request.target = Some(DropTarget::FreeArea);
-                    request.floating_bounds = proposed_floating_bounds;
+                    request.floating_bounds = free_area_bounds;
                 } else if request.target == Some(DropTarget::FreeArea) {
-                    request.floating_bounds = proposed_floating_bounds;
+                    request.floating_bounds = free_area_bounds;
                     if request.floating_bounds.is_none() {
                         tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
                     }
@@ -1629,7 +1629,7 @@ impl DragHostManager {
 
     /// Returns the proposed persistent Floating bounds in virtual-desktop pixels.
     pub fn active_free_area_bounds(&self) -> Option<Rect> {
-        self.active.as_ref()?.proposed_floating_bounds
+        self.active.as_ref()?.free_area_bounds
     }
 
     fn discard_unregistered_window(
