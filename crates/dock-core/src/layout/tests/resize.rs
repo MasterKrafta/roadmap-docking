@@ -1336,6 +1336,77 @@ fn floating_left_edge_resize_changes_only_first_column_and_keeps_inner_splitters
 }
 
 #[test]
+fn floating_edge_resize_preserves_rendered_interior_widths_after_a_prior_stretch() {
+    let metrics = DockMetrics::default();
+    let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);
+    let initial = layout.floating_group(floating).unwrap().bounds;
+    let widened = Rect::new(
+        initial.origin,
+        Size::new(initial.size.width + 180.0, initial.size.height),
+    );
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: widened,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let before_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let before_widths = [
+        before_rects.columns.iter().find(|item| item.column == columns[0]).unwrap().rect.size.width,
+        before_rects.columns.iter().find(|item| item.column == columns[1]).unwrap().rect.size.width,
+        before_rects.columns.iter().find(|item| item.column == columns[2]).unwrap().rect.size.width,
+    ];
+    let before_splitters = [
+        floating_splitter_screen_x(&layout, floating, split, 0, &metrics, 1.25),
+        floating_splitter_screen_x(&layout, floating, split, 1, &metrics, 1.25),
+    ];
+
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    widened.origin,
+                    Size::new(widened.size.width + 24.0, widened.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor: 1.25,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let after_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    for index in 0..2 {
+        let width = after_rects.columns.iter()
+            .find(|item| item.column == columns[index])
+            .unwrap()
+            .rect.size.width;
+        assert!((width - before_widths[index]).abs() < 1.0e-3);
+    }
+    let last_width = after_rects.columns.iter()
+        .find(|item| item.column == columns[2])
+        .unwrap()
+        .rect.size.width;
+    assert!((last_width - (before_widths[2] + 24.0)).abs() < 1.0e-3);
+
+    for (index, before_x) in before_splitters.into_iter().enumerate() {
+        let after_x =
+            floating_splitter_screen_x(&layout, floating, split, index, &metrics, 1.25);
+        assert!((after_x - before_x).abs() < 1.0e-3);
+    }
+    assert_eq!(
+        layout.floating_group(floating).unwrap().bounds.size.width,
+        widened.size.width + 24.0
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_right_edge_resize_changes_only_last_column_and_keeps_inner_splitters_still() {
     let metrics = DockMetrics::default();
     let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);
