@@ -562,7 +562,10 @@ mod windows_impl {
 
     fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> u32 {
         if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
-            HTCLIENT
+            // The invisible left resize border overlaps the previous chain
+            // member's visible right edge. Let Windows hit-test the window
+            // beneath this HWND so its right edge can start native resizing.
+            HTTRANSPARENT
         } else {
             hit_test
         }
@@ -1637,9 +1640,9 @@ mod windows_impl {
         }
 
         #[test]
-        fn disabling_left_resize_turns_left_edges_and_corners_into_client_area() {
+        fn disabling_left_resize_passes_overlapping_edges_to_the_previous_window() {
             for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
-                assert_eq!(hit_test_code_for_resize(hit_test, false), HTCLIENT);
+                assert_eq!(hit_test_code_for_resize(hit_test, false), HTTRANSPARENT);
             }
             assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT);
             assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT);
