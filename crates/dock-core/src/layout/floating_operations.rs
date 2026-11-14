@@ -1345,6 +1345,19 @@ impl Layout {
         bounds: Rect,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
+        self.apply_resize_floating_bounds_command_with_edge(group, bounds, None, 1.0, metrics)
+    }
+
+    /// Applies a native-frame resize and resizes only the Column attached to
+    /// the moved horizontal edge. Interior Columns retain their requested widths.
+    fn apply_resize_floating_bounds_command_with_edge(
+        &mut self,
+        group: FloatingGroupId,
+        bounds: Rect,
+        edge: Option<crate::FloatingResizeEdge>,
+        scale_factor: f32,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
         bounds
             .validate_non_empty()
             .map_err(|error| CommandError::InvalidValue {
@@ -1364,13 +1377,59 @@ impl Layout {
             })?
             .root;
         let minimum = self.minimum_floating_size(root, metrics)?;
-        let actual_bounds = Rect::new(
+        let mut actual_bounds = Rect::new(
             bounds.origin,
             Size::new(
                 bounds.size.width.max(minimum.width),
                 bounds.size.height.max(minimum.height),
             ),
         );
+
+        if let Some(edge) = edge
+            && let Some(Node::Split(split)) = self.nodes.get(root).cloned()
+            && split.axis == Axis::X
+            && split.children.iter().all(|child| {
+                matches!(self.nodes.get(*child), Some(Node::Column(_)))
+            })
+        {
+            let requested_native_width_delta =
+                bounds.size.width - floating.bounds.size.width;
+            let requested_width_delta =
+                actual_bounds.size.width - floating.bounds.size.width;
+            let edge_column = match edge {
+                crate::FloatingResizeEdge::Left => split.children.first().copied(),
+                crate::FloatingResizeEdge::Right => split.children.last().copied(),
+            }
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating horizontal Split has no edge Column",
+            })?;
+            let current_width = match self.nodes.get(edge_column) {
+                Some(Node::Column(column)) => column.width,
+                _ => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "floating edge resize target must be a Column",
+                    });
+                }
+            };
+            let actual_width = self.resize_column_to_width(
+                edge_column,
+                current_width + requested_width_delta,
+                metrics,
+            )?;
+            let actual_width_delta = actual_width - current_width;
+            if actual_width_delta != 0.0 {
+                self.sync_split_column_ratios(root)?;
+            }
+
+            // Keep the untouched window edge anchored if Column constraints
+            // prevent the native frame from reaching its requested width.
+            actual_bounds.size.width = floating.bounds.size.width + actual_width_delta;
+            if edge == crate::FloatingResizeEdge::Left {
+                actual_bounds.origin.x +=
+                    (requested_native_width_delta - actual_width_delta) * scale_factor;
+            }
+        }
+
         actual_bounds
             .validate_non_empty()
             .map_err(|error| CommandError::InvalidValue {
@@ -1388,26 +1447,31 @@ impl Layout {
         if let Some(value) = self.floating_groups.get_mut(group) {
             value.bounds = actual_bounds;
         }
-        Ok(CommandApplication {
-            actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
-            inverse: Some(DockCommand::ResizeFloatingBounds {
+        let inverse = match edge {
+            Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
                 group,
                 bounds: floating.bounds,
-            }),
+                edge,
+                scale_factor,
+            },
+            None => DockCommand::ResizeFloatingBounds {
+                group,
+                bounds: floating.bounds,
+            },
+        };
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::FloatingBounds(actual_bounds)),
+            inverse: Some(inverse),
             persistent: true,
         })
     }
 
-    /// Compatibility wrapper for callers that still report the native edge.
-    ///
-    /// Floating compositions always fill the whole client area, so the edge
-    /// does not select or resize an individual Column. The native window's
-    /// bounds are the only input to this operation.
+    /// Updates the selected edge Column while preserving all interior Column widths.
     pub(super) fn apply_resize_floating_bounds_from_edge_command(
         &mut self,
         group: FloatingGroupId,
         bounds: Rect,
-        _edge: crate::FloatingResizeEdge,
+        edge: crate::FloatingResizeEdge,
         scale_factor: f32,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
@@ -1417,7 +1481,13 @@ impl Layout {
                 reason: "floating resize scale factor must be finite and positive",
             });
         }
-        self.apply_resize_floating_bounds_command(group, bounds, metrics)
+        self.apply_resize_floating_bounds_command_with_edge(
+            group,
+            bounds,
+            Some(edge),
+            scale_factor,
+            metrics,
+        )
     }
 
     pub(super) fn next_floating_z_order(&self) -> Result<i32, CommandError> {

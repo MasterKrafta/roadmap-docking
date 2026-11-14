@@ -628,6 +628,93 @@ impl Layout {
         }
     }
 
+    /// Sets one Column's requested width while reusing the constraints applied
+    /// by the normal column-resize command.
+    pub(super) fn resize_column_to_width(
+        &mut self,
+        column_id: NodeId,
+        requested_width: f32,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        if !requested_width.is_finite() || requested_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "width must be finite and positive",
+            });
+        }
+        let current = match self.nodes.get(column_id) {
+            Some(Node::Column(column)) => column.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "resize target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: column_id }),
+        };
+        let (min_width, max_width) = self.column_resize_limits(column_id, &current, metrics)?;
+        let actual_width =
+            Self::effective_column_width(requested_width, current.mode, min_width, max_width, metrics)?;
+        if actual_width != current.width {
+            if let Some(Node::Column(column)) = self.nodes.get_mut(column_id) {
+                column.width = actual_width;
+                if current.mode == ColumnMode::Expanded {
+                    column.last_expanded_width = Some(actual_width);
+                }
+            }
+        }
+        Ok(actual_width)
+    }
+
+    /// Synchronizes a horizontal Split(X) of Columns with their current widths.
+    /// Interactive splitter resizing and native edge resizing share this helper.
+    pub(super) fn sync_split_column_ratios(
+        &mut self,
+        split_id: NodeId,
+    ) -> Result<(), CommandError> {
+        let split = match self.nodes.get(split_id) {
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) => split.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "column width ratios require a horizontal Split(X) of Columns",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: split_id }),
+        };
+        let widths = split
+            .children
+            .iter()
+            .map(|child| match self.nodes.get(*child) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "split column boundary references a non-Column node",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if split.ratios.len() != widths.len() {
+            return Err(CommandError::InvalidValue {
+                field: "ratios",
+                reason: "ratio count must match split child count",
+            });
+        }
+        let total_width = widths.iter().sum::<f32>();
+        if !total_width.is_finite() || total_width <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "split column widths must have a finite positive total",
+            });
+        }
+        if let Some(Node::Split(split_node)) = self.nodes.get_mut(split_id) {
+            for (ratio, width) in split_node.ratios.iter_mut().zip(widths) {
+                *ratio = width / total_width;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn apply_resize_column_command(
         &mut self,
         column: &NodeId,
@@ -650,17 +737,9 @@ impl Layout {
             None => return Err(CommandError::MissingNode { node: *column }),
         };
         let old_width = current.width;
-        let (min_width, max_width) = self.column_resize_limits(*column, &current, metrics)?;
-        let actual_width =
-            Self::effective_column_width(*width, current.mode, min_width, max_width, metrics)?;
+        let actual_width = self.resize_column_to_width(*column, *width, metrics)?;
         let actual_delta = actual_width - old_width;
         if actual_delta != 0.0 {
-            if let Some(Node::Column(column)) = self.nodes.get_mut(*column) {
-                column.width = actual_width;
-                if current.mode == ColumnMode::Expanded {
-                    column.last_expanded_width = Some(actual_width);
-                }
-            }
             self.adjust_canvas_for_column_resize(*column, actual_delta, metrics)?;
             self.sync_main_column_ratios(*column)?;
         }
@@ -827,31 +906,8 @@ impl Layout {
             width_error_reason: "resized split column width is not finite and positive",
         })?;
         if actual_delta != 0.0 {
-            // Split(X) of Columns is laid out from each Column's requested
-            // width. Keep ratios in sync so the tree remains meaningful if
-            // another layout mode later consumes the stored ratios.
-            let widths: Vec<f32> = current_split
-                .children
-                .iter()
-                .map(|child_id| match self.nodes.get(*child_id) {
-                    Some(Node::Column(column)) => Ok(column.width),
-                    _ => Err(CommandError::InvalidTarget {
-                        reason: "split column boundary references a non-Column node",
-                    }),
-                })
-                .collect::<Result<_, _>>()?;
-            let total_width = widths.iter().sum::<f32>();
-            if !total_width.is_finite() || total_width <= 0.0 {
-                return Err(CommandError::InvalidValue {
-                    field: "delta",
-                    reason: "split column widths must have a finite positive total",
-                });
-            }
-            if let Some(Node::Split(split_node)) = self.nodes.get_mut(*split) {
-                for (ratio, width) in split_node.ratios.iter_mut().zip(widths) {
-                    *ratio = width / total_width;
-                }
-            }
+            // Ratios mirror requested widths for any later layout mode.
+            self.sync_split_column_ratios(*split)?;
         }
 
         Ok(CommandApplication {

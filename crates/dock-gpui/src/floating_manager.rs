@@ -290,6 +290,7 @@ struct FloatingGroupSnapshot {
 struct NativeResizeSession {
     group: FloatingGroupId,
     window_id: WindowId,
+    start_bounds: Rect,
     transaction_started: bool,
 }
 
@@ -678,9 +679,15 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return false;
         }
+        let Some(start_bounds) = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
+        }) else {
+            return false;
+        };
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
+            start_bounds,
             transaction_started: false,
         });
         self.schedule_native_resize(cx, group, window_id);
@@ -771,7 +778,26 @@ impl FloatingWindowManager {
             return;
         }
 
-        let command = DockCommand::ResizeFloatingBounds { group, bounds };
+        // GPUI does not expose WM_SIZING's hit edge. Compare the live origin
+        // with the session's original bounds: a horizontal origin shift means
+        // the left edge (or left corner) is being dragged.
+        let edge = if (bounds.origin.x - state.start_bounds.origin.x).abs() > 0.5 {
+            dock_core::FloatingResizeEdge::Left
+        } else {
+            dock_core::FloatingResizeEdge::Right
+        };
+        let scale_factor = self
+            .panel_window_for_group(group)
+            .and_then(|entry| entry.native_window)
+            .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let command = DockCommand::ResizeFloatingBoundsFromEdge {
+            group,
+            bounds,
+            edge,
+            scale_factor,
+        };
         let result = self.controller.update(cx, |controller, controller_cx| {
             controller.dispatch_in(command, controller_cx)
         });

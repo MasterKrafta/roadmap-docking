@@ -1187,3 +1187,166 @@ fn c46_resize_groups_clamps_against_tab_chrome_and_restores_inverse_atomically()
     assert!((group_height(&layout, group_b) - 250.0).abs() < 1.0e-3);
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+fn three_column_floating_layout(
+    metrics: &DockMetrics,
+) -> (Layout, crate::FloatingGroupId, NodeId, [NodeId; 3]) {
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let widths = [260.0_f32, 300.0, 340.0];
+    let keys = ["floating-resize-edge-a", "floating-resize-edge-b", "floating-resize-edge-c"];
+    let columns = std::array::from_fn(|index| {
+        let (_, panel) = builder.panel(
+            PanelKey::new(keys[index]).unwrap(),
+            descriptors()[0].1,
+        );
+        let group = builder.tabs(vec![panel], 0, false);
+        builder.column(
+            widths[index],
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        )
+    });
+    let total_column_width = widths.iter().sum::<f32>();
+    let total_width = total_column_width
+        + metrics.splitter_thickness * (columns.len() - 1) as f32;
+    let split = builder.split(
+        Axis::X,
+        columns.to_vec(),
+        widths.map(|width| width / total_column_width).to_vec(),
+    );
+    let floating = builder.floating_group(
+        split,
+        Rect::new(Point::new(100.0, 80.0), Size::new(total_width, 420.0)),
+        1,
+    );
+    (builder.build(), floating, split, columns)
+}
+
+fn floating_splitter_screen_x(
+    layout: &Layout,
+    floating: crate::FloatingGroupId,
+    split: NodeId,
+    boundary_index: usize,
+    metrics: &DockMetrics,
+    scale_factor: f32,
+) -> f32 {
+    let bounds = layout.floating_group(floating).unwrap().bounds;
+    let rects = layout.compute_floating_rects(floating, metrics).unwrap();
+    let splitter = rects
+        .splitters
+        .iter()
+        .find(|item| {
+            item.owner == split
+                && item.boundary_index == boundary_index
+                && item.axis == Axis::X
+        })
+        .unwrap();
+    bounds.origin.x
+        + (splitter.rect.origin.x + splitter.rect.size.width * 0.5) * scale_factor
+}
+
+#[test]
+fn floating_left_edge_resize_changes_only_first_column_and_keeps_inner_splitters_still() {
+    let metrics = DockMetrics::default();
+    let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let original_bounds = layout.floating_group(floating).unwrap().bounds;
+    let original_splitters = [
+        floating_splitter_screen_x(&layout, floating, split, 0, &metrics, 1.5),
+        floating_splitter_screen_x(&layout, floating, split, 1, &metrics, 1.5),
+    ];
+
+    let outcome = layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    Point::new(original_bounds.origin.x - 30.0, original_bounds.origin.y),
+                    Size::new(original_bounds.size.width + 20.0, original_bounds.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Left,
+                scale_factor: 1.5,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        layout.node(columns[0]),
+        Some(Node::Column(column)) if (column.width - 280.0).abs() < 1.0e-3
+    ));
+    assert!(matches!(
+        layout.node(columns[1]),
+        Some(Node::Column(column)) if (column.width - 300.0).abs() < 1.0e-3
+    ));
+    assert!(matches!(
+        layout.node(columns[2]),
+        Some(Node::Column(column)) if (column.width - 340.0).abs() < 1.0e-3
+    ));
+    assert_eq!(
+        layout.floating_group(floating).unwrap().bounds.origin.x,
+        original_bounds.origin.x - 30.0
+    );
+    for (index, original_x) in original_splitters.into_iter().enumerate() {
+        let resized_x =
+            floating_splitter_screen_x(&layout, floating, split, index, &metrics, 1.5);
+        assert!((resized_x - original_x).abs() < 1.0e-3);
+    }
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, original_bounds);
+    assert!(matches!(
+        layout.node(columns[0]),
+        Some(Node::Column(column)) if (column.width - 260.0).abs() < 1.0e-3
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn floating_right_edge_resize_changes_only_last_column_and_keeps_inner_splitters_still() {
+    let metrics = DockMetrics::default();
+    let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    let original_bounds = layout.floating_group(floating).unwrap().bounds;
+    let original_splitters = [
+        floating_splitter_screen_x(&layout, floating, split, 0, &metrics, 1.25),
+        floating_splitter_screen_x(&layout, floating, split, 1, &metrics, 1.25),
+    ];
+
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    original_bounds.origin,
+                    Size::new(original_bounds.size.width + 24.0, original_bounds.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor: 1.25,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        layout.node(columns[0]),
+        Some(Node::Column(column)) if (column.width - 260.0).abs() < 1.0e-3
+    ));
+    assert!(matches!(
+        layout.node(columns[1]),
+        Some(Node::Column(column)) if (column.width - 300.0).abs() < 1.0e-3
+    ));
+    assert!(matches!(
+        layout.node(columns[2]),
+        Some(Node::Column(column)) if (column.width - 364.0).abs() < 1.0e-3
+    ));
+    for (index, original_x) in original_splitters.into_iter().enumerate() {
+        let resized_x =
+            floating_splitter_screen_x(&layout, floating, split, index, &metrics, 1.25);
+        assert!((resized_x - original_x).abs() < 1.0e-3);
+    }
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
