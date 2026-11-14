@@ -738,10 +738,14 @@ impl FloatingWindowManager {
             return false;
         };
 
-        // The bounds observer sends every live client-size update to Core.
-        // This timer only detects the end of the OS-owned sizing loop and
-        // takes one final native sample as a fallback for the last frame.
+        // The bounds observer is the fast path, but rapid native sizing
+        // messages can be coalesced before GPUI reports a viewport change.
+        // Sample the HWND here as a fallback so Core cannot lag behind the
+        // actual client size during short, repeated resize movements.
         if self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+                self.apply_native_resize_bounds(group, bounds, &mut state, cx);
+            }
             self.native_resize = Some(state);
             return true;
         }
