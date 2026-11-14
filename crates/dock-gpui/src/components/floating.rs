@@ -339,6 +339,7 @@ fn floating_has_single_tab_dock(
 fn floating_dock_area_title_pointer_region(
     area_rect: Rect,
     columns: &[ColumnRect],
+    splitters: &[SplitterRect],
     point: Point,
     metrics: DockMetrics,
 ) -> Option<bool> {
@@ -356,6 +357,7 @@ fn floating_dock_area_title_pointer_region(
     Some(CompositionDragArea::contains(
         area_rect,
         columns,
+        splitters,
         point,
         header_height,
         metrics.column_control_button_width,
@@ -699,6 +701,7 @@ impl Render for FloatingHost {
             (
                 snapshot.floating.rect,
                 snapshot.rects.columns.clone(),
+                snapshot.rects.splitters.clone(),
                 snapshot.metrics,
             )
         });
@@ -812,10 +815,11 @@ impl Render for FloatingHost {
                         // The remaining CompositionHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
-                                |(area_rect, columns, metrics)| {
+                                |(area_rect, columns, splitters, metrics)| {
                                     floating_dock_area_title_pointer_region(
                                         *area_rect,
                                         columns,
+                                        splitters,
                                         point,
                                         *metrics,
                                     )
@@ -2057,7 +2061,7 @@ mod floating_tab_drag_host_tests {
 
 #[cfg(test)]
 mod floating_dock_area_header_hit_tests {
-    use dock_core::{ColumnRect, DockMetrics, NodeId, Point, Rect, Size};
+    use dock_core::{Axis, ColumnRect, DockMetrics, NodeId, Point, Rect, Size, SplitterRect};
     use slotmap::Key;
 
     #[test]
@@ -2070,6 +2074,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &[],
                 Point::new(100.0, 30.0),
                 metrics,
             ),
@@ -2086,6 +2091,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &[],
                 Point::new(collapse_button_center, 30.0),
                 metrics,
             ),
@@ -2095,6 +2101,7 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &[],
                 Point::new(240.0, 30.0),
                 metrics,
             ),
@@ -2104,10 +2111,37 @@ mod floating_dock_area_header_hit_tests {
             super::floating_dock_area_title_pointer_region(
                 column,
                 &columns,
+                &[],
                 Point::new(100.0, 60.0),
                 metrics,
             ),
             None,
+        );
+
+        let splitters = [SplitterRect::new(
+            NodeId::null(),
+            0,
+            Axis::X,
+            Rect::new(Point::new(246.0, 20.0), Size::new(8.0, 32.0)),
+        )];
+        assert_eq!(
+            super::floating_dock_area_title_pointer_region(
+                Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 500.0)),
+                &[
+                    ColumnRect::new(
+                        NodeId::null(),
+                        Rect::new(Point::new(10.0, 20.0), Size::new(236.0, 500.0)),
+                    ),
+                    ColumnRect::new(
+                        NodeId::null(),
+                        Rect::new(Point::new(250.0, 20.0), Size::new(260.0, 500.0)),
+                    ),
+                ],
+                &splitters,
+                Point::new(250.0, 30.0),
+                metrics,
+            ),
+            Some(false),
         );
     }
 }
