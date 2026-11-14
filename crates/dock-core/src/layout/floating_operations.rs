@@ -370,7 +370,13 @@ impl Layout {
             ) if self.is_column_composition_root(root)
                 && self.floating_group_is_in_column_composition(target_group) =>
             {
-                self.dock_floating_composition_to_edge(group_id, root, target_group, zone)
+                self.dock_floating_composition_to_edge(
+                    group_id,
+                    root,
+                    target_group,
+                    zone,
+                    metrics,
+                )
             }
             (
                 Some(Node::Column(column)),
@@ -1014,6 +1020,7 @@ impl Layout {
         source_root: NodeId,
         target_group: NodeId,
         zone: DropZone,
+        metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
         let source_floating = self.floating_groups.get(source_group_id).copied().ok_or(
             CommandError::MissingFloatingGroup {
@@ -1105,32 +1112,70 @@ impl Layout {
             }
         };
 
-        let source_ratios = normalized_ratios(source_ratios.into_iter().map(Some).collect());
-        let target_ratios = normalized_ratios(target_ratios.into_iter().map(Some).collect());
-        let combined_width = source_floating.bounds.size.width + target_floating.bounds.size.width;
-        if !combined_width.is_finite() || combined_width <= 0.0 {
+        // A floating root Column fills its native window, so its saved
+        // Column width is not consulted until it becomes a child of Split(X).
+        // Capture the actual window width before composing the two roots.
+        if !source_was_split {
+            let Some(Node::Column(column)) = self.nodes.get_mut(source_root) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "source Floating Column changed unexpectedly",
+                });
+            };
+            column.width = source_floating.bounds.size.width;
+        }
+        if !target_was_split {
+            let Some(Node::Column(column)) = self.nodes.get_mut(target_root) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "target Floating Column changed unexpectedly",
+                });
+            };
+            column.width = target_floating.bounds.size.width;
+        }
+
+        let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
+        for (index, target_column) in target_columns.iter().copied().enumerate() {
+            if index == insertion_index {
+                children.extend(source_columns.iter().copied());
+            }
+            children.push(target_column);
+        }
+        if insertion_index == target_columns.len() {
+            children.extend(source_columns.iter().copied());
+        }
+
+        // Split(X) lays out Columns from their requested widths. Size the
+        // surviving native window for every Column plus the newly introduced
+        // splitter; otherwise Core geometry rejects the frame and the host
+        // renders only its background.
+        let column_widths = children
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "Floating composition must contain only Columns",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let total_column_width = column_widths.iter().sum::<f32>();
+        let splitter_width = metrics.splitter_thickness
+            * children.len().saturating_sub(1) as f32;
+        let required_width = total_column_width + splitter_width;
+        let combined_window_width = source_floating.bounds.size.width
+            + target_floating.bounds.size.width
+            + metrics.splitter_thickness;
+        if !total_column_width.is_finite()
+            || total_column_width <= 0.0
+            || !required_width.is_finite()
+            || !combined_window_width.is_finite()
+            || combined_window_width <= 0.0
+        {
             return Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "combined floating composition width must be finite and positive",
             });
         }
-        let source_weight = source_floating.bounds.size.width / combined_width;
-        let target_weight = target_floating.bounds.size.width / combined_width;
-
-        let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
-        let mut ratios = Vec::with_capacity(source_ratios.len() + target_ratios.len());
-        for (index, target_column) in target_columns.iter().copied().enumerate() {
-            if index == insertion_index {
-                children.extend(source_columns.iter().copied());
-                ratios.extend(source_ratios.iter().map(|ratio| ratio * source_weight));
-            }
-            children.push(target_column);
-            ratios.push(target_ratios[index] * target_weight);
-        }
-        if insertion_index == target_columns.len() {
-            children.extend(source_columns.iter().copied());
-            ratios.extend(source_ratios.iter().map(|ratio| ratio * source_weight));
-        }
+        let window_width = required_width.max(combined_window_width);
+        let ratios = normalized_ratios(column_widths.into_iter().map(Some).collect());
 
         // Detaching the source root unregisters its FloatingGroup and DockArea,
         // but deliberately leaves its Column/Panel nodes alive for the new tree.
@@ -1148,6 +1193,32 @@ impl Layout {
         if target_was_split {
             self.nodes.remove(target_root);
         }
+
+        // Keep the outer edge opposite the insertion side anchored. This lets
+        // a left-side drop grow the destination window leftward while a right
+        // or internal insertion grows it to the right.
+        let target_origin_x = if insertion_index == 0 {
+            target_floating.bounds.origin.x
+                - source_floating.bounds.size.width
+                - metrics.splitter_thickness
+        } else {
+            target_floating.bounds.origin.x
+        };
+        if !target_origin_x.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "origin",
+                reason: "combined floating composition origin must be finite",
+            });
+        }
+        let Some(target) = self.floating_groups.get_mut(target_group_id) else {
+            return Err(CommandError::MissingFloatingGroup {
+                group: target_group_id,
+            });
+        };
+        target.bounds = Rect::new(
+            Point::new(target_origin_x, target_floating.bounds.origin.y),
+            Size::new(window_width, target_floating.bounds.size.height),
+        );
 
         Ok(())
     }
