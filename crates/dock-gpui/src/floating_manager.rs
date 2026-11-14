@@ -299,6 +299,147 @@ struct NativeResizeSession {
     transaction_started: bool,
 }
 
+
+/// Ordered groups of independent native Floating windows.
+///
+/// The first member is used as the registry key. Removing that member simply
+/// re-keys the remaining chain; no additional runtime identifier is required.
+/// Single windows are intentionally not stored as chains.
+#[derive(Default)]
+struct WindowChainRegistry {
+    chains: HashMap<FloatingGroupId, Vec<FloatingGroupId>>,
+    chain_by_group: HashMap<FloatingGroupId, FloatingGroupId>,
+}
+
+impl WindowChainRegistry {
+    fn chain_for(&self, group: FloatingGroupId) -> Option<&[FloatingGroupId]> {
+        let chain_id = *self.chain_by_group.get(&group)?;
+        self.chains.get(&chain_id).map(Vec::as_slice)
+    }
+
+    /// Returns a chain's ordered members, treating an unlinked window as a
+    /// one-member chain for move operations.
+    fn members_for(&self, group: FloatingGroupId) -> Vec<FloatingGroupId> {
+        self.chain_for(group)
+            .map_or_else(|| vec![group], <[FloatingGroupId]>::to_vec)
+    }
+
+    fn link_before(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: FloatingGroupId,
+    ) -> bool {
+        self.link_at(anchor, moving, false)
+    }
+
+    fn link_after(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: FloatingGroupId,
+    ) -> bool {
+        self.link_at(anchor, moving, true)
+    }
+
+    /// Inserts the complete moving chain immediately before/after the anchor
+    /// member, preserving the internal order of both chains.
+    fn link_at(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: FloatingGroupId,
+        after: bool,
+    ) -> bool {
+        if anchor == moving {
+            return false;
+        }
+
+        let anchor_chain = self.chain_by_group.get(&anchor).copied();
+        let moving_chain = self.chain_by_group.get(&moving).copied();
+        if anchor_chain.is_some() && anchor_chain == moving_chain {
+            return false;
+        }
+
+        let mut anchor_members = self.members_for(anchor);
+        let moving_members = self.members_for(moving);
+        let Some(anchor_index) = anchor_members.iter().position(|member| *member == anchor)
+        else {
+            return false;
+        };
+
+        self.take_chain_for(anchor);
+        self.take_chain_for(moving);
+
+        let insertion_index = if after {
+            anchor_index + 1
+        } else {
+            anchor_index
+        };
+        anchor_members.splice(insertion_index..insertion_index, moving_members);
+        self.store_chain(anchor_members);
+        true
+    }
+
+    /// Removes one window from its chain. The remaining members keep their
+    /// order; zero- and one-member results are not retained as chains.
+    fn remove_member(&mut self, group: FloatingGroupId) -> bool {
+        let Some(chain_id) = self.chain_by_group.get(&group).copied() else {
+            return false;
+        };
+        let Some(mut members) = self.chains.remove(&chain_id) else {
+            self.chain_by_group.remove(&group);
+            return false;
+        };
+
+        for member in &members {
+            self.chain_by_group.remove(member);
+        }
+        members.retain(|member| *member != group);
+        self.store_chain(members);
+        true
+    }
+
+    /// Drops links to FloatingGroups that no longer exist in Core Layout.
+    /// Returns the number of removed members.
+    fn retain_groups(&mut self, live_groups: &HashSet<FloatingGroupId>) -> usize {
+        let previous_chains = self.chains.values().cloned().collect::<Vec<_>>();
+        self.chains.clear();
+        self.chain_by_group.clear();
+
+        let mut removed = 0;
+        for mut members in previous_chains {
+            let previous_len = members.len();
+            members.retain(|member| live_groups.contains(member));
+            removed += previous_len - members.len();
+            self.store_chain(members);
+        }
+        removed
+    }
+
+    fn take_chain_for(&mut self, group: FloatingGroupId) {
+        let Some(chain_id) = self.chain_by_group.remove(&group) else {
+            return;
+        };
+        if let Some(members) = self.chains.remove(&chain_id) {
+            for member in members {
+                self.chain_by_group.remove(&member);
+            }
+        }
+    }
+
+    fn store_chain(&mut self, mut members: Vec<FloatingGroupId>) {
+        let mut seen = HashSet::new();
+        members.retain(|member| seen.insert(*member));
+        if members.len() < 2 {
+            return;
+        }
+
+        let chain_id = members[0];
+        for member in &members {
+            self.chain_by_group.insert(*member, chain_id);
+        }
+        self.chains.insert(chain_id, members);
+    }
+}
+
 /// Reconciles the native-window registry with the current Core Layout.
 pub struct FloatingWindowManager {
     controller: Entity<DockController>,
@@ -311,6 +452,7 @@ pub struct FloatingWindowManager {
     reconciling: bool,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
+    window_chains: WindowChainRegistry,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
 }
@@ -328,6 +470,7 @@ impl FloatingWindowManager {
             reconciling: false,
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
+            window_chains: WindowChainRegistry::default(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
         }
@@ -339,6 +482,41 @@ impl FloatingWindowManager {
 
     pub fn host_registry(&self) -> &CompositionHostRegistry {
         &self.host_registry
+    }
+
+    /// Returns ordered members of a chain. An unlinked Floating window is
+    /// represented as a one-member chain for callers that move windows.
+    pub(crate) fn window_chain_members(
+        &self,
+        group: FloatingGroupId,
+    ) -> Vec<FloatingGroupId> {
+        self.window_chains.members_for(group)
+    }
+
+    /// Inserts the moving window's complete chain immediately before the anchor.
+    pub(crate) fn link_window_chain_before(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: FloatingGroupId,
+    ) -> bool {
+        self.window_chains.link_before(anchor, moving)
+    }
+
+    /// Inserts the moving window's complete chain immediately after the anchor.
+    pub(crate) fn link_window_chain_after(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: FloatingGroupId,
+    ) -> bool {
+        self.window_chains.link_after(anchor, moving)
+    }
+
+    /// Removes a Floating window from its chain without disturbing other members.
+    pub(crate) fn remove_window_from_chain(
+        &mut self,
+        group: FloatingGroupId,
+    ) -> bool {
+        self.window_chains.remove_member(group)
     }
 
     /// Connects the temporary transport manager without creating an ownership cycle.
@@ -1453,6 +1631,16 @@ impl FloatingWindowManager {
             });
 
         groups.sort_by_key(|group| group.z_order);
+
+        let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
+        let removed_chain_members = self.window_chains.retain_groups(&live_groups);
+        if removed_chain_members > 0 {
+            tracing::debug!(
+                removed_chain_members,
+                "removed stale FloatingGroups from window chains"
+            );
+        }
+
         let previous_hosts = self.host_registry.floating_groups.clone();
         let next_hosts = groups
             .iter()
@@ -2851,6 +3039,99 @@ mod coordinate_tests {
             )
             .is_none()
         );
+    }
+}
+
+
+#[cfg(test)]
+mod window_chain_registry_tests {
+    use super::WindowChainRegistry;
+    use dock_core::FloatingGroupId;
+    use slotmap::SlotMap;
+    use std::collections::HashSet;
+
+    fn groups(count: usize) -> Vec<FloatingGroupId> {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        (0..count).map(|_| ids.insert(())).collect()
+    }
+
+    #[test]
+    fn links_before_and_after_keep_requested_order() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        assert!(chains.link_after(a, b));
+        assert!(chains.link_after(b, c));
+        assert!(chains.link_before(b, d));
+        assert_eq!(chains.members_for(a), vec![a, d, b, c]);
+        assert_eq!(chains.members_for(c), vec![a, d, b, c]);
+    }
+
+    #[test]
+    fn joining_existing_chains_inserts_the_whole_chain_at_the_anchor() {
+        let [a, b, c, d, e] = groups(5).try_into().expect("five group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        assert!(chains.link_after(a, b));
+        assert!(chains.link_after(c, d));
+        assert!(chains.link_after(a, c));
+        assert_eq!(chains.members_for(a), vec![a, c, d, b]);
+        assert_eq!(chains.members_for(e), vec![e]);
+    }
+
+    #[test]
+    fn linking_members_already_in_the_same_chain_is_a_no_op() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        assert!(chains.link_after(a, b));
+        assert!(!chains.link_after(a, b));
+        assert!(!chains.link_before(a, b));
+        assert_eq!(chains.members_for(c), vec![c]);
+        assert_eq!(chains.members_for(a), vec![a, b]);
+    }
+
+    #[test]
+    fn removing_a_middle_member_preserves_the_remaining_order() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        chains.link_after(a, b);
+        chains.link_after(b, c);
+        assert!(chains.remove_member(b));
+        assert_eq!(chains.members_for(a), vec![a, c]);
+        assert_eq!(chains.members_for(c), vec![a, c]);
+        assert_eq!(chains.members_for(b), vec![b]);
+    }
+
+    #[test]
+    fn removing_members_dissolves_a_chain_when_only_one_remains() {
+        let [a, b] = groups(2).try_into().expect("two group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        chains.link_after(a, b);
+        assert!(chains.remove_member(a));
+        assert_eq!(chains.members_for(b), vec![b]);
+        assert!(!chains.remove_member(a));
+    }
+
+    #[test]
+    fn reconciliation_prunes_missing_groups_and_dissolves_short_chains() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        chains.link_after(a, b);
+        chains.link_after(b, c);
+        chains.link_after(c, d);
+
+        let live = HashSet::from([a, c, d]);
+        assert_eq!(chains.retain_groups(&live), 1);
+        assert_eq!(chains.members_for(a), vec![a, c, d]);
+        assert_eq!(chains.members_for(b), vec![b]);
+
+        let live = HashSet::from([c]);
+        assert_eq!(chains.retain_groups(&live), 2);
+        assert_eq!(chains.members_for(c), vec![c]);
     }
 }
 
