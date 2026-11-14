@@ -1529,6 +1529,52 @@ mod windows_impl {
             }
         }
     }
+
+    #[cfg(test)]
+    mod native_resize_sizing_tests {
+        use super::*;
+
+        #[test]
+        fn left_edge_minimum_preserves_the_right_side_of_the_window() {
+            let mut rect = RECT {
+                left: 100,
+                top: 20,
+                right: 500,
+                bottom: 400,
+            };
+            assert!(clamp_sizing_rect(&mut rect, 1, 560));
+            assert_eq!(rect.left, -60);
+            assert_eq!(rect.right, 500);
+            assert_eq!(rect.right - rect.left, 560);
+        }
+
+        #[test]
+        fn right_edge_minimum_preserves_the_left_side_of_the_window() {
+            let mut rect = RECT {
+                left: 100,
+                top: 20,
+                right: 500,
+                bottom: 400,
+            };
+            assert!(clamp_sizing_rect(&mut rect, 2, 560));
+            assert_eq!(rect.left, 100);
+            assert_eq!(rect.right, 660);
+            assert_eq!(rect.right - rect.left, 560);
+        }
+
+        #[test]
+        fn vertical_resize_does_not_apply_a_horizontal_minimum() {
+            let mut rect = RECT {
+                left: 100,
+                top: 20,
+                right: 500,
+                bottom: 400,
+            };
+            assert!(!clamp_sizing_rect(&mut rect, 6, 560));
+            assert_eq!(rect.left, 100);
+            assert_eq!(rect.right, 500);
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -1665,52 +1711,6 @@ pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
     false
 }
 
-
-#[cfg(all(test, windows))]
-mod native_resize_sizing_tests {
-    use super::windows_impl::{clamp_sizing_rect, RECT};
-
-    #[test]
-    fn left_edge_minimum_preserves_the_right_side_of_the_window() {
-        let mut rect = RECT {
-            left: 100,
-            top: 20,
-            right: 500,
-            bottom: 400,
-        };
-        assert!(clamp_sizing_rect(&mut rect, 1, 560));
-        assert_eq!(rect.left, -60);
-        assert_eq!(rect.right, 500);
-        assert_eq!(rect.right - rect.left, 560);
-    }
-
-    #[test]
-    fn right_edge_minimum_preserves_the_left_side_of_the_window() {
-        let mut rect = RECT {
-            left: 100,
-            top: 20,
-            right: 500,
-            bottom: 400,
-        };
-        assert!(clamp_sizing_rect(&mut rect, 2, 560));
-        assert_eq!(rect.left, 100);
-        assert_eq!(rect.right, 660);
-        assert_eq!(rect.right - rect.left, 560);
-    }
-
-    #[test]
-    fn vertical_resize_does_not_apply_a_horizontal_minimum() {
-        let mut rect = RECT {
-            left: 100,
-            top: 20,
-            right: 500,
-            bottom: 400,
-        };
-        assert!(!clamp_sizing_rect(&mut rect, 6, 560));
-        assert_eq!(rect.left, 100);
-        assert_eq!(rect.right, 500);
-    }
-}
 
 #[cfg(test)]
 mod drop_window_target_tests {
