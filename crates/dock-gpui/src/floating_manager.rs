@@ -311,8 +311,7 @@ fn contiguous_window_chain_bounds(
     members: &[FloatingGroupId],
     anchor: FloatingGroupId,
 ) -> Option<Vec<(FloatingGroupId, Rect)>> {
-    let anchor_index = members.iter().position(|member| *member == anchor)?;
-    let mut bounds = members
+    let bounds = members
         .iter()
         .map(|group| {
             layout
@@ -320,6 +319,14 @@ fn contiguous_window_chain_bounds(
                 .map(|floating| (*group, floating.bounds))
         })
         .collect::<Option<Vec<_>>>()?;
+    arrange_contiguous_window_chain_bounds(bounds, anchor)
+}
+
+fn arrange_contiguous_window_chain_bounds(
+    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    anchor: FloatingGroupId,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    let anchor_index = bounds.iter().position(|(group, _)| *group == anchor)?;
     let anchor_origin = bounds[anchor_index].1.origin;
 
     for index in (0..anchor_index).rev() {
@@ -1563,8 +1570,9 @@ impl FloatingWindowManager {
 
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
-            self.reconcile(cx);
             self.cancel_controller_move(cx);
+            self.mark_group_native_bounds_dirty(state.group);
+            self.reconcile(cx);
         }
 
         self.redraw_visible_hosts(cx);
@@ -1591,17 +1599,9 @@ impl FloatingWindowManager {
             // Dropping inside the same chain does not redefine membership. Until
             // chain-wide movement is enabled, restore the dragged member rather
             // than leaving its neighbours detached from their stored order.
-            let current = self.controller.update(cx, |controller, _| {
-                controller.layout().floating_group(moving).map(|group| group.bounds)
-            });
-            if let Some(bounds) = current
-                && let Some(position) = self.physical_origin_for_bounds(bounds)
-                && let Some(entry) = self.panel_window_for_group(moving)
-                && let Some(native_window) = entry.native_window
-            {
-                let _ = self.native_ops.move_window(native_window, position);
-            }
+            self.mark_group_native_bounds_dirty(moving);
             self.cancel_controller_move(cx);
+            self.reconcile(cx);
             return Ok(());
         }
 
@@ -1649,6 +1649,15 @@ impl FloatingWindowManager {
             controller_cx.notify();
             result
         });
+    }
+
+    fn mark_group_native_bounds_dirty(&mut self, group: FloatingGroupId) {
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return;
+        };
+        if let Some(entry) = self.registry.windows.get_mut(&panel) {
+            entry.native_bounds_dirty = true;
+        }
     }
 
     fn physical_origin_for_bounds(&self, bounds: Rect) -> Option<PhysicalPoint> {
@@ -3246,6 +3255,58 @@ mod window_chain_registry_tests {
         let live = HashSet::from([c]);
         assert_eq!(chains.retain_groups(&live), 2);
         assert_eq!(chains.members_for(c), vec![c]);
+    }
+}
+
+
+#[cfg(test)]
+mod contiguous_window_chain_bounds_tests {
+    use super::arrange_contiguous_window_chain_bounds;
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::SlotMap;
+
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let groups = [ids.insert(()), ids.insert(()), ids.insert(())];
+        (ids, groups)
+    }
+
+    #[test]
+    fn keeps_anchor_and_places_neighbours_edge_to_edge() {
+        let (_ids, [a, b, c]) = groups();
+        let input = vec![
+            (a, Rect::new(Point::new(50.0, 10.0), Size::new(120.0, 300.0))),
+            (b, Rect::new(Point::new(500.0, 40.0), Size::new(240.0, 360.0))),
+            (c, Rect::new(Point::new(900.0, 90.0), Size::new(180.0, 280.0))),
+        ];
+
+        let arranged = arrange_contiguous_window_chain_bounds(input, b)
+            .expect("anchor must belong to the chain");
+
+        assert_eq!(arranged[0].1.origin, Point::new(380.0, 40.0));
+        assert_eq!(arranged[1].1.origin, Point::new(500.0, 40.0));
+        assert_eq!(arranged[2].1.origin, Point::new(740.0, 40.0));
+        assert_eq!(arranged[0].1.size, Size::new(120.0, 300.0));
+        assert_eq!(arranged[1].1.size, Size::new(240.0, 360.0));
+        assert_eq!(arranged[2].1.size, Size::new(180.0, 280.0));
+    }
+
+    #[test]
+    fn supports_anchor_at_chain_edge_and_rejects_missing_anchor() {
+        let (_ids, [a, b, c]) = groups();
+        let input = vec![
+            (a, Rect::new(Point::new(30.0, 8.0), Size::new(100.0, 200.0))),
+            (b, Rect::new(Point::new(300.0, 28.0), Size::new(150.0, 240.0))),
+            (c, Rect::new(Point::new(700.0, 48.0), Size::new(200.0, 260.0))),
+        ];
+
+        let arranged = arrange_contiguous_window_chain_bounds(input.clone(), a)
+            .expect("first member is a valid anchor");
+        assert_eq!(arranged[0].1.origin, Point::new(30.0, 8.0));
+        assert_eq!(arranged[1].1.origin, Point::new(130.0, 8.0));
+        assert_eq!(arranged[2].1.origin, Point::new(280.0, 8.0));
+
+        assert!(arrange_contiguous_window_chain_bounds(input, FloatingGroupId::null()).is_none());
     }
 }
 
