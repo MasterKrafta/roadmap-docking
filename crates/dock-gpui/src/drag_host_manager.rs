@@ -1056,8 +1056,14 @@ impl DragHostManager {
                             };
                             match result {
                                 Ok(outcome) => {
-                                    if let Some(CommandValue::FloatingGroups(groups)) = outcome.actual_value {
-                                        created_groups = groups;
+                                    match outcome.actual_value {
+                                        Some(CommandValue::FloatingGroups(groups)) => {
+                                            created_groups = groups;
+                                        }
+                                        Some(CommandValue::FloatingGroup(group)) => {
+                                            created_groups = vec![group];
+                                        }
+                                        _ => {}
                                     }
                                 }
                                 Err(error) => {
@@ -1162,6 +1168,21 @@ impl DragHostManager {
                     return;
                 }
             }
+            if chain_join.is_some() {
+                // Even if native DragHost promotion fails, the Core source is
+                // already detached into separate FloatingGroups. Do not hand
+                // the complete source composition to just its first group.
+                self.flush_controller_events(cx);
+                if let Err(error) = self.close(id, cx) {
+                    tracing::warn!(
+                        ?id,
+                        %error,
+                        "could not close the DockArea DragHost after WindowChain promotion failed"
+                    );
+                }
+                return;
+            }
+
             if promote_on_float {
                 self.flush_controller_events(cx);
             }
