@@ -714,10 +714,8 @@ mod windows_impl {
             // so each preceding window keeps ownership of the shared resize edge.
             // SAFETY: The subclass owns this state for the lifetime of the HWND.
             let chain_z_order = unsafe { (*state).chain_z_order.clone() };
-            if !chain_z_order.is_empty()
-                && let Err(error) = raise_native_window_chain(&chain_z_order)
-            {
-                tracing::warn!(%error, "could not restore native Floating chain Z-order after activation");
+            if !chain_z_order.is_empty() {
+                let _ = raise_native_window_chain(&chain_z_order);
             }
         }
 
