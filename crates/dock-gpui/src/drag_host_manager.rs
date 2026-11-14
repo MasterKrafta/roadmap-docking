@@ -824,8 +824,12 @@ impl DragHostManager {
         let update: Result<(Option<DropTarget>, Option<Rect>), String> =
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
-                if matches!(payload, DragPayload::DockArea { .. })
-                    && (source.is_none() || target_window.is_none())
+                if matches!(payload, DragPayload::DockArea { .. }) && source.is_none() {
+                    // A stale DockArea source must never be reinterpreted as a
+                    // FreeArea detach operation.
+                    Ok(None)
+                } else if matches!(payload, DragPayload::DockArea { .. })
+                    && target_window.is_none()
                 {
                     // A multi-Column DockArea, or a single-Column DockArea released
                     // on the desktop, detaches as one composition. A foreign
