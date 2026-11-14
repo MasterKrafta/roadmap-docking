@@ -229,6 +229,15 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
+    /// Stores the chain order (left-to-right) for activation-time native Z-order
+    /// correction. Activation of any member must not invert overlapping resize edges.
+    fn set_window_chain_z_order(
+        &self,
+        _window: NativeWindowId,
+        _ordered_members: &[NativeWindowId],
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
     /// Sets the minimum client-content size in physical pixels. The native
@@ -556,8 +565,30 @@ mod windows_impl {
         active: bool,
         horizontal_edge: Option<NativeHorizontalResizeEdge>,
         left_resize_enabled: bool,
+        chain_z_order: Vec<HWND>,
         left_min_client_width: i32,
         right_min_client_width: i32,
+    }
+
+    /// The input order is left-to-right. Raising right-to-left leaves the
+    /// leftmost window on top, where its right Resize edge overlaps its neighbour.
+    fn raise_native_window_chain(ordered_members: &[HWND]) -> Result<(), NativeError> {
+        for member in ordered_members.iter().rev().copied() {
+            // SAFETY: All handles belong to live GPUI windows registered in this chain.
+            unsafe {
+                SetWindowPos(
+                    member,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                )
+            }
+            .map_err(|error| platform_error("SetWindowPos(chain Z-order)", error))?;
+        }
+        Ok(())
     }
 
     fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> i32 {
@@ -676,6 +707,19 @@ mod windows_impl {
 
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
         let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
+
+        if message == WM_ACTIVATE && (wparam.0 & 0xffff) != WA_INACTIVE as usize {
+            // Windows normally raises the activated HWND above its siblings.
+            // Reapply the chain's left-to-right stacking without changing focus,
+            // so each preceding window keeps ownership of the shared resize edge.
+            // SAFETY: The subclass owns this state for the lifetime of the HWND.
+            let chain_z_order = unsafe { (*state).chain_z_order.clone() };
+            if !chain_z_order.is_empty()
+                && let Err(error) = raise_native_window_chain(&chain_z_order)
+            {
+                tracing::warn!(%error, "could not restore native Floating chain Z-order after activation");
+            }
+        }
 
         if message == WM_NCHITTEST {
             // A secondary Window Chain member must not expose a left resize
@@ -1215,6 +1259,7 @@ mod windows_impl {
                     active: false,
                     horizontal_edge: None,
                     left_resize_enabled: true,
+                    chain_z_order: Vec::new(),
                     left_min_client_width: 0,
                     right_min_client_width: 0,
                 }));
@@ -1450,6 +1495,34 @@ mod windows_impl {
             // SAFETY: This state remains owned by the live HWND subclass.
             unsafe {
                 (*(reference_data as *mut ResizeLoopState)).left_resize_enabled = enabled;
+            }
+            Ok(())
+        }
+
+        fn set_window_chain_z_order(
+            &self,
+            window: NativeWindowId,
+            ordered_members: &[NativeWindowId],
+        ) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            let native_members = ordered_members.iter().copied().map(hwnd).collect();
+            // SAFETY: The state belongs to this live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).chain_z_order = native_members;
             }
             Ok(())
         }
