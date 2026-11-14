@@ -1127,15 +1127,10 @@ impl Layout {
         // surviving native window for every Column plus the newly introduced
         // splitter; otherwise Core geometry rejects the frame and the host
         // renders only its background.
-        let split_column_width = |column: &Column| match column.mode {
-            ColumnMode::Expanded => column.width,
-            ColumnMode::IconsAndLabels => metrics.min_column_width,
-            ColumnMode::IconsOnly => metrics.rail_width,
-        };
         let column_widths = children
             .iter()
             .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(split_column_width(column)),
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
                 _ => Err(CommandError::InvalidTarget {
                     reason: "Floating composition must contain only Columns",
                 }),
@@ -1148,7 +1143,7 @@ impl Layout {
         let source_column_widths = source_columns
             .iter()
             .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(split_column_width(column)),
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
                 _ => Err(CommandError::InvalidTarget {
                     reason: "source Floating composition must contain only Columns",
                 }),
