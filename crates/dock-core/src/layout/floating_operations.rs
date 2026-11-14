@@ -827,7 +827,7 @@ impl Layout {
         groups.splice(index..index, split.children);
         let mut ratios = Vec::with_capacity(groups.len());
         ratios.extend(target_ratios[..index].iter().map(|ratio| ratio * 0.5));
-        ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
+        ratios.extend(source_ratios.iter().copied().map(|ratio| ratio * 0.5));
         ratios.extend(target_ratios[index..].iter().map(|ratio| ratio * 0.5));
         let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
 
@@ -1127,14 +1127,14 @@ impl Layout {
         for (index, target_column) in target_columns.iter().copied().enumerate() {
             if index == insertion_index {
                 children.extend(source_columns.iter().copied());
-                ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
+                ratios.extend(source_ratios.iter().copied().map(|ratio| ratio * 0.5));
             }
             children.push(target_column);
             ratios.push(target_ratios[index] * 0.5);
         }
         if insertion_index == target_columns.len() {
             children.extend(source_columns.iter().copied());
-            ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
+            ratios.extend(source_ratios.iter().copied().map(|ratio| ratio * 0.5));
         }
         let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
 
