@@ -1053,40 +1053,50 @@ impl Layout {
             },
         )?;
 
-        let (source_columns, source_was_split) = match self.nodes.get(source_root) {
-            Some(Node::Column(_)) => (vec![source_root], false),
-            Some(Node::Split(split))
-                if split.axis == Axis::X
-                    && split
-                        .children
-                        .iter()
-                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
-            {
-                (split.children.clone(), true)
-            }
-            _ => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "source floating area must be a Column or horizontal composition of Columns",
-                });
-            }
-        };
-        let (target_columns, target_was_split) = match self.nodes.get(target_root) {
-            Some(Node::Column(_)) => (vec![target_root], false),
-            Some(Node::Split(split))
-                if split.axis == Axis::X
-                    && split
-                        .children
-                        .iter()
-                        .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
-            {
-                (split.children.clone(), true)
-            }
-            _ => {
-                return Err(CommandError::InvalidTarget {
-                    reason: "target floating area must be a Column or horizontal composition of Columns",
-                });
-            }
-        };
+        let (source_columns, source_ratios, source_was_split) =
+            match self.nodes.get(source_root) {
+                Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split
+                            .children
+                            .iter()
+                            .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+                {
+                    (
+                        split.children.clone(),
+                        normalized_ratios(split.ratios.iter().copied().map(Some).collect()),
+                        true,
+                    )
+                }
+                _ => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "source floating area must be a Column or horizontal composition of Columns",
+                    });
+                }
+            };
+        let (target_columns, target_ratios, target_was_split) =
+            match self.nodes.get(target_root) {
+                Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split
+                            .children
+                            .iter()
+                            .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
+                {
+                    (
+                        split.children.clone(),
+                        normalized_ratios(split.ratios.iter().copied().map(Some).collect()),
+                        true,
+                    )
+                }
+                _ => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "target floating area must be a Column or horizontal composition of Columns",
+                    });
+                }
+            };
 
         let target_column =
             self.find_owner_column(target_group)
@@ -1113,15 +1123,20 @@ impl Layout {
         };
 
         let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
+        let mut ratios = Vec::with_capacity(children.capacity());
         for (index, target_column) in target_columns.iter().copied().enumerate() {
             if index == insertion_index {
                 children.extend(source_columns.iter().copied());
+                ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
             }
             children.push(target_column);
+            ratios.push(target_ratios[index] * 0.5);
         }
         if insertion_index == target_columns.len() {
             children.extend(source_columns.iter().copied());
+            ratios.extend(source_ratios.iter().map(|ratio| ratio * 0.5));
         }
+        let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
 
         // A native Floating window can be wider than its saved Column.
         // Keep the requested effective widths when joining windows so spare
@@ -1163,7 +1178,6 @@ impl Layout {
             });
         }
         let window_width = required_width;
-        let ratios = normalized_ratios(column_widths.into_iter().map(Some).collect());
 
         // Detaching the source root unregisters its FloatingGroup and DockArea,
         // but deliberately leaves its Column/Panel nodes alive for the new tree.
