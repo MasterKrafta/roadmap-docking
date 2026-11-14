@@ -552,7 +552,7 @@ mod windows_impl {
         right_min_client_width: i32,
     }
 
-    fn hit_test_code_for_resize(hit_test: i32, left_resize_enabled: bool) -> i32 {
+    fn hit_test_code_for_resize(hit_test: u32, left_resize_enabled: bool) -> u32 {
         if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
             HTCLIENT
         } else {
@@ -672,7 +672,7 @@ mod windows_impl {
             // handle: that edge is the join with its preceding native window.
             // SAFETY: The subclass owns this state for the lifetime of the HWND.
             let left_resize_enabled = unsafe { (*state).left_resize_enabled };
-            let hit_test = result.0 as i32;
+            let hit_test = result.0 as u32;
             let adjusted_hit_test =
                 hit_test_code_for_resize(hit_test, left_resize_enabled);
             if adjusted_hit_test != hit_test {
@@ -1608,22 +1608,13 @@ mod windows_impl {
 
         #[test]
         fn disabling_left_resize_turns_left_edges_and_corners_into_client_area() {
-            for hit_test in [HTLEFT as i32, HTTOPLEFT as i32, HTBOTTOMLEFT as i32] {
-                assert_eq!(hit_test_code_for_resize(hit_test, false), HTCLIENT as i32);
+            for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
+                assert_eq!(hit_test_code_for_resize(hit_test, false), HTCLIENT);
             }
-            assert_eq!(hit_test_code_for_resize(HTLEFT as i32, true), HTLEFT as i32);
-            assert_eq!(
-                hit_test_code_for_resize(HTRIGHT as i32, false),
-                HTRIGHT as i32
-            );
-            assert_eq!(
-                hit_test_code_for_resize(HTTOPRIGHT as i32, false),
-                HTTOPRIGHT as i32
-            );
-            assert_eq!(
-                hit_test_code_for_resize(HTBOTTOMRIGHT as i32, false),
-                HTBOTTOMRIGHT as i32
-            );
+            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT);
+            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT);
         }
 
         #[test]
