@@ -888,7 +888,11 @@ impl FloatingWindowManager {
                 self.registry.windows.insert(panel, entry);
             }
         }
-        self.schedule_window_chain_bounds_update(commands, cx);
+        if commands.is_empty() {
+            self.reconcile(cx);
+        } else {
+            self.schedule_window_chain_bounds_update(commands, cx);
+        }
         cx.notify();
         Ok(())
     }
