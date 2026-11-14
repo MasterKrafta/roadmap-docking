@@ -351,6 +351,52 @@ fn shift_window_chain_after_resize(
     Some(bounds)
 }
 
+fn floating_groups_in_native_z_order(
+    groups: &[FloatingGroupSnapshot],
+    chains: &WindowChainRegistry,
+) -> Vec<FloatingGroupId> {
+    let mut emitted = HashSet::new();
+    let mut blocks = Vec::new();
+
+    for group in groups {
+        if emitted.contains(&group.id) {
+            continue;
+        }
+
+        let members = chains.members_for(group.id);
+        let block = members
+            .into_iter()
+            .filter(|member| {
+                !emitted.contains(member)
+                    && groups.iter().any(|candidate| candidate.id == *member)
+            })
+            .collect::<Vec<_>>();
+        if block.is_empty() {
+            continue;
+        }
+
+        let block_z_order = block
+            .iter()
+            .filter_map(|member| {
+                groups
+                    .iter()
+                    .find(|candidate| candidate.id == *member)
+                    .map(|candidate| candidate.z_order)
+            })
+            .max()
+            .unwrap_or(group.z_order);
+
+        emitted.extend(block.iter().copied());
+        blocks.push((block_z_order, block));
+    }
+
+    blocks.sort_by_key(|(z_order, _)| *z_order);
+    blocks
+        .into_iter()
+        .flat_map(|(_, members)| members)
+        .collect()
+}
+
 fn contiguous_window_chain_bounds(
     layout: &dock_core::Layout,
     members: &[FloatingGroupId],
@@ -2380,12 +2426,21 @@ impl FloatingWindowManager {
         active_hosts: &HashMap<FloatingGroupId, PanelId>,
         transferred_panels: &[PanelId],
     ) {
-        for group in groups {
-            if self.native_move.is_some_and(|session| session.group == group.id)
-                || self.native_resize.is_some_and(|session| session.group == group.id)
-            {
+        let mut interaction_chain_members = HashSet::new();
+        if let Some(session) = self.native_move {
+            interaction_chain_members.extend(self.window_chains.members_for(session.group));
+        }
+        if let Some(session) = self.native_resize {
+            interaction_chain_members.extend(self.window_chains.members_for(session.group));
+        }
+
+        for group_id in floating_groups_in_native_z_order(groups, &self.window_chains) {
+            if interaction_chain_members.contains(&group_id) {
                 continue;
             }
+            let Some(group) = groups.iter().find(|group| group.id == group_id) else {
+                continue;
+            };
             let Some(panel) = active_hosts.get(&group.id).copied() else {
                 continue;
             };
@@ -3600,6 +3655,7 @@ mod window_chain_registry_tests {
 
         let live = HashSet::from([c]);
         assert_eq!(chains.retain_groups(&live), (2, Vec::new()));
+        assert_eq!(chains.retain_groups(&live), (0, Vec::new()));
         assert_eq!(chains.members_for(c), vec![c]);
     }
 }
@@ -3709,6 +3765,68 @@ mod native_resize_chain_geometry_tests {
         let shifted = shift_window_chain_after_resize(bounds.clone(), c, 80.0)
             .expect("last member must belong to chain");
         assert_eq!(shifted, bounds);
+    }
+}
+
+#[cfg(test)]
+mod native_z_order_tests {
+    use super::{FloatingGroupSnapshot, WindowChainRegistry, floating_groups_in_native_z_order};
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::{Key, SlotMap};
+
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 5]) {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let groups = [
+            ids.insert(()),
+            ids.insert(()),
+            ids.insert(()),
+            ids.insert(()),
+            ids.insert(()),
+        ];
+        (ids, groups)
+    }
+
+    fn snapshot(id: FloatingGroupId, z_order: i32) -> FloatingGroupSnapshot {
+        FloatingGroupSnapshot {
+            id,
+            bounds: Rect::new(Point::ZERO, Size::new(300.0, 240.0)),
+            z_order,
+            minimum_size: None,
+            horizontal_resize_minimum_widths: None,
+            panels: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn chain_members_are_kept_adjacent_in_native_z_order() {
+        let (_ids, [a, b, c, d, e]) = groups();
+        let groups = [
+            snapshot(a, 1),
+            snapshot(c, 4),
+            snapshot(d, 5),
+            snapshot(e, 7),
+            snapshot(b, 8),
+        ];
+        let mut chains = WindowChainRegistry::default();
+        assert!(chains.link_after(a, b));
+        assert!(chains.link_after(c, d));
+
+        assert_eq!(
+            floating_groups_in_native_z_order(&groups, &chains),
+            vec![c, d, e, a, b],
+            "each chain is ordered internally and ranked by its frontmost member"
+        );
+    }
+
+    #[test]
+    fn an_unlinked_floating_group_remains_a_single_z_order_block() {
+        let (_ids, [a, b, c, d, _]) = groups();
+        let groups = [snapshot(a, 3), snapshot(b, 1), snapshot(c, 2), snapshot(d, 4)];
+
+        assert_eq!(
+            floating_groups_in_native_z_order(&groups, &WindowChainRegistry::default()),
+            vec![b, c, a, d]
+        );
     }
 }
 
