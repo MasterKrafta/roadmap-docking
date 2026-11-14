@@ -31,6 +31,34 @@ use crate::{
     DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
 };
 
+fn dock_area_window_chain_target(
+    handle: Option<DragHandle>,
+    target: Option<DropTarget>,
+    target_role: Option<DockWindowRole>,
+) -> Option<(FloatingGroupId, bool)> {
+    if handle != Some(DragHandle::DockAreaHeader) {
+        return None;
+    }
+
+    match (target, target_role) {
+        (
+            Some(DropTarget::GroupEdge {
+                zone: DropZone::Left,
+                ..
+            }),
+            Some(DockWindowRole::Floating { group }),
+        ) => Some((group, true)),
+        (
+            Some(DropTarget::GroupEdge {
+                zone: DropZone::Right,
+                ..
+            }),
+            Some(DockWindowRole::Floating { group }),
+        ) => Some((group, false)),
+        _ => None,
+    }
+}
+
 struct ActiveDragHost {
     id: DragHostId,
     window: WindowHandle<DragHostSurface>,
@@ -951,30 +979,11 @@ impl DragHostManager {
         let proposed_floating_bounds = active.proposed_floating_bounds;
         let panel = active.panels.first().copied();
         let promote_on_float = active.promote_on_float;
-        let is_dock_area_drag = self.controller.update(cx, |controller, _| {
-            controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
+        let drag_handle = self.controller.update(cx, |controller, _| {
+            controller.drag().session().handle()
         });
-        let chain_join = if is_dock_area_drag {
-            match (target, active.target_role) {
-                (
-                    Some(DropTarget::GroupEdge {
-                        zone: DropZone::Left,
-                        ..
-                    }),
-                    Some(DockWindowRole::Floating { group }),
-                ) => Some((group, true)),
-                (
-                    Some(DropTarget::GroupEdge {
-                        zone: DropZone::Right,
-                        ..
-                    }),
-                    Some(DockWindowRole::Floating { group }),
-                ) => Some((group, false)),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        let chain_join =
+            dock_area_window_chain_target(drag_handle, target, active.target_role);
         let restored_proposed_floating_bounds = if promote_on_float
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
@@ -2218,3 +2227,76 @@ fn floating_group_for_panel(
 fn valid_scale(scale: f32) -> Option<f32> {
     (scale.is_finite() && scale > 0.0).then_some(scale)
 }
+
+#[cfg(test)]
+mod dock_area_window_chain_target_tests {
+    use super::dock_area_window_chain_target;
+    use crate::DockWindowRole;
+    use dock_core::{DragHandle, DropTarget, DropZone, FloatingGroupId, NodeId};
+    use slotmap::Key;
+
+    #[test]
+    fn whole_main_composition_left_and_right_drops_join_a_window_chain() {
+        let anchor = FloatingGroupId::null();
+        let group = NodeId::null();
+
+        assert_eq!(
+            dock_area_window_chain_target(
+                Some(DragHandle::DockAreaHeader),
+                Some(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Left,
+                }),
+                Some(DockWindowRole::Floating { group: anchor }),
+            ),
+            Some((anchor, true)),
+        );
+        assert_eq!(
+            dock_area_window_chain_target(
+                Some(DragHandle::DockAreaHeader),
+                Some(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Right,
+                }),
+                Some(DockWindowRole::Floating { group: anchor }),
+            ),
+            Some((anchor, false)),
+        );
+    }
+
+    #[test]
+    fn content_drags_and_non_side_zones_keep_core_docking_semantics() {
+        let anchor = FloatingGroupId::null();
+        let group = NodeId::null();
+        let target = Some(DropTarget::GroupEdge {
+            group,
+            zone: DropZone::Left,
+        });
+        let floating = Some(DockWindowRole::Floating { group: anchor });
+
+        assert_eq!(
+            dock_area_window_chain_target(Some(DragHandle::PanelTab), target, floating),
+            None,
+        );
+        assert_eq!(
+            dock_area_window_chain_target(
+                Some(DragHandle::DockAreaHeader),
+                Some(DropTarget::GroupEdge {
+                    group,
+                    zone: DropZone::Top,
+                }),
+                floating,
+            ),
+            None,
+        );
+        assert_eq!(
+            dock_area_window_chain_target(
+                Some(DragHandle::DockAreaHeader),
+                target,
+                Some(DockWindowRole::Main),
+            ),
+            None,
+        );
+    }
+}
+
