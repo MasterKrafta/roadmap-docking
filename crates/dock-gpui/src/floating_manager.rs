@@ -398,43 +398,53 @@ fn floating_groups_in_native_z_order(
         .collect()
 }
 
-fn contiguous_window_chain_bounds(
-    layout: &dock_core::Layout,
-    members: &[FloatingGroupId],
-    anchor: FloatingGroupId,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
-    let bounds = members
-        .iter()
-        .map(|group| {
-            layout
-                .floating_group(*group)
-                .map(|floating| (*group, floating.bounds))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    arrange_contiguous_window_chain_bounds(bounds, anchor)
-}
-
 fn arrange_contiguous_window_chain_bounds(
     mut bounds: Vec<(FloatingGroupId, Rect)>,
+    physical_widths: &[f32],
     anchor: FloatingGroupId,
 ) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    if bounds.len() != physical_widths.len()
+        || physical_widths
+            .iter()
+            .any(|width| !width.is_finite() || *width <= 0.0)
+    {
+        return None;
+    }
+
     let anchor_index = bounds.iter().position(|(group, _)| *group == anchor)?;
     let anchor_origin = bounds[anchor_index].1.origin;
 
     for index in (0..anchor_index).rev() {
         let next = bounds[index + 1].1;
         let current = &mut bounds[index].1;
-        current.origin.x = next.origin.x - current.size.width;
+        current.origin.x = next.origin.x - physical_widths[index];
         current.origin.y = anchor_origin.y;
     }
     for index in anchor_index + 1..bounds.len() {
         let previous = bounds[index - 1].1;
         let current = &mut bounds[index].1;
-        current.origin.x = previous.origin.x + previous.size.width;
+        current.origin.x = previous.origin.x + physical_widths[index - 1];
         current.origin.y = anchor_origin.y;
     }
 
     Some(bounds)
+}
+
+fn should_insert_window_before(
+    moving_left: i32,
+    moving_right: i32,
+    target_left: i32,
+    target_right: i32,
+    cursor_x: i32,
+) -> bool {
+    let moving_center_twice = i64::from(moving_left) + i64::from(moving_right);
+    let target_center_twice = i64::from(target_left) + i64::from(target_right);
+
+    if moving_center_twice == target_center_twice {
+        i64::from(cursor_x) * 2 < target_center_twice
+    } else {
+        moving_center_twice < target_center_twice
+    }
 }
 
 /// Ordered groups of independent native Floating windows.
@@ -783,6 +793,38 @@ impl FloatingWindowManager {
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
         let panel = self.host_registry.panel_for_group(group)?;
         self.registry.windows.get(&panel)
+    }
+
+    /// Returns each HWND's outer width in physical desktop pixels. Floating
+    /// Core bounds intentionally store physical origins but logical sizes, so
+    /// using Rect::size.width directly here would leave gaps at non-100% DPI.
+    fn physical_widths_for_bounds(&self, bounds: &[(FloatingGroupId, Rect)]) -> Vec<f32> {
+        bounds
+            .iter()
+            .map(|(group, bounds)| {
+                let Some(entry) = self.panel_window_for_group(*group) else {
+                    return bounds.size.width;
+                };
+                let Some(native_window) = entry.native_window else {
+                    return bounds.size.width * entry.native_scale_factor.unwrap_or(1.0);
+                };
+
+                if let Ok(rect) = self.native_ops.window_rect(native_window) {
+                    let width = i64::from(rect.right) - i64::from(rect.left);
+                    if width > 0 {
+                        return width as f32;
+                    }
+                }
+
+                self.native_ops
+                    .scale_factor(native_window)
+                    .ok()
+                    .or(entry.native_scale_factor)
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+                    .map(|scale| bounds.size.width * scale)
+                    .unwrap_or(bounds.size.width)
+            })
+            .collect()
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -1596,9 +1638,24 @@ impl FloatingWindowManager {
                 self.clear_native_drag_target(cx);
                 return;
             };
-            let midpoint = i64::from(target_rect.left)
-                + (i64::from(target_rect.right) - i64::from(target_rect.left)) / 2;
-            let insert_before = i64::from(cursor.x) < midpoint;
+            let mut moving_left = i32::MAX;
+            let mut moving_right = i32::MIN;
+            for moving in &self.native_move_windows {
+                let Ok(rect) = self.native_ops.window_rect(moving.native_window) else {
+                    state.drop_target = None;
+                    self.clear_native_drag_target(cx);
+                    return;
+                };
+                moving_left = moving_left.min(rect.left);
+                moving_right = moving_right.max(rect.right);
+            }
+            let insert_before = should_insert_window_before(
+                moving_left,
+                moving_right,
+                target_rect.left,
+                target_rect.right,
+                cursor.x,
+            );
 
             // Whole-window drags are not Core Dock operations. Clear the Core
             // resolver/preview and retain only the destination window + side.
@@ -1893,11 +1950,27 @@ impl FloatingWindowManager {
         }
 
         let members = next_chains.members_for(anchor);
-        let Some(bounds) = self.controller.update(cx, |controller, _| {
-            contiguous_window_chain_bounds(controller.layout(), &members, anchor)
+        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
+            members
+                .iter()
+                .map(|member| {
+                    controller
+                        .layout()
+                        .floating_group(*member)
+                        .map(|floating| (*member, floating.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
         }) else {
             return Err(dock_core::CommandError::InvalidTarget {
                 reason: "window chain contains a FloatingGroup that no longer exists",
+            });
+        };
+        let physical_widths = self.physical_widths_for_bounds(&member_bounds);
+        let Some(bounds) =
+            arrange_contiguous_window_chain_bounds(member_bounds, &physical_widths, anchor)
+        else {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "could not calculate physical widths for the Floating window chain",
             });
         };
 
@@ -2094,9 +2167,13 @@ impl FloatingWindowManager {
                 let Some(member_bounds) = member_bounds else {
                     continue;
                 };
+                let physical_widths = self.physical_widths_for_bounds(&member_bounds);
                 if let Some(anchor) = members.first().copied()
-                    && let Some(bounds) =
-                        arrange_contiguous_window_chain_bounds(member_bounds, anchor)
+                    && let Some(bounds) = arrange_contiguous_window_chain_bounds(
+                        member_bounds,
+                        &physical_widths,
+                        anchor,
+                    )
                 {
                     compacted_bounds.extend(bounds);
                 }
@@ -3697,7 +3774,7 @@ mod window_chain_registry_tests {
 
 #[cfg(test)]
 mod contiguous_window_chain_bounds_tests {
-    use super::arrange_contiguous_window_chain_bounds;
+    use super::{arrange_contiguous_window_chain_bounds, should_insert_window_before};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
 
@@ -3716,8 +3793,12 @@ mod contiguous_window_chain_bounds_tests {
             (c, Rect::new(Point::new(900.0, 90.0), Size::new(180.0, 280.0))),
         ];
 
-        let arranged = arrange_contiguous_window_chain_bounds(input, b)
-            .expect("anchor must belong to the chain");
+        let arranged = arrange_contiguous_window_chain_bounds(
+            input,
+            &[120.0, 240.0, 180.0],
+            b,
+        )
+        .expect("anchor must belong to the chain");
 
         assert_eq!(arranged[0].1.origin, Point::new(380.0, 40.0));
         assert_eq!(arranged[1].1.origin, Point::new(500.0, 40.0));
@@ -3736,13 +3817,73 @@ mod contiguous_window_chain_bounds_tests {
             (c, Rect::new(Point::new(700.0, 48.0), Size::new(200.0, 260.0))),
         ];
 
-        let arranged = arrange_contiguous_window_chain_bounds(input.clone(), a)
-            .expect("first member is a valid anchor");
+        let arranged = arrange_contiguous_window_chain_bounds(
+            input.clone(),
+            &[100.0, 150.0, 200.0],
+            a,
+        )
+        .expect("first member is a valid anchor");
         assert_eq!(arranged[0].1.origin, Point::new(30.0, 8.0));
         assert_eq!(arranged[1].1.origin, Point::new(130.0, 8.0));
         assert_eq!(arranged[2].1.origin, Point::new(280.0, 8.0));
 
-        assert!(arrange_contiguous_window_chain_bounds(input, FloatingGroupId::null()).is_none());
+        assert!(
+            arrange_contiguous_window_chain_bounds(
+                input,
+                &[100.0, 150.0, 200.0],
+                FloatingGroupId::null(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn uses_physical_window_widths_when_dpi_scales_logical_sizes() {
+        let (_ids, [a, b, c]) = groups();
+        let input = vec![
+            (a, Rect::new(Point::new(0.0, 20.0), Size::new(300.0, 240.0))),
+            (b, Rect::new(Point::new(1000.0, 40.0), Size::new(400.0, 320.0))),
+            (c, Rect::new(Point::new(1800.0, 60.0), Size::new(200.0, 200.0))),
+        ];
+
+        // The members have different monitor scales: 1.5x, 1.25x and 2x.
+        let arranged = arrange_contiguous_window_chain_bounds(
+            input,
+            &[450.0, 500.0, 400.0],
+            b,
+        )
+        .expect("physical widths must place the chain");
+        assert_eq!(arranged[0].1.origin, Point::new(550.0, 40.0));
+        assert_eq!(arranged[1].1.origin, Point::new(1000.0, 40.0));
+        assert_eq!(arranged[2].1.origin, Point::new(1500.0, 40.0));
+    }
+
+    #[test]
+    fn rejects_missing_or_invalid_physical_widths() {
+        let (_ids, [a, b, _c]) = groups();
+        let input = vec![
+            (a, Rect::new(Point::ZERO, Size::new(100.0, 200.0))),
+            (b, Rect::new(Point::new(300.0, 0.0), Size::new(100.0, 200.0))),
+        ];
+        assert!(arrange_contiguous_window_chain_bounds(input.clone(), &[100.0], a).is_none());
+        assert!(arrange_contiguous_window_chain_bounds(input, &[100.0, 0.0], a).is_none());
+    }
+
+    #[test]
+    fn insertion_side_uses_window_center_not_mouse_grab_point() {
+        // The cursor is on the target's right half, but the dragged window
+        // itself is on the left: the source must be inserted before the target.
+        assert!(should_insert_window_before(100, 500, 300, 700, 650));
+
+        // The cursor is on the target's left half, but the dragged window
+        // itself is on the right: the source must be inserted after the target.
+        assert!(!should_insert_window_before(500, 900, 300, 700, 350));
+    }
+
+    #[test]
+    fn insertion_side_uses_cursor_only_when_window_centers_match() {
+        assert!(should_insert_window_before(300, 700, 300, 700, 400));
+        assert!(!should_insert_window_before(300, 700, 300, 700, 600));
     }
 }
 
