@@ -177,16 +177,6 @@ impl DockGeometry {
         Some(point)
     }
 
-    pub(crate) fn physical_delta_between(
-        to: PhysicalPoint,
-        from: PhysicalPoint,
-    ) -> PhysicalPoint {
-        PhysicalPoint {
-            x: to.x.saturating_sub(from.x),
-            y: to.y.saturating_sub(from.y),
-        }
-    }
-
     pub(crate) fn physical_coordinate(value: f32, scale: f32) -> Option<i32> {
         if !valid_scale(scale) || !value.is_finite() {
             return None;
