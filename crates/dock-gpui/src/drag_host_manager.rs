@@ -15,7 +15,7 @@ use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, N
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide, DragDropAction,
-    DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
+    DragHandle, DragPayload, DragState, DropTarget, DropZone, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
     VerticalOverflow,
 };
@@ -42,7 +42,7 @@ struct ActiveDragHost {
     visible: bool,
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
-    free_area_bounds: Option<Rect>,
+    proposed_floating_bounds: Option<Rect>,
     promote_on_float: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
@@ -554,7 +554,7 @@ impl DragHostManager {
             visible,
             drop_target: None,
             target_role: None,
-            free_area_bounds: None,
+            proposed_floating_bounds: None,
             promote_on_float,
             pending_release_cursor: None,
             source_detach_subscription: None,
@@ -778,26 +778,12 @@ impl DragHostManager {
         )
         .then_some(source_window_id)
         .flatten();
-        let previous_floating_target = self
-            .active
-            .as_ref()
-            .filter(|active| active.id == id)
-            .and_then(|active| match active.target_role {
-                Some(DockWindowRole::Floating { group }) => Some(group),
-                _ => None,
-            });
         let target_window = floating_manager.update(cx, |manager, _| {
-            let target = manager.docking_window_at_point(
+            manager.docking_window_at_point(
                 cursor,
                 native_drag_host,
                 excluded_source_window,
-            );
-            if target.is_none() && matches!(payload, DragPayload::DockArea { .. }) {
-                previous_floating_target
-                    .and_then(|group| manager.floating_window_at_point(group, cursor))
-            } else {
-                target
-            }
+            )
         });
         let source_point = floating_manager.update(cx, |manager, _| {
             manager.core_point_for_drag_source(source_host, source_window_id, cursor)
@@ -824,12 +810,8 @@ impl DragHostManager {
         let update: Result<(Option<DropTarget>, Option<Rect>), String> =
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
-                if matches!(payload, DragPayload::DockArea { .. }) && source.is_none() {
-                    // A stale DockArea source must never be reinterpreted as a
-                    // FreeArea detach operation.
-                    Ok(None)
-                } else if matches!(payload, DragPayload::DockArea { .. })
-                    && target_window.is_none()
+                if matches!(payload, DragPayload::DockArea { .. })
+                    && (source.is_none() || target_window.is_none())
                 {
                     // A multi-Column DockArea, or a single-Column DockArea released
                     // on the desktop, detaches as one composition. A foreign
@@ -902,7 +884,17 @@ impl DragHostManager {
                 .set_drop_target(target)
                 .map_err(|error| error.to_string())?;
 
-            let local_free_area_bounds = if target == Some(DropTarget::FreeArea) {
+            let needs_floating_bounds = target == Some(DropTarget::FreeArea)
+                || (matches!(payload, DragPayload::DockArea { .. })
+                    && matches!(
+                        target,
+                        Some(DropTarget::GroupEdge {
+                            zone: DropZone::Left | DropZone::Right,
+                            ..
+                        })
+                    )
+                    && matches!(target_window, Some(DockingWindowAtPoint::Floating { .. })));
+            let local_proposed_floating_bounds = needs_floating_bounds.then(|| {
                 crate::input::drag::floating_bounds_for_drag(
                     controller,
                     payload,
@@ -910,13 +902,11 @@ impl DragHostManager {
                     source_host,
                     source_window_id,
                 )
-            } else {
-                None
-            };
+            }).flatten();
             controller_cx.notify();
-            Ok((target, local_free_area_bounds))
+            Ok((target, local_proposed_floating_bounds))
         });
-        let (target, local_free_area_bounds) = match update {
+        let (target, local_proposed_floating_bounds) = match update {
             Ok(update) => update,
             Err(error) => {
                 tracing::warn!(
@@ -928,7 +918,7 @@ impl DragHostManager {
                 return false;
             }
         };
-        let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
+        let screen_proposed_floating_bounds = local_proposed_floating_bounds.and_then(|bounds| {
             floating_manager.update(cx, |manager, _| {
                 manager.screen_bounds_for_drag_source(source_host, bounds)
             })
@@ -936,7 +926,7 @@ impl DragHostManager {
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
             active.target_role = target_window.and_then(DockingWindowAtPoint::role);
-            active.free_area_bounds = screen_free_area_bounds;
+            active.proposed_floating_bounds = screen_proposed_floating_bounds;
         }
 
         match self.native_ops.left_button_down() {
@@ -958,11 +948,35 @@ impl DragHostManager {
             return;
         };
         let target = active.drop_target;
-        let free_area_bounds = active.free_area_bounds;
+        let proposed_floating_bounds = active.proposed_floating_bounds;
         let panel = active.panels.first().copied();
         let promote_on_float = active.promote_on_float;
-        let restored_free_area_bounds = if promote_on_float
-            && target == Some(DropTarget::FreeArea)
+        let is_dock_area_drag = self.controller.update(cx, |controller, _| {
+            controller.drag().session().handle() == Some(DragHandle::DockAreaHeader)
+        });
+        let chain_join = if is_dock_area_drag {
+            match (target, active.target_role) {
+                (
+                    Some(DropTarget::GroupEdge {
+                        zone: DropZone::Left,
+                        ..
+                    }),
+                    Some(DockWindowRole::Floating { group }),
+                ) => Some((group, true)),
+                (
+                    Some(DropTarget::GroupEdge {
+                        zone: DropZone::Right,
+                        ..
+                    }),
+                    Some(DockWindowRole::Floating { group }),
+                ) => Some((group, false)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let restored_proposed_floating_bounds = if promote_on_float
+            && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
                 Ok(bounds) => Some(bounds),
@@ -974,8 +988,8 @@ impl DragHostManager {
         } else {
             None
         };
-        let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
-        let can_promote_existing_window = restored_free_area_bounds.is_some();
+        let proposed_floating_bounds = restored_proposed_floating_bounds.or(proposed_floating_bounds);
+        let can_promote_existing_window = restored_proposed_floating_bounds.is_some();
 
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -1001,10 +1015,15 @@ impl DragHostManager {
 
             let mut created_groups = Vec::new();
             if let Some(mut request) = request {
-                if request.target == Some(DropTarget::FreeArea) {
-                    if let Some(bounds) = free_area_bounds {
-                        request.floating_bounds = Some(bounds);
-                    } else {
+                if let Some((_, _)) = chain_join {
+                    // Whole Main DockArea side drops create independent native
+                    // Floating windows. The destination window is joined at the
+                    // WindowChain layer after those Core FloatingGroups exist.
+                    request.target = Some(DropTarget::FreeArea);
+                    request.floating_bounds = proposed_floating_bounds;
+                } else if request.target == Some(DropTarget::FreeArea) {
+                    request.floating_bounds = proposed_floating_bounds;
+                    if request.floating_bounds.is_none() {
                         tracing::debug!(?id, "DragHost FreeArea drop has no valid screen bounds");
                     }
                 }
@@ -1050,7 +1069,7 @@ impl DragHostManager {
         // Register the complete source-ordered chain before adopting the first
         // DragHost HWND. Adoption calls reconcile(), which then creates one
         // persistent native Floating window for each remaining FloatingGroup.
-        if finished && created_groups.len() > 1 {
+        if finished && created_groups.len() > 1 && chain_join.is_none() {
             let registered = self.floating_manager.as_ref().is_some_and(|manager| {
                 manager.update(cx, |manager, _| {
                     manager.register_window_chain(&created_groups)
@@ -1084,9 +1103,35 @@ impl DragHostManager {
         if let Some(target_group) = floating_target {
             if promote_on_float
                 && can_promote_existing_window
-                && target == Some(DropTarget::FreeArea)
+                && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
                 && self.promote_active_drag_host_to_floating(id, target_group, cx)
             {
+                if let Some((anchor, insert_before)) = chain_join {
+                    let joined = self.floating_manager.as_ref().map(|manager| {
+                        manager.update(cx, |manager, manager_cx| {
+                            manager.join_window_chain_at(
+                                anchor,
+                                &created_groups,
+                                insert_before,
+                                manager_cx,
+                            )
+                        })
+                    });
+                    match joined {
+                        Some(Ok(Ok(()))) => {}
+                        Some(Ok(Err(error))) => tracing::warn!(
+                            ?id,
+                            ?anchor,
+                            %error,
+                            "could not join the newly floated Main DockArea windows to the target WindowChain"
+                        ),
+                        _ => tracing::warn!(
+                            ?id,
+                            ?anchor,
+                            "FloatingWindowManager was unavailable after promoting the Main DockArea"
+                        ),
+                    }
+                }
                 return;
             }
             if promote_on_float {
@@ -1550,8 +1595,8 @@ impl DragHostManager {
     }
 
     /// Returns the proposed persistent Floating bounds in virtual-desktop pixels.
-    pub fn active_free_area_bounds(&self) -> Option<Rect> {
-        self.active.as_ref()?.free_area_bounds
+    pub fn active_proposed_floating_bounds(&self) -> Option<Rect> {
+        self.active.as_ref()?.proposed_floating_bounds
     }
 
     fn discard_unregistered_window(
