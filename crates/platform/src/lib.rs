@@ -74,22 +74,6 @@ impl PhysicalRect {
     }
 }
 
-/// Horizontal side selected by the native non-client resize loop.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NativeResizeEdge {
-    Left,
-    Right,
-}
-
-#[cfg(any(windows, test))]
-fn horizontal_resize_edge_from_sizing_code(code: usize) -> Option<NativeResizeEdge> {
-    match code {
-        1 | 4 | 7 => Some(NativeResizeEdge::Left),
-        2 | 5 | 8 => Some(NativeResizeEdge::Right),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeWindowAtPoint {
     Known(NativeWindowId),
@@ -227,14 +211,6 @@ pub trait NativeWindowOps {
     fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
-    /// Returns the horizontal edge reported by WM_SIZING, when the active
-    /// native resize is controlled by a left or right edge/corner.
-    fn resizing_edge(
-        &self,
-        _window: NativeWindowId,
-    ) -> Result<Option<NativeResizeEdge>, NativeError> {
-        Ok(None)
-    }
     /// Sets the minimum client-content size in physical pixels. The native
     /// implementation includes the current non-client frame in WM_GETMINMAXINFO.
     /// Pass None to remove the dynamic native constraint.
@@ -283,38 +259,6 @@ fn topmost_known_window_under_point(
         };
     }
     NativeWindowAtPoint::Empty
-}
-
-#[cfg(test)]
-mod native_resize_edge_tests {
-    use super::{NativeResizeEdge, horizontal_resize_edge_from_sizing_code};
-
-    #[test]
-    fn win32_left_edges_and_corners_map_to_the_left_column() {
-        for code in [1, 4, 7] {
-            assert_eq!(
-                horizontal_resize_edge_from_sizing_code(code),
-                Some(NativeResizeEdge::Left),
-            );
-        }
-    }
-
-    #[test]
-    fn win32_right_edges_and_corners_map_to_the_right_column() {
-        for code in [2, 5, 8] {
-            assert_eq!(
-                horizontal_resize_edge_from_sizing_code(code),
-                Some(NativeResizeEdge::Right),
-            );
-        }
-    }
-
-    #[test]
-    fn win32_top_and_bottom_edges_do_not_select_a_horizontal_column() {
-        for code in [3, 6] {
-            assert_eq!(horizontal_resize_edge_from_sizing_code(code), None);
-        }
-    }
 }
 
 #[cfg(windows)]
@@ -571,7 +515,6 @@ mod windows_impl {
 
     struct ResizeLoopState {
         active: bool,
-        horizontal_edge: Option<NativeResizeEdge>,
     }
 
     unsafe extern "system" fn resize_loop_subclass_proc(
@@ -590,15 +533,7 @@ mod windows_impl {
         let state = reference_data as *mut ResizeLoopState;
         if message == WM_ENTERSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
-            unsafe {
-                (*state).active = true;
-                (*state).horizontal_edge = None;
-            }
-        }
-        if message == WM_SIZING {
-            let edge = horizontal_resize_edge_from_sizing_code(wparam.0);
-            // SAFETY: WM_SIZING is delivered to the same live subclass state.
-            unsafe { (*state).horizontal_edge = edge };
+            unsafe { (*state).active = true };
         }
 
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
@@ -606,10 +541,7 @@ mod windows_impl {
 
         if message == WM_EXITSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
-            unsafe {
-                (*state).active = false;
-                (*state).horizontal_edge = None;
-            }
+            unsafe { (*state).active = false };
         }
         if message == WM_NCDESTROY {
             // SAFETY: Detach this callback before freeing its owned state.
@@ -1128,10 +1060,7 @@ mod windows_impl {
             }
             .as_bool();
             if !tracking_installed {
-                let pointer = Box::into_raw(Box::new(ResizeLoopState {
-                    active: false,
-                    horizontal_edge: None,
-                }));
+                let pointer = Box::into_raw(Box::new(ResizeLoopState { active: false }));
                 // SAFETY: The window subclass owns this allocation until it is
                 // explicitly removed or WM_NCDESTROY is received.
                 if !unsafe {
@@ -1267,30 +1196,6 @@ mod windows_impl {
             // it is detached or WM_NCDESTROY runs, both on the UI thread.
             Ok(unsafe { (*(reference_data as *const ResizeLoopState)).active })
         }
-        fn resizing_edge(
-            &self,
-            window: NativeWindowId,
-        ) -> Result<Option<NativeResizeEdge>, NativeError> {
-            let mut reference_data = 0usize;
-            // SAFETY: Query the subclass and its retained state for this HWND.
-            let installed = unsafe {
-                GetWindowSubclass(
-                    hwnd(window),
-                    Some(resize_loop_subclass_proc),
-                    RESIZE_LOOP_SUBCLASS_ID,
-                    Some(&mut reference_data as *mut usize),
-                )
-            }
-            .as_bool();
-            if !installed || reference_data == 0 {
-                return Ok(None);
-            }
-
-            // SAFETY: The subclass owns this state until it is detached or
-            // WM_NCDESTROY runs on the UI thread.
-            Ok(unsafe { (*(reference_data as *const ResizeLoopState)).horizontal_edge })
-        }
-
         fn set_min_size(
             &self,
             window: NativeWindowId,
