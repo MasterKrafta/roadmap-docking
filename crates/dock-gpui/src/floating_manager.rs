@@ -1822,8 +1822,8 @@ impl FloatingWindowManager {
         })
     }
 
-    /// Resolves the previously targeted Floating host when native Z-order hit-testing
-    /// transiently reports empty desktop space at the release edge.
+    /// Resolves the previously targeted Floating host if native Z-order hit-testing
+    /// transiently reports empty desktop space while the pointer remains inside it.
     ///
     /// The point must still be inside that exact visible HWND. Foreign windows
     /// are handled by the primary hit-test and are never bypassed by this fallback.
