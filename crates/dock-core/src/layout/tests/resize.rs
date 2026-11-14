@@ -1250,13 +1250,25 @@ fn floating_splitter_screen_x(
 #[test]
 fn floating_edge_minimum_width_keeps_non_edge_columns_at_current_widths() {
     let metrics = DockMetrics::default();
-    let (layout, floating, _, columns) = three_column_floating_layout(&metrics);
+    let (mut layout, floating, _, columns) = three_column_floating_layout(&metrics);
+    let initial = layout.floating_group(floating).unwrap().bounds;
+    let widened_bounds = Rect::new(
+        initial.origin,
+        Size::new(initial.size.width + 180.0, initial.size.height),
+    );
+    layout
+        .apply(DockCommand::ResizeFloatingBounds { group: floating, bounds: widened_bounds }, &metrics)
+        .unwrap();
+
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
     let first_minimum = layout.minimum_column_width(columns[0], &metrics).unwrap();
     let last_minimum = layout.minimum_column_width(columns[2], &metrics).unwrap();
     let splitter_width = metrics.splitter_thickness * 2.0;
+    let fixed_after_first = rects.columns.iter().skip(1).map(|column| column.rect.size.width).sum::<f32>();
+    let fixed_before_last = rects.columns.iter().take(2).map(|column| column.rect.size.width).sum::<f32>();
 
-    let expected_left = first_minimum + 300.0 + 340.0 + splitter_width;
-    let expected_right = 260.0 + 300.0 + last_minimum + splitter_width;
+    let expected_left = first_minimum + fixed_after_first + splitter_width;
+    let expected_right = fixed_before_last + last_minimum + splitter_width;
     assert_eq!(
         layout
             .floating_horizontal_resize_minimum_widths(floating, &metrics)

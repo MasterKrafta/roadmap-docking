@@ -767,14 +767,23 @@ impl Layout {
             _ => return Ok(None),
         };
 
+        let rects = self
+            .compute_floating_rects(group_id, metrics)
+            .map_err(|_| CommandError::InvalidTarget {
+                reason: "floating composition geometry is unavailable for edge minimum sizing",
+            })?;
         let widths = split
             .children
             .iter()
-            .map(|child| match self.nodes.get(*child) {
-                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "floating horizontal Split contains a non-Column child",
-                }),
+            .map(|child| {
+                rects
+                    .columns
+                    .iter()
+                    .find(|column| column.column == *child)
+                    .map(|column| column.rect.size.width)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "floating composition is missing a rendered Column rectangle",
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let minimums = split

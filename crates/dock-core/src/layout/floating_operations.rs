@@ -1397,37 +1397,71 @@ impl Layout {
                 bounds.size.width - floating.bounds.size.width;
             let requested_width_delta =
                 actual_bounds.size.width - floating.bounds.size.width;
-            let edge_column = match edge {
-                crate::FloatingResizeEdge::Left => split.children.first().copied(),
-                crate::FloatingResizeEdge::Right => split.children.last().copied(),
-            }
-            .ok_or(CommandError::InvalidTarget {
-                reason: "floating horizontal Split has no edge Column",
-            })?;
-            let current_width = match self.nodes.get(edge_column) {
-                Some(Node::Column(column)) => column.width,
-                _ => {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "floating edge resize target must be a Column",
-                    });
-                }
-            };
-            let actual_width = self.resize_column_to_width(
-                edge_column,
-                current_width + requested_width_delta,
-                metrics,
-            )?;
-            let actual_width_delta = actual_width - current_width;
-            if actual_width_delta != 0.0 {
-                self.sync_split_column_ratios(root)?;
-            }
+            if requested_width_delta != 0.0 {
+                let current_rects = self
+                    .compute_floating_rects(group, metrics)
+                    .map_err(|_| CommandError::InvalidTarget {
+                        reason: "current Floating column geometry could not be computed",
+                    })?;
+                let rendered_widths = split
+                    .children
+                    .iter()
+                    .map(|child| {
+                        current_rects
+                            .columns
+                            .iter()
+                            .find(|column| column.column == *child)
+                            .map(|column| column.rect.size.width)
+                            .ok_or(CommandError::InvalidTarget {
+                                reason: "Floating composition is missing a rendered Column rectangle",
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
-            // Keep the untouched window edge anchored if Column constraints
-            // prevent the native frame from reaching its requested width.
-            actual_bounds.size.width = floating.bounds.size.width + actual_width_delta;
-            if edge == crate::FloatingResizeEdge::Left {
-                actual_bounds.origin.x +=
-                    (requested_native_width_delta - actual_width_delta) * scale_factor;
+                // A restored or previously stretched composition may have
+                // rendered widths that differ from saved Column widths.
+                // Adopt the visible geometry before changing the edge Column,
+                // so syncing Split ratios cannot shift interior splitters.
+                for (column_id, rendered_width) in
+                    split.children.iter().copied().zip(rendered_widths.iter().copied())
+                {
+                    if let Some(Node::Column(column)) = self.nodes.get_mut(column_id)
+                        && !column.mode.is_rail()
+                    {
+                        column.width = rendered_width;
+                        if column.mode == ColumnMode::Expanded {
+                            column.last_expanded_width = Some(rendered_width);
+                        }
+                    }
+                }
+
+                let (edge_index, edge_column) = match edge {
+                    crate::FloatingResizeEdge::Left => (0, split.children.first().copied()),
+                    crate::FloatingResizeEdge::Right => {
+                        (split.children.len() - 1, split.children.last().copied())
+                    }
+                };
+                let edge_column = edge_column.ok_or(CommandError::InvalidTarget {
+                    reason: "floating horizontal Split has no edge Column",
+                })?;
+                let current_width = rendered_widths[edge_index];
+                let actual_width = self.resize_column_to_width(
+                    edge_column,
+                    current_width + requested_width_delta,
+                    metrics,
+                )?;
+                let actual_width_delta = actual_width - current_width;
+                if actual_width_delta != 0.0 {
+                    self.sync_split_column_ratios(root)?;
+                }
+
+                // Keep the untouched window edge anchored if Column constraints
+                // prevent the native frame from reaching its requested width.
+                actual_bounds.size.width = floating.bounds.size.width + actual_width_delta;
+                if edge == crate::FloatingResizeEdge::Left {
+                    actual_bounds.origin.x +=
+                        (requested_native_width_delta - actual_width_delta) * scale_factor;
+                }
             }
         }
 

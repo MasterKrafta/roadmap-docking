@@ -2298,13 +2298,15 @@ impl FloatingWindowManager {
             }
         }
 
-        let desired_minimum = group.minimum_size.and_then(|minimum| {
-            let scale = self.native_ops.scale_factor(native_window)
-                .ok()
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-                .unwrap_or(1.0);
-            DockGeometry::physical_size_from_logical(minimum, scale)
-        });
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let desired_minimum = group
+            .minimum_size
+            .and_then(|minimum| DockGeometry::physical_size_from_logical(minimum, scale));
 
         if entry.native_min_size != desired_minimum {
             match self.native_ops.set_min_size(native_window, desired_minimum) {
