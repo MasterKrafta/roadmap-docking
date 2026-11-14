@@ -1152,26 +1152,11 @@ impl DragHostManager {
                     return;
                 }
 
-                if chain_join.is_some() {
-                    // The Core layout is already split into independent
-                    // FloatingGroups. Release the transport views so the normal
-                    // Floating hosts can render each group instead of handing
-                    // the complete DockArea to only the first group.
-                    self.flush_controller_events(cx);
-                    if let Err(error) = self.close(id, cx) {
-                        tracing::warn!(
-                            ?id,
-                            %error,
-                            "could not close the DockArea DragHost after Floating promotion failed"
-                        );
-                    }
-                    return;
-                }
             }
             if chain_join.is_some() {
-                // Even if native DragHost promotion fails, the Core source is
-                // already detached into separate FloatingGroups. Do not hand
-                // the complete source composition to just its first group.
+                // Core has already detached the source into independent
+                // FloatingGroups. Release transported PanelViews so each
+                // normal FloatingHost can render its own composition.
                 self.flush_controller_events(cx);
                 if let Err(error) = self.close(id, cx) {
                     tracing::warn!(
