@@ -886,11 +886,24 @@ impl DockController {
         }
     }
 
-    /// Starts tracking a resize from a Core hit-test result.
+    /// Starts tracking a resize from a Core hit-test result using Main geometry.
     pub fn begin_resize_interaction(
         &mut self,
         hit: HitResult,
         origin: Point,
+    ) -> Result<(), ResizeInteractionError> {
+        let rects = self.geometry().ok().cloned();
+        self.begin_resize_interaction_with_rects(hit, origin, rects.as_ref())
+    }
+
+    /// Starts a resize using the geometry produced by the host that owns the
+    /// pointer. Floating windows have their own local geometry snapshot, while
+    /// Main continues to use the standard Layout geometry above.
+    pub(crate) fn begin_resize_interaction_with_rects(
+        &mut self,
+        hit: HitResult,
+        origin: Point,
+        rects: Option<&LayoutRects>,
     ) -> Result<(), ResizeInteractionError> {
         if self.has_active_pointer_interaction() {
             return Err(ResizeInteractionError::AlreadyActive);
@@ -902,15 +915,13 @@ impl DockController {
         ) {
             return Err(ResizeInteractionError::NotResizeHandle);
         }
-        // Snapshot only the geometry values needed by this gesture. No second
-        // Dock tree is created; Layout stays the single model owner.
-        let rects = self.geometry().ok().cloned();
+
         let start_splitter_rect = match hit {
             HitResult::Splitter {
                 owner,
                 boundary_index,
                 axis,
-            } => rects.as_ref().and_then(|rects| {
+            } => rects.and_then(|rects| {
                 rects
                     .splitters
                     .iter()
@@ -925,7 +936,6 @@ impl DockController {
         };
         let start_flyout_rect = match hit {
             HitResult::FlyoutResizeEdge { panel, .. } => rects
-                .as_ref()
                 .and_then(|rects| rects.flyout)
                 .filter(|flyout| flyout.panel == panel)
                 .map(|flyout| flyout.rect),
