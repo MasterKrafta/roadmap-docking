@@ -321,7 +321,7 @@ impl WindowChainRegistry {
     /// one-member chain for move operations.
     fn members_for(&self, group: FloatingGroupId) -> Vec<FloatingGroupId> {
         self.chain_for(group)
-            .map_or_else(|| vec![group], <[FloatingGroupId]>::to_vec)
+            .map_or_else(|| vec![group], |members| members.to_vec())
     }
 
     fn link_before(
@@ -486,6 +486,7 @@ impl FloatingWindowManager {
 
     /// Returns ordered members of a chain. An unlinked Floating window is
     /// represented as a one-member chain for callers that move windows.
+    #[allow(dead_code)] // Consumed by the chain-wide move stage.
     pub(crate) fn window_chain_members(
         &self,
         group: FloatingGroupId,
@@ -494,6 +495,7 @@ impl FloatingWindowManager {
     }
 
     /// Inserts the moving window's complete chain immediately before the anchor.
+    #[allow(dead_code)] // Consumed by the whole-window docking stage.
     pub(crate) fn link_window_chain_before(
         &mut self,
         anchor: FloatingGroupId,
@@ -503,6 +505,7 @@ impl FloatingWindowManager {
     }
 
     /// Inserts the moving window's complete chain immediately after the anchor.
+    #[allow(dead_code)] // Consumed by the whole-window docking stage.
     pub(crate) fn link_window_chain_after(
         &mut self,
         anchor: FloatingGroupId,
@@ -512,6 +515,7 @@ impl FloatingWindowManager {
     }
 
     /// Removes a Floating window from its chain without disturbing other members.
+    #[allow(dead_code)] // Consumed by the content-extraction lifecycle stage.
     pub(crate) fn remove_window_from_chain(
         &mut self,
         group: FloatingGroupId,
@@ -3102,6 +3106,20 @@ mod window_chain_registry_tests {
         assert_eq!(chains.members_for(a), vec![a, c]);
         assert_eq!(chains.members_for(c), vec![a, c]);
         assert_eq!(chains.members_for(b), vec![b]);
+    }
+
+
+    #[test]
+    fn removing_the_first_member_rekeys_the_remaining_chain() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        chains.link_after(a, b);
+        chains.link_after(b, c);
+        assert!(chains.remove_member(a));
+        assert_eq!(chains.members_for(b), vec![b, c]);
+        assert_eq!(chains.members_for(c), vec![b, c]);
+        assert_eq!(chains.members_for(a), vec![a]);
     }
 
     #[test]
