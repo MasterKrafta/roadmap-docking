@@ -1493,6 +1493,11 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         ..request
     };
     let floating_to_floating_action =
+        DragDropAction::Command(DockCommand::DockFloating {
+            group: source_float,
+            target: floating_target,
+        });
+    let column_to_floating_action =
         DragDropAction::Command(DockCommand::MoveColumnToTarget {
             column: source_column,
             target: floating_target,
@@ -1513,17 +1518,17 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
     };
     assert_eq!(
         layout.resolve_drag_drop(&group_to_floating_request, &metrics).unwrap(),
-        floating_to_floating_action
+        column_to_floating_action
     );
     assert_eq!(
         layout.resolve_drag_drop(&panel_to_floating_request, &metrics).unwrap(),
-        floating_to_floating_action
+        column_to_floating_action
     );
 
     layout
         .apply(
-            DockCommand::MoveColumnToTarget {
-                column: source_column,
+            DockCommand::DockFloating {
+                group: source_float,
                 target: floating_target,
             },
             &metrics,
@@ -1540,6 +1545,9 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
         Some(Node::Split(split))
             if split.axis == Axis::X
                 && split.children == vec![source_column, target_column]
+                && split.ratios.len() == 2
+                && (split.ratios[0] - 0.5).abs() < 1.0e-4
+                && (split.ratios[1] - 0.5).abs() < 1.0e-4
     ));
     assert!(matches!(
         layout.node(source_column),
