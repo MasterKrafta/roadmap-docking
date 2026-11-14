@@ -200,18 +200,10 @@ impl DockColumnView {
                     content = content.child(group_surface(*group, content_origin, metrics, theme));
                 }
             }
-            let pointer_offset = Point::new(
-                0.0,
-                scroll_handle
-                    .as_ref()
-                    .map(|handle| handle.offset().y.as_f32().max(0.0))
-                    .unwrap_or(0.0),
-            );
             for splitter in splitters {
                 content = content.child(SplitterView::render(
                     *splitter,
                     content_origin,
-                    pointer_offset,
                     controller.clone(),
                     metrics,
                     theme,
