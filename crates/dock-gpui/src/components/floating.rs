@@ -252,6 +252,206 @@ impl FloatingWindowContent {
 }
 
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FloatingWindowResizeEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl FloatingWindowResizeEdge {
+    fn horizontal(self) -> Option<dock_core::FloatingResizeEdge> {
+        match self {
+            Self::Left | Self::TopLeft | Self::BottomLeft => {
+                Some(dock_core::FloatingResizeEdge::Left)
+            }
+            Self::Right | Self::TopRight | Self::BottomRight => {
+                Some(dock_core::FloatingResizeEdge::Right)
+            }
+            Self::Top | Self::Bottom => None,
+        }
+    }
+
+    fn resizes_top(self) -> bool {
+        matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
+    }
+
+    fn resizes_bottom(self) -> bool {
+        matches!(self, Self::Bottom | Self::BottomLeft | Self::BottomRight)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct FloatingWindowResizePress {
+    group: FloatingGroupId,
+    edge: FloatingWindowResizeEdge,
+    start_pointer: Point,
+    start_bounds: Rect,
+    scale_factor: f32,
+}
+
+const FLOATING_WINDOW_RESIZE_HIT_SIZE: f32 = 6.0;
+
+fn floating_window_resize_edge(
+    rect: Rect,
+    point: Point,
+) -> Option<FloatingWindowResizeEdge> {
+    if !matches!(rect.contains(point), Ok(true)) {
+        return None;
+    }
+
+    let left_distance = point.x - rect.origin.x;
+    let right_distance = rect.origin.x + rect.size.width - point.x;
+    let top_distance = point.y - rect.origin.y;
+    let bottom_distance = rect.origin.y + rect.size.height - point.y;
+    let near_left = left_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
+    let near_right = right_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
+    let near_top = top_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
+    let near_bottom = bottom_distance <= FLOATING_WINDOW_RESIZE_HIT_SIZE;
+
+    let horizontal = match (near_left, near_right) {
+        (true, true) => Some(if left_distance <= right_distance {
+            FloatingWindowResizeEdge::Left
+        } else {
+            FloatingWindowResizeEdge::Right
+        }),
+        (true, false) => Some(FloatingWindowResizeEdge::Left),
+        (false, true) => Some(FloatingWindowResizeEdge::Right),
+        (false, false) => None,
+    };
+    let vertical = match (near_top, near_bottom) {
+        (true, true) => Some(if top_distance <= bottom_distance {
+            FloatingWindowResizeEdge::Top
+        } else {
+            FloatingWindowResizeEdge::Bottom
+        }),
+        (true, false) => Some(FloatingWindowResizeEdge::Top),
+        (false, true) => Some(FloatingWindowResizeEdge::Bottom),
+        (false, false) => None,
+    };
+
+    match (horizontal, vertical) {
+        (Some(FloatingWindowResizeEdge::Left), Some(FloatingWindowResizeEdge::Top)) => {
+            Some(FloatingWindowResizeEdge::TopLeft)
+        }
+        (Some(FloatingWindowResizeEdge::Right), Some(FloatingWindowResizeEdge::Top)) => {
+            Some(FloatingWindowResizeEdge::TopRight)
+        }
+        (Some(FloatingWindowResizeEdge::Left), Some(FloatingWindowResizeEdge::Bottom)) => {
+            Some(FloatingWindowResizeEdge::BottomLeft)
+        }
+        (Some(FloatingWindowResizeEdge::Right), Some(FloatingWindowResizeEdge::Bottom)) => {
+            Some(FloatingWindowResizeEdge::BottomRight)
+        }
+        (Some(edge), None) | (None, Some(edge)) => Some(edge),
+        (None, None) => None,
+    }
+}
+
+fn floating_window_resize_bounds(
+    press: FloatingWindowResizePress,
+    point: Point,
+    minimum: dock_core::Size,
+    horizontal_minimums: Option<(f32, f32)>,
+) -> (Rect, Option<dock_core::FloatingResizeEdge>) {
+    let delta_x = point.x - press.start_pointer.x;
+    let delta_y = point.y - press.start_pointer.y;
+    let mut bounds = press.start_bounds;
+    let horizontal_edge = press.edge.horizontal();
+
+    match horizontal_edge {
+        Some(dock_core::FloatingResizeEdge::Left) => {
+            let side_minimum = horizontal_minimums
+                .map(|(left, _)| left)
+                .unwrap_or(minimum.width)
+                .max(minimum.width);
+            let requested_width = press.start_bounds.size.width - delta_x;
+            let actual_width = requested_width.max(side_minimum);
+            bounds.size.width = actual_width;
+            bounds.origin.x = press.start_bounds.origin.x
+                + (press.start_bounds.size.width - actual_width) * press.scale_factor;
+        }
+        Some(dock_core::FloatingResizeEdge::Right) => {
+            let side_minimum = horizontal_minimums
+                .map(|(_, right)| right)
+                .unwrap_or(minimum.width)
+                .max(minimum.width);
+            bounds.size.width =
+                (press.start_bounds.size.width + delta_x).max(side_minimum);
+        }
+        None => {}
+    }
+
+    if press.edge.resizes_top() {
+        let actual_height =
+            (press.start_bounds.size.height - delta_y).max(minimum.height);
+        bounds.size.height = actual_height;
+        bounds.origin.y = press.start_bounds.origin.y
+            + (press.start_bounds.size.height - actual_height) * press.scale_factor;
+    } else if press.edge.resizes_bottom() {
+        bounds.size.height =
+            (press.start_bounds.size.height + delta_y).max(minimum.height);
+    }
+
+    (bounds, horizontal_edge)
+}
+
+fn floating_window_resize_command(
+    controller: &DockController,
+    press: FloatingWindowResizePress,
+    point: Point,
+) -> Option<DockCommand> {
+    let layout = controller.layout();
+    let metrics = controller.metrics();
+    let minimum = layout.floating_minimum_size(press.group, &metrics).ok()?;
+    let horizontal_minimums = layout
+        .floating_horizontal_resize_minimum_widths(press.group, &metrics)
+        .ok()
+        .flatten();
+    let (bounds, edge) =
+        floating_window_resize_bounds(press, point, minimum, horizontal_minimums);
+
+    Some(match edge {
+        Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
+            group: press.group,
+            bounds,
+            edge,
+            scale_factor: press.scale_factor,
+        },
+        None => DockCommand::ResizeFloatingBounds {
+            group: press.group,
+            bounds,
+        },
+    })
+}
+
+fn update_floating_window_resize(
+    controller: &Entity<DockController>,
+    press: FloatingWindowResizePress,
+    point: Point,
+    app: &mut gpui::App,
+) {
+    let command = controller.update(app, |controller, _| {
+        floating_window_resize_command(controller, press, point)
+    });
+    if let Some(command) = command {
+        controller.update(app, |controller, controller_cx| {
+            if let Err(error) = controller.dispatch_in(command, controller_cx) {
+                tracing::warn!(
+                    ?press.group,
+                    %error,
+                    "could not update floating-window bounds during custom resize"
+                );
+            }
+        });
+    }
+}
+
 #[derive(Clone, Copy)]
 struct FloatingTabPress {
     tab_group: NodeId,
@@ -493,6 +693,7 @@ pub struct FloatingHost {
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    window_resize_press: Rc<Cell<Option<FloatingWindowResizePress>>>,
     controller_observed: bool,
     manager_observed: bool,
     native_bounds_observed: bool,
@@ -545,6 +746,7 @@ impl FloatingHost {
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
             pointer_capture: Rc::new(Cell::new(None)),
+            window_resize_press: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
             native_bounds_observed: false,
@@ -570,6 +772,7 @@ impl FloatingHost {
             return;
         }
         self.group = group;
+        self.window_resize_press.set(None);
         self.column_scroll_handles.clear();
         self.open_context_menu = None;
         self.tab_press.set(None);
@@ -645,6 +848,7 @@ impl Render for FloatingHost {
             let tab_press = self.tab_press.clone();
             let group_press = self.group_press.clone();
             let pointer_capture = self.pointer_capture.clone();
+            let window_resize_press = self.window_resize_press.clone();
             cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
                 let preserve_interaction = manager.upgrade().is_some_and(|manager| {
                     manager.update(app, |manager, manager_cx| {
@@ -653,6 +857,12 @@ impl Render for FloatingHost {
                 });
                 if preserve_interaction {
                     return;
+                }
+                if window_resize_press.take().is_some() {
+                    controller.update(app, |controller, controller_cx| {
+                        controller.finish_native_resize_transaction();
+                        controller_cx.notify();
+                    });
                 }
                 DockInteractionCoordinator::cancel_on_focus_loss(
                     &controller,
@@ -719,6 +929,8 @@ impl Render for FloatingHost {
         let pointer_capture_for_escape = pointer_capture.clone();
         let input_window_id = window_id;
         let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
+        let floating_resize_rect = floating_rect;
+        let window_resize_press = self.window_resize_press.clone();
         let dock_component_tab_zones = snapshot
             .as_ref()
             .map(floating_dock_component_tab_zones)
@@ -744,6 +956,7 @@ impl Render for FloatingHost {
                     let tab_press_for_down = tab_press.clone();
                     let group_press_for_down = group_press.clone();
                     let pointer_capture_for_down = pointer_capture.clone();
+                    let window_resize_press_for_down = window_resize_press.clone();
                     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture
                             || event.button != MouseButton::Left
@@ -775,6 +988,55 @@ impl Render for FloatingHost {
                         let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
                             return;
                         };
+
+                        if let Some(edge) = floating_resize_rect
+                            .and_then(|rect| floating_window_resize_edge(rect, point))
+                        {
+                            let start_bounds = controller_for_down.update(app, |controller, _| {
+                                controller
+                                    .layout()
+                                    .floating_group(group)
+                                    .map(|floating| floating.bounds)
+                            });
+                            let scale_factor = manager_for_down
+                                .upgrade()
+                                .and_then(|manager| {
+                                    manager.update(app, |manager, _| {
+                                        manager.native_scale_factor_for_group(group)
+                                    })
+                                })
+                                .unwrap_or(1.0);
+                            if let Some(start_bounds) = start_bounds {
+                                let transaction_started = controller_for_down.update(app, |controller, _| {
+                                    controller.begin_native_resize_transaction()
+                                });
+                                if transaction_started {
+                                    window_resize_press_for_down.set(Some(
+                                        FloatingWindowResizePress {
+                                            group,
+                                            edge,
+                                            start_pointer: point,
+                                            start_bounds,
+                                            scale_factor,
+                                        },
+                                    ));
+                                    if !DockInteractionCoordinator::capture(
+                                        window,
+                                        hitbox,
+                                        &pointer_capture_for_down,
+                                    ) {
+                                        window_resize_press_for_down.set(None);
+                                        controller_for_down.update(app, |controller, controller_cx| {
+                                            controller.finish_native_resize_transaction();
+                                            controller_cx.notify();
+                                        });
+                                    }
+                                }
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+
                         let core_hit = controller_for_down.update(app, |controller, _| {
                             controller
                                 .hit_floating_window(input_window_id, group, point)
@@ -1017,8 +1279,44 @@ impl Render for FloatingHost {
                     let tab_press_for_move = tab_press.clone();
                     let group_press_for_move = group_press.clone();
                     let pointer_capture_for_move = pointer_capture.clone();
+                    let window_resize_press_for_move = window_resize_press.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || !event.dragging() {
+                            return;
+                        }
+                        if let Some(press) = window_resize_press_for_move.get() {
+                            if !DockInteractionCoordinator::ensure_current(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            ) || DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_move,
+                            ) {
+                                window_resize_press_for_move.set(None);
+                                controller_for_move.update(app, |controller, controller_cx| {
+                                    controller.finish_native_resize_transaction();
+                                    controller_cx.notify();
+                                });
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_move,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            if let Ok(point) =
+                                crate::geometry::DockGeometry::point_from_gpui(event.position)
+                            {
+                                update_floating_window_resize(
+                                    &controller_for_move,
+                                    press,
+                                    point,
+                                    app,
+                                );
+                            }
+                            app.stop_propagation();
                             return;
                         }
                         let resize_owner = controller_for_move.update(app, |controller, _| {
@@ -1368,8 +1666,32 @@ impl Render for FloatingHost {
                     let tab_press_for_up = tab_press.clone();
                     let group_press_for_up = group_press.clone();
                     let pointer_capture_for_up = pointer_capture.clone();
+                    let window_resize_press_for_up = window_resize_press.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
                         if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        if let Some(press) = window_resize_press_for_up.get() {
+                            if let Ok(point) =
+                                crate::geometry::DockGeometry::point_from_gpui(event.position)
+                            {
+                                update_floating_window_resize(
+                                    &controller_for_up,
+                                    press,
+                                    point,
+                                    app,
+                                );
+                            }
+                            window_resize_press_for_up.set(None);
+                            controller_for_up.update(app, |controller, controller_cx| {
+                                controller.finish_native_resize_transaction();
+                                controller_cx.notify();
+                            });
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
+                            app.stop_propagation();
                             return;
                         }
                         let resize_owner = controller_for_up.update(app, |controller, _| {
@@ -2038,6 +2360,7 @@ impl Render for FloatingHost {
         let controller_for_escape = self.controller.clone();
         let tab_press_for_escape = self.tab_press.clone();
         let group_press_for_escape = self.group_press.clone();
+        let window_resize_press_for_escape = self.window_resize_press.clone();
         let context_menu_is_open = self.open_context_menu.is_some();
         root = root.capture_key_down(move |event, window, app| {
             if context_menu_is_open
@@ -2046,6 +2369,25 @@ impl Render for FloatingHost {
                 return;
             }
             let window_id = window.window_handle().window_id();
+            if let Some(press) = window_resize_press_for_escape.get() {
+                update_floating_window_resize(
+                    &controller_for_escape,
+                    press,
+                    press.start_pointer,
+                    app,
+                );
+                window_resize_press_for_escape.set(None);
+                controller_for_escape.update(app, |controller, controller_cx| {
+                    controller.finish_native_resize_transaction();
+                    controller_cx.notify();
+                });
+                DockInteractionCoordinator::release(
+                    window,
+                    &pointer_capture_for_escape,
+                );
+                app.stop_propagation();
+                return;
+            }
             let resize_owner = controller_for_escape.update(app, |controller, _| {
                 controller.resize_interaction().map(|interaction| interaction.window_id)
             });
