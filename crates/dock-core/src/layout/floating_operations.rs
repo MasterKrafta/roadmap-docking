@@ -1022,11 +1022,11 @@ impl Layout {
         zone: DropZone,
         metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
-        let source_floating = self.floating_groups.get(source_group_id).copied().ok_or(
-            CommandError::MissingFloatingGroup {
+        self.floating_groups
+            .get(source_group_id)
+            .ok_or(CommandError::MissingFloatingGroup {
                 group: source_group_id,
-            },
-        )?;
+            })?;
         let target_root = self.find_floating_root_containing(target_group).ok_or(
             CommandError::InvalidTarget {
                 reason: "side-by-side composition target must belong to another floating area",
