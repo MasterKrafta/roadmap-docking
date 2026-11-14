@@ -7,7 +7,7 @@ use std::{
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
     DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState,
-    GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, Size, SplitterRect,
+    GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
@@ -607,8 +607,6 @@ impl Render for FloatingHost {
                 let Some(group) = host.group else {
                     return;
                 };
-                let viewport = window.viewport_size();
-                let size = Size::new(viewport.width.as_f32(), viewport.height.as_f32());
                 let window_id = window.window_handle().window_id();
 
                 // bounds_changed() can be invoked by FloatingWindowManager while
@@ -621,12 +619,7 @@ impl Render for FloatingHost {
                     }
                     if let Some(manager) = host.manager.upgrade() {
                         let _ = manager.update(deferred_cx, |manager, manager_cx| {
-                            manager.sync_native_resize_bounds_from_viewport(
-                                group,
-                                window_id,
-                                size,
-                                manager_cx,
-                            );
+                            manager.sync_native_resize_bounds(group, window_id, manager_cx);
                         });
                     }
                 });
