@@ -879,14 +879,6 @@ impl FloatingWindowManager {
             })
             .collect::<Vec<_>>();
 
-        if !commands.is_empty() {
-            self.controller.update(cx, |controller, controller_cx| {
-                controller
-                    .dispatch_sequence_in(commands, controller_cx)
-                    .map(|_| ())
-            })?;
-        }
-
         self.window_chains = next_chains;
         for member in members {
             if let Some(panel) = self.host_registry.panel_for_group(member)
@@ -896,7 +888,7 @@ impl FloatingWindowManager {
                 self.registry.windows.insert(panel, entry);
             }
         }
-        self.schedule_chain_compaction(commands, cx);
+        self.schedule_window_chain_bounds_update(commands, cx);
         cx.notify();
         Ok(())
     }
@@ -2231,11 +2223,11 @@ impl FloatingWindowManager {
         });
     }
 
-    /// Applies chain compaction after the current reconcile update has unwound.
+    /// Applies pending WindowChain bounds after the current GPUI update unwinds.
     ///
-    /// Publishing LayoutChanged synchronously from inside reconcile would
-    /// re-enter this same GPUI entity through its controller subscription.
-    fn schedule_chain_compaction(
+    /// Publishing LayoutChanged while this entity is updating would re-enter
+    /// FloatingWindowManager through its controller subscription.
+    fn schedule_window_chain_bounds_update(
         &self,
         commands: Vec<DockCommand>,
         cx: &mut Context<Self>,
@@ -2256,7 +2248,7 @@ impl FloatingWindowManager {
                 Ok(_) => {}
                 Err(error) => tracing::warn!(
                     %error,
-                    "could not compact a Window Chain after an empty FloatingGroup was removed"
+                    "could not commit the arranged native bounds for a Floating WindowChain"
                 ),
             }
         })
@@ -2405,7 +2397,7 @@ impl FloatingWindowManager {
                 .collect::<Vec<_>>();
 
             if !commands.is_empty() {
-                self.schedule_chain_compaction(commands, cx);
+                self.schedule_window_chain_bounds_update(commands, cx);
             }
         }
 
