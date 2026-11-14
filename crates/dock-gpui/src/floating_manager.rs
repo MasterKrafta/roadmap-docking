@@ -295,6 +295,7 @@ pub struct FloatingWindowManager {
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
+    custom_resize_group: Option<FloatingGroupId>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
     registry: PanelWindowRegistry,
@@ -311,6 +312,7 @@ impl FloatingWindowManager {
             main_native_window: None,
             main_host_origin: Point::ZERO,
             native_move: None,
+            custom_resize_group: None,
             drag_host_manager: None,
             reconciling: false,
             registry: PanelWindowRegistry::default(),
@@ -551,6 +553,74 @@ impl FloatingWindowManager {
     }
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
+
+    /// Marks a floating window as being resized by the client-area gesture.
+    /// Core still receives live bounds so its geometry stays current, but the
+    /// reconciliation pass must not send the same bounds back to the HWND.
+    pub(crate) fn begin_custom_resize(&mut self, group: FloatingGroupId) -> bool {
+        if self.custom_resize_group.is_some() || self.native_move.is_some() {
+            return false;
+        }
+        let Some(entry) = self.panel_window_for_group(group) else {
+            return false;
+        };
+        if entry.native_window.is_none() {
+            return false;
+        }
+        self.custom_resize_group = Some(group);
+        true
+    }
+
+    /// Applies the current Core resize bounds to the native window without
+    /// going through the normal LayoutChanged reconciliation feedback path.
+    pub(crate) fn update_custom_resize_bounds(
+        &mut self,
+        group: FloatingGroupId,
+        bounds: Rect,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.custom_resize_group != Some(group) {
+            return false;
+        }
+        let Some(panel) = self.host_registry.panel_for_group(group) else {
+            return false;
+        };
+        let Some(mut entry) = self.registry.windows.remove(&panel) else {
+            return false;
+        };
+        if entry.host_group != Some(group) {
+            self.registry.windows.insert(panel, entry);
+            return false;
+        }
+
+        let snapshot = FloatingGroupSnapshot {
+            id: group,
+            bounds,
+            z_order: 0,
+            minimum_size: None,
+            horizontal_resize_minimum_widths: None,
+            panels: Vec::new(),
+        };
+        self.sync_window_bounds(&mut entry, &snapshot, cx);
+        let applied = entry.bounds == bounds;
+        self.registry.windows.insert(panel, entry);
+        applied
+    }
+
+    /// Ends the custom resize transaction and performs one final reconciliation.
+    pub(crate) fn finish_custom_resize(
+        &mut self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.custom_resize_group != Some(group) {
+            return;
+        }
+        self.custom_resize_group = None;
+        self.reconcile(cx);
+        cx.notify();
+    }
+
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
         self.native_move
             .is_some_and(|state| state.group == group && state.hide_header)
@@ -583,7 +653,7 @@ impl FloatingWindowManager {
         // Native Floating-window moves are tracked independently of GPUI focus.
         // Moving over another managed host can transfer foreground activation;
         // the native move loop must keep running until mouse-up or Escape.
-        if self.native_move_active() {
+        if self.native_move_active() || self.custom_resize_group.is_some() {
             return true;
         }
 
@@ -1421,7 +1491,9 @@ impl FloatingWindowManager {
                 }
             }
 
-            self.sync_window_bounds(&mut entry, group, cx);
+            if self.custom_resize_group != Some(group.id) {
+                self.sync_window_bounds(&mut entry, group, cx);
+            }
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
                     self.restore_native_window_to_monitor(&mut entry, areas)
