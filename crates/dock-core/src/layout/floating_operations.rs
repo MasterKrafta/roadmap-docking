@@ -1053,8 +1053,8 @@ impl Layout {
             },
         )?;
 
-        let (source_columns, source_ratios, source_was_split) = match self.nodes.get(source_root) {
-            Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
+        let (source_columns, source_was_split) = match self.nodes.get(source_root) {
+            Some(Node::Column(_)) => (vec![source_root], false),
             Some(Node::Split(split))
                 if split.axis == Axis::X
                     && split
@@ -1062,7 +1062,7 @@ impl Layout {
                         .iter()
                         .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
             {
-                (split.children.clone(), split.ratios.clone(), true)
+                (split.children.clone(), true)
             }
             _ => {
                 return Err(CommandError::InvalidTarget {
@@ -1070,8 +1070,8 @@ impl Layout {
                 });
             }
         };
-        let (target_columns, target_ratios, target_was_split) = match self.nodes.get(target_root) {
-            Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
+        let (target_columns, target_was_split) = match self.nodes.get(target_root) {
+            Some(Node::Column(_)) => (vec![target_root], false),
             Some(Node::Split(split))
                 if split.axis == Axis::X
                     && split
@@ -1079,7 +1079,7 @@ impl Layout {
                         .iter()
                         .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
             {
-                (split.children.clone(), split.ratios.clone(), true)
+                (split.children.clone(), true)
             }
             _ => {
                 return Err(CommandError::InvalidTarget {
