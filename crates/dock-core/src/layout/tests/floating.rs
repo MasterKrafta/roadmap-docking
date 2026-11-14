@@ -2274,7 +2274,7 @@ fn column_slot_uses_the_area_of_its_main_or_floating_column() {
 
 
 #[test]
-fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_stationary() {
+fn floating_native_edge_resize_only_updates_composition_bounds() {
     let metrics = DockMetrics::default();
 
     let make_layout = || {
@@ -2323,139 +2323,64 @@ fn floating_native_edge_resize_changes_only_the_edge_column_and_keeps_splitter_s
         )
     };
 
-    // Resizing the right edge expands only the right Column.
-    let (mut right_layout, floating, root, left_column, right_column, initial_bounds) =
-        make_layout();
-    let right_resize = right_layout
-        .apply(
-            DockCommand::ResizeFloatingBoundsFromEdge {
-                group: floating,
-                bounds: Rect::new(
-                    initial_bounds.origin,
-                    Size::new(664.0, initial_bounds.size.height),
-                ),
-                edge: crate::FloatingResizeEdge::Right,
-                scale_factor: 1.0,
-            },
-            &metrics,
-        )
-        .unwrap();
-    let right_rects = right_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(right_rects.columns[0].column, left_column);
-    assert_eq!(right_rects.columns[0].rect.size.width, 280.0);
-    assert_eq!(right_rects.columns[1].column, right_column);
-    assert_eq!(right_rects.columns[1].rect.size.width, 380.0);
-    assert_eq!(
-        initial_bounds.origin.x + right_rects.columns[0].rect.size.width,
-        initial_bounds.origin.x + 280.0,
-        "right-edge resize must not move the internal Split"
-    );
-    assert!(matches!(
-        right_layout.node(root),
-        Some(Node::Split(split))
-            if (split.ratios[0] - 280.0 / 660.0).abs() < 1.0e-4
-                && (split.ratios[1] - 380.0 / 660.0).abs() < 1.0e-4
-    ));
-    assert_eq!(right_layout.validate(&metrics), Ok(()));
+    // Both native edges send the actual frame bounds. The edge does not
+    // select a Column: the full composition is laid out inside the new frame.
+    for edge in [crate::FloatingResizeEdge::Left, crate::FloatingResizeEdge::Right] {
+        let (mut layout, floating, root, left_column, right_column, initial_bounds) =
+            make_layout();
+        let resized_bounds = Rect::new(
+            Point::new(-50.0, initial_bounds.origin.y),
+            Size::new(664.0, initial_bounds.size.height),
+        );
+        let outcome = layout
+            .apply(
+                DockCommand::ResizeFloatingBoundsFromEdge {
+                    group: floating,
+                    bounds: resized_bounds,
+                    edge,
+                    scale_factor: 1.5,
+                },
+                &metrics,
+            )
+            .unwrap();
 
-    right_layout.apply(right_resize.inverse.unwrap(), &metrics).unwrap();
-    let restored_rects = right_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(
-        restored_rects.floating_groups[0].rect,
-        Rect::new(Point::ZERO, initial_bounds.size)
-    );
-    assert_eq!(restored_rects.columns[0].rect.size.width, 280.0);
-    assert_eq!(restored_rects.columns[1].rect.size.width, 280.0);
+        let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+        assert_eq!(rects.columns[0].column, left_column);
+        assert_eq!(rects.columns[0].rect.size.width, 330.0);
+        assert_eq!(rects.columns[1].column, right_column);
+        assert_eq!(rects.columns[1].rect.origin.x, 334.0);
+        assert_eq!(rects.columns[1].rect.size.width, 330.0);
+        assert_eq!(
+            rects.columns[1].rect.origin.x + rects.columns[1].rect.size.width,
+            664.0,
+            "the final Column must end exactly at the window client edge"
+        );
+        assert_eq!(
+            layout.floating_group(floating).unwrap().bounds,
+            resized_bounds,
+        );
+        assert!(matches!(
+            layout.node(root),
+            Some(Node::Split(split)) if split.ratios == vec![0.5, 0.5]
+        ));
+        assert!(matches!(
+            layout.node(left_column),
+            Some(Node::Column(column)) if column.width == 280.0
+        ));
+        assert!(matches!(
+            layout.node(right_column),
+            Some(Node::Column(column)) if column.width == 280.0
+        ));
+        assert_eq!(layout.validate(&metrics), Ok(()));
 
-    // Resizing the left edge expands only the left Column. Its right boundary
-    // stays at the same screen coordinate, so the internal Split does not move.
-    let (mut left_layout, floating, _, left_column, right_column, initial_bounds) =
-        make_layout();
-    let left_resized_bounds = Rect::new(
-        Point::new(-50.0, initial_bounds.origin.y),
-        Size::new(664.0, initial_bounds.size.height),
-    );
-    left_layout
-        .apply(
-            DockCommand::ResizeFloatingBoundsFromEdge {
-                group: floating,
-                bounds: left_resized_bounds,
-                edge: crate::FloatingResizeEdge::Left,
-                scale_factor: 1.5,
-            },
-            &metrics,
-        )
-        .unwrap();
-    let left_rects = left_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(left_rects.columns[0].column, left_column);
-    assert_eq!(left_rects.columns[0].rect.size.width, 380.0);
-    assert_eq!(left_rects.columns[1].column, right_column);
-    assert_eq!(left_rects.columns[1].rect.size.width, 280.0);
-    assert_eq!(
-        left_layout.floating_group(floating).unwrap().bounds.origin.x,
-        -50.0,
-        "the left edge origin must use physical pixels at the destination DPI"
-    );
-    assert_eq!(
-        left_resized_bounds.origin.x + left_rects.columns[0].rect.size.width * 1.5,
-        initial_bounds.origin.x + 280.0 * 1.5,
-        "left-edge resize must keep the internal Split at its physical screen coordinate"
-    );
-    assert_eq!(left_layout.validate(&metrics), Ok(()));
-
-    // Shrinking from the right edge reduces only the right Column, down
-    // to Core's minimum expanded width, while the left Column and splitter stay fixed.
-    let (mut shrink_layout, floating, _, left_column, right_column, initial_bounds) =
-        make_layout();
-    let minimum_edge_width = metrics.min_column_width;
-    let shrink_delta = minimum_edge_width - 280.0;
-    shrink_layout
-        .apply(
-            DockCommand::ResizeFloatingBoundsFromEdge {
-                group: floating,
-                bounds: Rect::new(
-                    initial_bounds.origin,
-                    Size::new(
-                        initial_bounds.size.width + shrink_delta,
-                        initial_bounds.size.height,
-                    ),
-                ),
-                edge: crate::FloatingResizeEdge::Right,
-                scale_factor: 1.0,
-            },
-            &metrics,
-        )
-        .unwrap();
-    let shrink_rects = shrink_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(shrink_rects.columns[0].column, left_column);
-    assert_eq!(shrink_rects.columns[0].rect.size.width, 280.0);
-    assert_eq!(shrink_rects.columns[1].column, right_column);
-    assert_eq!(shrink_rects.columns[1].rect.size.width, minimum_edge_width);
-    assert_eq!(
-        shrink_rects.floating_groups[0].rect.size.width,
-        initial_bounds.size.width + shrink_delta
-    );
-    assert_eq!(shrink_layout.validate(&metrics), Ok(()));
-
-    // Moving a Floating window changes both outer edges equally and must not
-    // resize either Column.
-    let (mut moved_layout, floating, _, _, _, initial_bounds) = make_layout();
-    moved_layout
-        .apply(
-            DockCommand::ResizeFloatingBounds {
-                group: floating,
-                bounds: Rect::new(
-                    Point::new(150.0, initial_bounds.origin.y),
-                    initial_bounds.size,
-                ),
-            },
-            &metrics,
-        )
-        .unwrap();
-    let moved_rects = moved_layout.compute_floating_rects(floating, &metrics).unwrap();
-    assert_eq!(moved_rects.columns[0].rect.size.width, 280.0);
-    assert_eq!(moved_rects.columns[1].rect.size.width, 280.0);
-    assert_eq!(moved_layout.validate(&metrics), Ok(()));
+        // Undo restores the window rectangle; the composition ratio and saved
+        // Column widths were never rewritten by native frame resizing.
+        layout.apply(outcome.inverse.unwrap(), &metrics).unwrap();
+        let restored = layout.compute_floating_rects(floating, &metrics).unwrap();
+        assert_eq!(restored.columns[0].rect.size.width, 280.0);
+        assert_eq!(restored.columns[1].rect.size.width, 280.0);
+        assert_eq!(restored.floating_groups[0].rect.size.width, 564.0);
+    }
 }
 
 #[test]
