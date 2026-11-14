@@ -1086,6 +1086,132 @@ fn floating_geometry_is_local_and_independent_of_main_viewport_and_other_windows
     assert_eq!(first.floating_groups[0].rect.size, Size::new(1420.0, 960.0));
 }
 #[test]
+fn floating_split_columns_fill_window_by_ratios_and_respect_minimums() {
+    let metrics = DockMetrics {
+        min_column_width: 180.0,
+        ..DockMetrics::default()
+    };
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let panel_constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(200.0, 160.0),
+        None,
+        false,
+    );
+
+    let (_, left_panel) = builder.panel(key("floating-ratio-left"), panel_constraints.clone());
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, right_panel) = builder.panel(key("floating-ratio-right"), panel_constraints);
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let right_column = builder.column(
+        280.0,
+        ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.25, 0.75]);
+    let initial_bounds = Rect::new(Point::new(100.0, 50.0), Size::new(804.0, 320.0));
+    let floating = builder.floating_group(root, initial_bounds, 1);
+    let mut layout = builder.build();
+
+    let initial = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(initial.columns[0].rect.origin, Point::ZERO);
+    assert_eq!(initial.columns[0].rect.size.width, 200.0);
+    assert_eq!(initial.columns[1].rect.origin.x, 204.0);
+    assert_eq!(initial.columns[1].rect.size.width, 600.0);
+    assert_eq!(
+        initial.columns[1].rect.origin.x + initial.columns[1].rect.size.width,
+        initial.floating_groups[0].rect.size.width,
+        "the last Column must finish exactly at the window's client edge"
+    );
+
+    // Resizing the native window changes only its bounds. The composition
+    // redistributes the available client width using its existing Split ratios.
+    layout
+        .apply(
+            crate::DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(1204.0, initial_bounds.size.height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let widened = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(widened.columns[0].rect.size.width, 300.0);
+    assert_eq!(widened.columns[1].rect.size.width, 900.0);
+
+    // Below a Column's minimum, weighted allocation pins that Column at its
+    // minimum and gives the remaining space to its neighbour without overlap.
+    layout
+        .apply(
+            crate::DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(504.0, initial_bounds.size.height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let narrowed = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(narrowed.columns[0].rect.size.width, 180.0);
+    assert_eq!(narrowed.columns[1].rect.size.width, 320.0);
+    assert_eq!(
+        narrowed.columns[1].rect.origin.x + narrowed.columns[1].rect.size.width,
+        504.0,
+    );
+
+    // Core also clamps a frame request below the sum of Column minimums.
+    layout
+        .apply(
+            crate::DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(300.0, initial_bounds.size.height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let minimum = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(minimum.floating_groups[0].rect.size.width, 364.0);
+    assert_eq!(minimum.columns[0].rect.size.width, 180.0);
+    assert_eq!(minimum.columns[1].rect.size.width, 180.0);
+    assert_eq!(
+        minimum.columns[1].rect.origin.x + minimum.columns[1].rect.size.width,
+        364.0,
+    );
+
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if split.ratios == vec![0.25, 0.75]
+    ));
+    assert!(matches!(
+        layout.node(left_column),
+        Some(Node::Column(column)) if column.width == 280.0
+    ));
+    assert!(matches!(
+        layout.node(right_column),
+        Some(Node::Column(column)) if column.width == 280.0
+    ));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn vertical_split_reports_content_extent_when_child_minimums_do_not_fit() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
