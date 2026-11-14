@@ -290,7 +290,7 @@ impl FloatingWindowResizeEdge {
 struct FloatingWindowResizePress {
     group: FloatingGroupId,
     edge: FloatingWindowResizeEdge,
-    start_pointer: Point,
+    start_cursor: platform::PhysicalPoint,
     start_bounds: Rect,
     scale_factor: f32,
 }
@@ -355,12 +355,12 @@ fn floating_window_resize_edge(
 
 fn floating_window_resize_bounds(
     press: FloatingWindowResizePress,
-    point: Point,
+    delta: Point,
     minimum: dock_core::Size,
     horizontal_minimums: Option<(f32, f32)>,
 ) -> (Rect, Option<dock_core::FloatingResizeEdge>) {
-    let delta_x = point.x - press.start_pointer.x;
-    let delta_y = point.y - press.start_pointer.y;
+    let delta_x = delta.x;
+    let delta_y = delta.y;
     let mut bounds = press.start_bounds;
     let horizontal_edge = press.edge.horizontal();
 
@@ -404,7 +404,7 @@ fn floating_window_resize_bounds(
 fn floating_window_resize_command(
     controller: &DockController,
     press: FloatingWindowResizePress,
-    point: Point,
+    delta: Point,
 ) -> Option<DockCommand> {
     let layout = controller.layout();
     let metrics = controller.metrics();
@@ -414,7 +414,7 @@ fn floating_window_resize_command(
         .ok()
         .flatten();
     let (bounds, edge) =
-        floating_window_resize_bounds(press, point, minimum, horizontal_minimums);
+        floating_window_resize_bounds(press, delta, minimum, horizontal_minimums);
 
     Some(match edge {
         Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
@@ -430,14 +430,14 @@ fn floating_window_resize_command(
     })
 }
 
-fn update_floating_window_resize(
+fn apply_floating_window_resize_delta(
     controller: &Entity<DockController>,
     press: FloatingWindowResizePress,
-    point: Point,
+    delta: Point,
     app: &mut gpui::App,
 ) {
     let command = controller.update(app, |controller, _| {
-        floating_window_resize_command(controller, press, point)
+        floating_window_resize_command(controller, press, delta)
     });
     if let Some(command) = command {
         controller.update(app, |controller, controller_cx| {
@@ -450,6 +450,28 @@ fn update_floating_window_resize(
             }
         });
     }
+}
+
+fn update_floating_window_resize(
+    controller: &Entity<DockController>,
+    manager: &WeakEntity<FloatingWindowManager>,
+    press: FloatingWindowResizePress,
+    app: &mut gpui::App,
+) {
+    // Use the desktop cursor, not event.position: after each resize frame the
+    // HWND moves with its left/top edge, so window-local coordinates move too.
+    let Some((cursor, _)) = manager.upgrade().and_then(|manager| {
+        manager.update(app, |manager, _| manager.native_pointer_for_group(press.group))
+    }) else {
+        return;
+    };
+    let delta = Point::new(
+        (i64::from(cursor.x) - i64::from(press.start_cursor.x)) as f32
+            / press.scale_factor,
+        (i64::from(cursor.y) - i64::from(press.start_cursor.y)) as f32
+            / press.scale_factor,
+    );
+    apply_floating_window_resize_delta(controller, press, delta, app);
 }
 
 #[derive(Clone, Copy)]
@@ -998,15 +1020,14 @@ impl Render for FloatingHost {
                                     .floating_group(group)
                                     .map(|floating| floating.bounds)
                             });
-                            let scale_factor = manager_for_down
-                                .upgrade()
-                                .and_then(|manager| {
-                                    manager.update(app, |manager, _| {
-                                        manager.native_scale_factor_for_group(group)
-                                    })
+                            let pointer_start = manager_for_down.upgrade().and_then(|manager| {
+                                manager.update(app, |manager, _| {
+                                    manager.native_pointer_for_group(group)
                                 })
-                                .unwrap_or(1.0);
-                            if let Some(start_bounds) = start_bounds {
+                            });
+                            if let (Some(start_bounds), Some((start_cursor, scale_factor))) =
+                                (start_bounds, pointer_start)
+                            {
                                 let transaction_started = controller_for_down.update(app, |controller, _| {
                                     controller.begin_native_resize_transaction()
                                 });
@@ -1015,7 +1036,7 @@ impl Render for FloatingHost {
                                         FloatingWindowResizePress {
                                             group,
                                             edge,
-                                            start_pointer: point,
+                                            start_cursor,
                                             start_bounds,
                                             scale_factor,
                                         },
@@ -1306,16 +1327,12 @@ impl Render for FloatingHost {
                                 app.stop_propagation();
                                 return;
                             }
-                            if let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            {
-                                update_floating_window_resize(
-                                    &controller_for_move,
-                                    press,
-                                    point,
-                                    app,
-                                );
-                            }
+                            update_floating_window_resize(
+                                &controller_for_move,
+                                &manager_for_move,
+                                press,
+                                app,
+                            );
                             app.stop_propagation();
                             return;
                         }
@@ -1672,16 +1689,12 @@ impl Render for FloatingHost {
                             return;
                         }
                         if let Some(press) = window_resize_press_for_up.get() {
-                            if let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            {
-                                update_floating_window_resize(
-                                    &controller_for_up,
-                                    press,
-                                    point,
-                                    app,
-                                );
-                            }
+                            update_floating_window_resize(
+                                &controller_for_up,
+                                &manager_for_up,
+                                press,
+                                app,
+                            );
                             window_resize_press_for_up.set(None);
                             controller_for_up.update(app, |controller, controller_cx| {
                                 controller.finish_native_resize_transaction();
@@ -2370,10 +2383,10 @@ impl Render for FloatingHost {
             }
             let window_id = window.window_handle().window_id();
             if let Some(press) = window_resize_press_for_escape.get() {
-                update_floating_window_resize(
+                apply_floating_window_resize_delta(
                     &controller_for_escape,
                     press,
-                    press.start_pointer,
+                    Point::ZERO,
                     app,
                 );
                 window_resize_press_for_escape.set(None);
