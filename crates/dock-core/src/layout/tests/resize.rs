@@ -837,7 +837,9 @@ fn resize_split_column_boundary_works_for_a_floating_tree() {
     let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
     builder.main_area(DockSide::Right, root);
     let mut layout = builder.build();
-    let bounds = Rect::new(Point::ZERO, Size::new(600.0, 500.0));
+    // Two preferred 280 px Columns plus the 4 px splitter exactly fill
+    // this Floating client width, so the clamp assertions start at 280 px.
+    let bounds = Rect::new(Point::ZERO, Size::new(564.0, 500.0));
 
     layout
         .apply(DockCommand::Float { node: root, bounds }, &metrics)
