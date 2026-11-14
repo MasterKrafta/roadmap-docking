@@ -649,7 +649,7 @@ impl FloatingWindowManager {
         else {
             return;
         };
-        let Some(bounds) = self.core_bounds_from_native_resize(native_window) else {
+        let Some(bounds) = self.core_bounds_from_native_window(native_window) else {
             return;
         };
         let Some(mut state) = self.native_resize.filter(|state| {
@@ -757,7 +757,7 @@ impl FloatingWindowManager {
         // Sample the HWND here as a fallback so Core cannot lag behind the
         // actual client size during short, repeated resize movements.
         if self.native_ops.is_resizing(native_window).unwrap_or(false) {
-            if let Some(bounds) = self.core_bounds_from_native_resize(native_window) {
+            if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
                 self.apply_native_resize_bounds(group, bounds, &mut state, cx);
             }
             // Refresh even when HWND bounds did not change: that can mean a
@@ -767,9 +767,7 @@ impl FloatingWindowManager {
             return true;
         }
 
-        // Process the final WM_SIZING proposal as well. In outline-only Windows
-        // resize mode GetWindowRect may still report the pre-drag HWND bounds here.
-        if let Some(bounds) = self.core_bounds_from_native_resize(native_window) {
+        if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
             self.apply_native_resize_bounds(group, bounds, &mut state, cx);
         }
         self.finish_native_resize_transaction(state, cx);
@@ -856,17 +854,6 @@ impl FloatingWindowManager {
         state: NativeResizeSession,
         cx: &mut Context<Self>,
     ) {
-        if let Some(native_window) = self
-            .panel_window_for_group(state.group)
-            .and_then(|entry| (entry.window_id == state.window_id).then_some(entry.native_window).flatten())
-            && let Err(error) = self.native_ops.clear_resize_preview(native_window)
-        {
-            tracing::debug!(
-                ?state.group,
-                %error,
-                "could not clear the completed native resize preview"
-            );
-        }
         self.native_resize = None;
         if state.transaction_started {
             self.controller.update(cx, |controller, controller_cx| {
@@ -886,38 +873,6 @@ impl FloatingWindowManager {
         let client_size = self.native_ops.client_size(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
-    }
-
-    /// Reads the latest WM_SIZING proposal, including outline-only resize mode.
-    ///
-    /// GetWindowRect describes the real HWND, which Windows may leave unchanged
-    /// until the modal sizing loop ends. Convert the proposed outer rectangle to
-    /// the corresponding client size using the HWND's current non-client frame.
-    fn core_bounds_from_native_resize_preview(
-        &self,
-        native_window: NativeWindowId,
-    ) -> Option<Rect> {
-        let preview_rect = self.native_ops.resize_preview_rect(native_window).ok()??;
-        let current_rect = self.native_ops.window_rect(native_window).ok()?;
-        let current_client_size = self.native_ops.client_size(native_window).ok()?;
-        let scale = self.native_ops.scale_factor(native_window).ok()?;
-
-        let frame_width = current_rect.width().saturating_sub(current_client_size.width).max(0);
-        let frame_height = current_rect.height().saturating_sub(current_client_size.height).max(0);
-        let preview_client_size = PhysicalSize {
-            width: preview_rect.width().checked_sub(frame_width)?,
-            height: preview_rect.height().checked_sub(frame_height)?,
-        };
-        if !preview_client_size.is_valid() {
-            return None;
-        }
-
-        DockGeometry::core_bounds_from_native(preview_rect, preview_client_size, scale)
-    }
-
-    fn core_bounds_from_native_resize(&self, native_window: NativeWindowId) -> Option<Rect> {
-        self.core_bounds_from_native_resize_preview(native_window)
-            .or_else(|| self.core_bounds_from_native_window(native_window))
     }
 
     /// Starts a thresholded native move from the shared floating DockAreaHeader.
