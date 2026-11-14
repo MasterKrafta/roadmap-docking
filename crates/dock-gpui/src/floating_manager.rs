@@ -695,6 +695,15 @@ impl FloatingWindowManager {
             start_bounds,
             transaction_started: false,
         });
+        // The OS may have changed the HWND before the first Core resize sample.
+        // Force one canonical Core -> HWND reconciliation when the modal loop ends,
+        // even if all intermediate samples were clamped to the existing layout.
+        if let Some(panel) = self.host_registry.panel_for_group(group)
+            && let Some(entry) = self.registry.windows.get_mut(&panel)
+            && entry.window_id == window_id
+        {
+            entry.native_bounds_dirty = true;
+        }
         self.schedule_native_resize(cx, group, window_id);
         true
     }
