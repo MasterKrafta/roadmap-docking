@@ -170,6 +170,16 @@ impl Layout {
                 if self.group_edge_is_same_position(group, target_group, zone) {
                     return Ok(DragDropAction::NoOp);
                 }
+                if let (
+                    DragHandle::FloatingCapture,
+                    DragPayload::FloatingGroup { group: floating_group },
+                ) = (request.handle, request.payload)
+                {
+                    return Ok(DragDropAction::Command(DockCommand::DockFloating {
+                        group: floating_group,
+                        target,
+                    }));
+                }
                 Ok(DragDropAction::Command(DockCommand::MoveColumnToTarget {
                     column,
                     target,
