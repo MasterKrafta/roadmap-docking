@@ -778,14 +778,27 @@ impl DragHostManager {
         )
         .then_some(source_window_id)
         .flatten();
-        let target_window = floating_manager
-            .update(cx, |manager, _| {
-                manager.docking_window_at_point(
-                    cursor,
-                    native_drag_host,
-                    excluded_source_window,
-                )
+        let previous_floating_target = self
+            .active
+            .as_ref()
+            .filter(|active| active.id == id)
+            .and_then(|active| match active.target_role {
+                Some(DockWindowRole::Floating { group }) => Some(group),
+                _ => None,
             });
+        let target_window = floating_manager.update(cx, |manager, _| {
+            let target = manager.docking_window_at_point(
+                cursor,
+                native_drag_host,
+                excluded_source_window,
+            );
+            if target.is_none() && matches!(payload, DragPayload::DockArea { .. }) {
+                previous_floating_target
+                    .and_then(|group| manager.floating_window_at_point(group, cursor))
+            } else {
+                target
+            }
+        });
         let source_point = floating_manager.update(cx, |manager, _| {
             manager.core_point_for_drag_source(source_host, source_window_id, cursor)
         });
