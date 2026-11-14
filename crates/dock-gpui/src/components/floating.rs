@@ -718,8 +718,6 @@ pub struct FloatingHost {
     window_resize_press: Rc<Cell<Option<FloatingWindowResizePress>>>,
     controller_observed: bool,
     manager_observed: bool,
-    native_bounds_observed: bool,
-    native_resize_observation_pending: bool,
     middle_click_closes_tabs: bool,
     /// Root focus boundary for cancelling gestures when this PanelWindow loses app focus.
     root_focus_handle: Option<FocusHandle>,
@@ -771,8 +769,6 @@ impl FloatingHost {
             window_resize_press: Rc::new(Cell::new(None)),
             controller_observed: false,
             manager_observed: false,
-            native_bounds_observed: false,
-            native_resize_observation_pending: false,
             middle_click_closes_tabs: true,
             root_focus_handle: None,
             focus_observed: false,
@@ -827,32 +823,6 @@ impl Render for FloatingHost {
                 .detach();
             self.manager_observed = true;
         }
-        if !self.native_bounds_observed {
-            cx.observe_window_bounds(window, |host, window, host_cx| {
-                let Some(group) = host.group else {
-                    return;
-                };
-                let window_id = window.window_handle().window_id();
-
-                // bounds_changed() can be invoked by FloatingWindowManager while
-                // it is already reconciling a native HWND. GPUI calls this
-                // observer synchronously, so re-entering manager.update here
-                // would panic. Defer until the current effect/update cycle ends.
-                host_cx.defer_in(window, move |host, _, deferred_cx| {
-                    if host.group != Some(group) {
-                        return;
-                    }
-                    if let Some(manager) = host.manager.upgrade() {
-                        let _ = manager.update(deferred_cx, |manager, manager_cx| {
-                            manager.sync_native_resize_bounds(group, window_id, manager_cx);
-                        });
-                    }
-                });
-            })
-            .detach();
-            self.native_bounds_observed = true;
-        }
-
         // Reuse the controller's persistent PanelId -> AnyView cache. This call
         // is idempotent; factories run only for cache misses.
         self.controller.update(cx, |controller, panel_cx| {
@@ -899,21 +869,6 @@ impl Render for FloatingHost {
             self.focus_observed = true;
         }
 
-        if !self.native_resize_observation_pending {
-            self.native_resize_observation_pending = true;
-            cx.defer_in(window, move |host, _, host_cx| {
-                host.native_resize_observation_pending = false;
-                // The permanent PanelWindow may stop hosting a group before
-                // this deferred callback runs.
-                if let Some(group) = host.group
-                    && let Some(manager) = host.manager.upgrade()
-                {
-                    manager.update(host_cx, |manager, manager_cx| {
-                        manager.observe_native_resize(group, window_id, manager_cx);
-                    });
-                }
-            });
-        }
         let snapshot = self.controller.update(cx, |controller, _| {
             floating_host_snapshot(controller, window_id, group)
         });
