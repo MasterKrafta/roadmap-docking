@@ -294,49 +294,6 @@ fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool)
     leaves_source || over_other_window
 }
 
-/// A Floating containing exactly one Group and one Panel can move as a whole.
-/// Detaching its only tab/group would only create a replacement window.
-fn floating_has_single_tab_dock(
-    layout: &dock_core::Layout,
-    floating_group: FloatingGroupId,
-    expected_group: NodeId,
-) -> bool {
-    let Some(floating) = layout.floating_group(floating_group) else {
-        return false;
-    };
-    let Some(area) = layout.dock_area(floating.area) else {
-        return false;
-    };
-    fn collect_groups(layout: &dock_core::Layout, node: NodeId, groups: &mut Vec<NodeId>) {
-        match layout.node(node) {
-            Some(Node::Split(split)) => {
-                for child in &split.children {
-                    collect_groups(layout, *child, groups);
-                }
-            }
-            Some(Node::Column(column)) => groups.extend(column.groups.iter().copied()),
-            Some(Node::Tabs(_)) => groups.push(node),
-            Some(Node::Panel(_)) | None => {}
-        }
-    }
-    let mut groups = Vec::new();
-    collect_groups(layout, area.root, &mut groups);
-    let [group] = groups.as_slice() else {
-        return false;
-    };
-    if *group != expected_group {
-        return false;
-    }
-    let Some(Node::Tabs(tabs)) = layout.node(*group) else {
-        return false;
-    };
-    let [panel] = tabs.children.as_slice() else {
-        return false;
-    };
-
-    matches!(layout.node(*panel), Some(Node::Panel(_)))
-}
-
 /// Gives the shared CompositionHeader input priority over its content.
 /// Returns Some(false) for controls.
 fn floating_dock_area_title_pointer_region(
@@ -903,30 +860,6 @@ impl Render for FloatingHost {
                                 .then_some((dock_group, controller.layout().version()))
                         });
                         if let Some((dock_group, layout_version)) = group_candidate {
-                            let is_single_tab_floating = controller_for_down.update(
-                                app,
-                                |controller, _| {
-                                    floating_has_single_tab_dock(
-                                        controller.layout(),
-                                        group,
-                                        dock_group,
-                                    )
-                                },
-                            );
-                            if is_single_tab_floating
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(
-                                        group,
-                                        point,
-                                        manager_cx,
-                                    )
-                                })
-                            {
-                                app.stop_propagation();
-                                return;
-                            }
-
                             begin_drag_at(
                                 &controller_for_down,
                                 dock_core::DragPayload::Group { group: dock_group },
@@ -971,30 +904,6 @@ impl Render for FloatingHost {
                             Some((tab_group, panel, controller.layout().version()))
                         });
                         if let Some((tab_group, panel, layout_version)) = press {
-                            let is_single_tab_floating = controller_for_down.update(
-                                app,
-                                |controller, _| {
-                                    floating_has_single_tab_dock(
-                                        controller.layout(),
-                                        group,
-                                        tab_group,
-                                    )
-                                },
-                            );
-                            if is_single_tab_floating
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(
-                                        group,
-                                        point,
-                                        manager_cx,
-                                    )
-                                })
-                            {
-                                app.stop_propagation();
-                                return;
-                            }
-
                             tab_press_for_down.set(Some(FloatingTabPress {
                                 tab_group,
                                 panel,
