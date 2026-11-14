@@ -545,10 +545,12 @@ impl Layout {
                 &self.panel_ids_in_subtree(root),
                 AllowedArea::FLOATING,
             )?;
-            return Ok(DragDropAction::Command(DockCommand::Float {
-                node: root,
-                bounds,
-            }));
+            let command = if self.profile == crate::Profile::Photoshop {
+                DockCommand::FloatMainAreaColumns { side, bounds }
+            } else {
+                DockCommand::Float { node: root, bounds }
+            };
+            return Ok(DragDropAction::Command(command));
         }
 
         if let Some(group) = single_group_in_subtree(self, root) {

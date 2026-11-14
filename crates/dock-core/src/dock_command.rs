@@ -154,6 +154,11 @@ pub enum DockCommand {
     /// In the Photoshop profile, Panel and Tabs roots are wrapped in a single-group
     /// Column. A Split(X) of Columns is preserved as one multi-column floating composition.
     Float { node: NodeId, bounds: Rect },
+    /// Detach every Column in one Main DockArea into its own FloatingGroup.
+    ///
+    /// The returned IDs preserve the original Column order. The GPUI adapter
+    /// uses that order to register one Window Chain after the Core transaction.
+    FloatMainAreaColumns { side: DockSide, bounds: Rect },
     /// Move a floating window by setting its new origin.
     MoveFloating {
         group: FloatingGroupId,
@@ -360,6 +365,10 @@ mod tests {
             DockCommand::Float {
                 node: NodeId::null(),
                 bounds: Rect::new(Point::ZERO, Size::new(400.0, 300.0)),
+            },
+            DockCommand::FloatMainAreaColumns {
+                side: DockSide::Right,
+                bounds: Rect::new(Point::ZERO, Size::new(900.0, 600.0)),
             },
             DockCommand::MoveFloating {
                 group: FloatingGroupId::null(),

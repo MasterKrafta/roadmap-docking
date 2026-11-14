@@ -14,7 +14,7 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, DragDropAction,
+    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide, DragDropAction,
     DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
     VerticalOverflow,
@@ -960,14 +960,14 @@ impl DragHostManager {
         let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
         let can_promote_existing_window = restored_free_area_bounds.is_some();
 
-        let finished = self.controller.update(cx, |controller, controller_cx| {
+        let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
                 let _ = controller.cancel_pointer_interaction();
                 let _ = controller.drag_mut().session_mut().reset();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
                 controller_cx.notify();
-                return false;
+                return (false, Vec::new());
             };
 
             let request = match controller
@@ -982,6 +982,7 @@ impl DragHostManager {
                 }
             };
 
+            let mut created_groups = Vec::new();
             if let Some(mut request) = request {
                 if request.target == Some(DropTarget::FreeArea) {
                     if let Some(bounds) = free_area_bounds {
@@ -1006,8 +1007,15 @@ impl DragHostManager {
                             } else {
                                 controller.dispatch_in(command, controller_cx)
                             };
-                            if let Err(error) = result {
-                                tracing::warn!(?id, %error, "DragHost drop command was rejected");
+                            match result {
+                                Ok(outcome) => {
+                                    if let Some(CommandValue::FloatingGroups(groups)) = outcome.actual_value {
+                                        created_groups = groups;
+                                    }
+                                }
+                                Err(error) => {
+                                    tracing::warn!(?id, %error, "DragHost drop command was rejected");
+                                }
                             }
                         }
                         Err(error) => controller.report_drop_resolution_error_in(error, controller_cx),
@@ -1019,8 +1027,26 @@ impl DragHostManager {
             controller.drag_mut().clear_resolver();
             controller.drag_mut().clear_layout_version();
             controller_cx.notify();
-            true
+            (true, created_groups)
         });
+
+        // Register the complete source-ordered chain before adopting the first
+        // DragHost HWND. Adoption calls reconcile(), which then creates one
+        // persistent native Floating window for each remaining FloatingGroup.
+        if finished && created_groups.len() > 1 {
+            let registered = self.floating_manager.as_ref().is_some_and(|manager| {
+                manager.update(cx, |manager, _| {
+                    manager.register_window_chain(&created_groups)
+                })
+            });
+            if !registered {
+                tracing::error!(
+                    ?id,
+                    groups = created_groups.len(),
+                    "could not register the Core-created Main DockArea Window Chain"
+                );
+            }
+        }
 
         if let Some(panel) = panel
             && !finished

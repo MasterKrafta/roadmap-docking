@@ -9,6 +9,8 @@ use crate::{FloatingGroupId, NodeId, PanelId, Rect, Size};
 pub enum CommandValue {
     /// Identifier of the new floating composition created by a Float command.
     FloatingGroup(FloatingGroupId),
+    /// Ordered identifiers of the FloatingGroups created from one Main DockArea.
+    FloatingGroups(Vec<FloatingGroupId>),
     /// Identifier of a panel instance returned by an OpenPanel command.
     PanelId(PanelId),
     /// Effective width of a resized column, in logical pixels.

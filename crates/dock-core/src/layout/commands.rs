@@ -108,6 +108,7 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::Float { .. }
+            | DockCommand::FloatMainAreaColumns { .. }
             | DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }

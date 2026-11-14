@@ -12,6 +12,9 @@ impl Layout {
     ) -> Result<CommandApplication, CommandError> {
         match command {
             DockCommand::Float { node, bounds } => self.apply_float_command(node, bounds, metrics),
+            DockCommand::FloatMainAreaColumns { side, bounds } => {
+                self.apply_float_main_area_columns_command(side, bounds, metrics)
+            },
             DockCommand::MoveFloating { .. }
             | DockCommand::ResizeFloating { .. }
             | DockCommand::ResizeFloatingBounds { .. }
@@ -161,12 +164,148 @@ impl Layout {
         self.remember_subtree_dock_locations(*node);
         self.detach_node(*node)?;
         let root = self.floating_root_for_node(*node, bounds.size.width, metrics)?;
-        let area_id = self.dock_areas.insert(DockArea::floating(root));
-        let floating_group = self
-            .floating_groups
-            .insert(FloatingGroup::new(area_id, *bounds, next_z));
+        let floating_group = self.insert_floating_group(root, *bounds, next_z);
         Ok(CommandApplication {
             actual_value: Some(CommandValue::FloatingGroup(floating_group)),
+            inverse: None,
+            persistent: true,
+        })
+    }
+
+    fn insert_floating_group(
+        &mut self,
+        root: NodeId,
+        bounds: Rect,
+        z_order: i32,
+    ) -> FloatingGroupId {
+        let area_id = self.dock_areas.insert(DockArea::floating(root));
+        self.floating_groups
+            .insert(FloatingGroup::new(area_id, bounds, z_order))
+    }
+
+    pub(super) fn apply_float_main_area_columns_command(
+        &mut self,
+        side: &DockSide,
+        bounds: &Rect,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if self.profile != crate::Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "floating each Main DockArea Column independently is available only in the Photoshop profile",
+            });
+        }
+        bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "bounds",
+                reason: geometry_error_reason(error),
+            })?;
+
+        let root = self
+            .main_area(*side)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Main DockArea source no longer exists",
+            })?;
+        let (columns, remove_split_root) = match self.nodes.get(root) {
+            Some(Node::Column(_)) => (vec![root], false),
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                    }) =>
+            {
+                (split.children.clone(), true)
+            }
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Main DockArea source must be one Column or a horizontal Split of Columns",
+                });
+            }
+        };
+        if columns.is_empty() {
+            return Err(CommandError::InvalidTarget {
+                reason: "Main DockArea has no Columns to float",
+            });
+        }
+
+        let moving_panels = self.panel_ids_in_subtree(root);
+        self.validate_panel_ids_allowed_for_area(&moving_panels, AllowedArea::FLOATING)?;
+
+        // Main Split(X) lays direct Columns out using their effective model
+        // widths, with splitter gaps between them. Native windows are contiguous,
+        // so preserve each width while omitting those splitter gaps.
+        let widths = columns
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "Main DockArea contains a non-Column child",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if widths.iter().any(|width| !width.is_finite() || *width <= 0.0) {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "every floating Column width must be finite and positive",
+            });
+        }
+
+        let content_width = widths.iter().sum::<f32>();
+        let splitter_width = metrics.splitter_thickness * columns.len().saturating_sub(1) as f32;
+        let required_source_width = content_width + splitter_width;
+        if !required_source_width.is_finite()
+            || required_source_width > bounds.size.width + PIXEL_TOLERANCE
+        {
+            return Err(CommandError::InvalidValue {
+                field: "bounds",
+                reason: "Main DockArea bounds are narrower than its rendered Columns and splitters",
+            });
+        }
+
+        self.remember_subtree_dock_locations(root);
+        let first_z_order = self.next_floating_z_order()?;
+        self.detach_node(root)?;
+        if remove_split_root {
+            self.nodes.remove(root);
+        }
+
+        let mut next_x = bounds.origin.x;
+        let mut groups = Vec::with_capacity(columns.len());
+        for (index, (column, width)) in columns.into_iter().zip(widths).enumerate() {
+            let z_offset = i32::try_from(index).map_err(|_| CommandError::InvalidValue {
+                field: "z_order",
+                reason: "Main DockArea has too many Columns to assign floating z-order",
+            })?;
+            let z_order = first_z_order.checked_add(z_offset).ok_or(
+                CommandError::InvalidValue {
+                    field: "z_order",
+                    reason: "floating z-order overflow while creating Main DockArea windows",
+                },
+            )?;
+            let floating_bounds = Rect::new(
+                Point::new(next_x, bounds.origin.y),
+                Size::new(width, bounds.size.height),
+            );
+            floating_bounds
+                .validate_non_empty()
+                .map_err(|error| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: geometry_error_reason(error),
+                })?;
+            groups.push(self.insert_floating_group(column, floating_bounds, z_order));
+            next_x += width;
+            if !next_x.is_finite() {
+                return Err(CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: "contiguous Floating window positions overflowed",
+                });
+            }
+        }
+
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::FloatingGroups(groups)),
             inverse: None,
             persistent: true,
         })

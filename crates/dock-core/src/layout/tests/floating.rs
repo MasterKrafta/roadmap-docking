@@ -2514,3 +2514,101 @@ fn floating_single_column_edge_resize_keeps_column_filling_the_window() {
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomically() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("float-main-left-area").unwrap(),
+        descriptors()[0].1,
+    );
+    let left_tabs = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        260.0,
+        crate::ColumnMode::Expanded,
+        vec![left_tabs],
+        vec![1.0],
+    );
+    let left_area = builder.main_area(DockSide::Left, left_column);
+
+    let widths = [240.0, 340.0, 280.0];
+    let mut source_columns = Vec::new();
+    for (index, width) in widths.into_iter().enumerate() {
+        let (_, panel) = builder.panel(
+            PanelKey::new(format!("float-main-column-{index}")).unwrap(),
+            descriptors()[0].1,
+        );
+        let tabs = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            width,
+            crate::ColumnMode::Expanded,
+            vec![tabs],
+            vec![1.0],
+        );
+        source_columns.push(column);
+    }
+    let source_split = builder.split(
+        Axis::X,
+        source_columns.clone(),
+        vec![0.75, 0.15, 0.10],
+    );
+    builder.main_area(DockSide::Right, source_split);
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let origin = Point::new(120.0, 80.0);
+    let height = 640.0;
+    let source_width =
+        widths.iter().sum::<f32>() + metrics.splitter_thickness * (widths.len() - 1) as f32;
+    let outcome = layout
+        .apply(
+            DockCommand::FloatMainAreaColumns {
+                side: DockSide::Right,
+                bounds: Rect::new(origin, Size::new(source_width, height)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let created_groups = match outcome.actual_value {
+        Some(CommandValue::FloatingGroups(groups)) => groups,
+        other => panic!("expected ordered FloatingGroup IDs, got {other:?}"),
+    };
+    assert_eq!(created_groups.len(), source_columns.len());
+    assert_eq!(outcome.new_version, 1);
+    assert_eq!(layout.version(), 1);
+    assert!(layout.main_area(DockSide::Right).is_none());
+    assert_eq!(layout.main_area(DockSide::Left).unwrap().root, left_column);
+    assert_eq!(layout.dock_area(left_area).unwrap().root, left_column);
+    assert!(layout.node(source_split).is_none());
+
+    let mut expected_x = origin.x;
+    for ((group_id, column_id), width) in created_groups
+        .iter()
+        .copied()
+        .zip(source_columns.iter().copied())
+        .zip(widths)
+    {
+        let floating = layout
+            .floating_group(group_id)
+            .expect("each source Column must have its own FloatingGroup");
+        assert_eq!(
+            layout.dock_area(floating.area).unwrap().root,
+            column_id,
+            "FloatingGroup order must match the original Split(X) order"
+        );
+        assert_eq!(
+            floating.bounds,
+            Rect::new(Point::new(expected_x, origin.y), Size::new(width, height))
+        );
+        assert!(matches!(layout.node(column_id), Some(Node::Column(_))));
+        expected_x += width;
+    }
+
+    assert_eq!(layout.floating_groups().count(), 3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+

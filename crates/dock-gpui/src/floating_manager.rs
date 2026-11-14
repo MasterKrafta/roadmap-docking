@@ -579,6 +579,37 @@ impl FloatingWindowManager {
         self.window_chains.remove_member(group)
     }
 
+    /// Registers the ordered Core result of one Main DockArea tear-off.
+    ///
+    /// This method deliberately does not reconcile: DragHost must establish
+    /// the chain before its native HWND is adopted and reconciliation creates
+    /// the remaining persistent Floating windows.
+    pub(crate) fn register_window_chain(
+        &mut self,
+        groups: &[FloatingGroupId],
+    ) -> bool {
+        if groups.is_empty() {
+            return false;
+        }
+        if groups.len() == 1 {
+            return true;
+        }
+
+        let mut seen = HashSet::new();
+        if !groups.iter().all(|group| seen.insert(*group)) {
+            return false;
+        }
+
+        let mut next = self.window_chains.clone();
+        for pair in groups.windows(2) {
+            if !next.link_after(pair[0], pair[1]) {
+                return false;
+            }
+        }
+        self.window_chains = next;
+        true
+    }
+
     /// Connects the temporary transport manager without creating an ownership cycle.
     pub(crate) fn attach_drag_host_manager(
         &mut self,
