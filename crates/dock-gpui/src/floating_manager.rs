@@ -398,15 +398,58 @@ fn floating_groups_in_native_z_order(
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct NativeFrameGeometry {
+    outer_width: f32,
+    visible_left_inset: f32,
+    visible_right_inset: f32,
+}
+
+impl NativeFrameGeometry {
+    fn from_rects(outer: platform::PhysicalRect, visible: platform::PhysicalRect) -> Option<Self> {
+        let outer_width = i64::from(outer.right) - i64::from(outer.left);
+        let visible_left_inset = i64::from(visible.left) - i64::from(outer.left);
+        let visible_right_inset = i64::from(outer.right) - i64::from(visible.right);
+
+        if outer_width <= 0
+            || visible_left_inset < 0
+            || visible_right_inset < 0
+            || visible_left_inset + visible_right_inset >= outer_width
+        {
+            return None;
+        }
+
+        Some(Self {
+            outer_width: outer_width as f32,
+            visible_left_inset: visible_left_inset as f32,
+            visible_right_inset: visible_right_inset as f32,
+        })
+    }
+
+    fn without_frame(outer_width: f32) -> Option<Self> {
+        (outer_width.is_finite() && outer_width > 0.0).then_some(Self {
+            outer_width,
+            visible_left_inset: 0.0,
+            visible_right_inset: 0.0,
+        })
+    }
+}
+
 fn arrange_contiguous_window_chain_bounds(
     mut bounds: Vec<(FloatingGroupId, Rect)>,
-    physical_widths: &[f32],
+    frames: &[NativeFrameGeometry],
     anchor: FloatingGroupId,
 ) -> Option<Vec<(FloatingGroupId, Rect)>> {
-    if bounds.len() != physical_widths.len()
-        || physical_widths
-            .iter()
-            .any(|width| !width.is_finite() || *width <= 0.0)
+    if bounds.len() != frames.len()
+        || frames.iter().any(|frame| {
+            !frame.outer_width.is_finite()
+                || frame.outer_width <= 0.0
+                || !frame.visible_left_inset.is_finite()
+                || !frame.visible_right_inset.is_finite()
+                || frame.visible_left_inset < 0.0
+                || frame.visible_right_inset < 0.0
+                || frame.visible_left_inset + frame.visible_right_inset >= frame.outer_width
+        })
     {
         return None;
     }
@@ -414,17 +457,26 @@ fn arrange_contiguous_window_chain_bounds(
     let anchor_index = bounds.iter().position(|(group, _)| *group == anchor)?;
     let anchor_origin = bounds[anchor_index].1.origin;
 
+    // Keep the anchor at its drop position. Position adjacent windows so that
+    // their DWM-visible edges touch, accounting for the invisible resize border
+    // around each HWND.
     for index in (0..anchor_index).rev() {
-        let next = bounds[index + 1].1;
-        let current = &mut bounds[index].1;
-        current.origin.x = next.origin.x - physical_widths[index];
-        current.origin.y = anchor_origin.y;
+        let next = frames[index + 1];
+        let current = frames[index];
+        bounds[index].1.origin.x = bounds[index + 1].1.origin.x
+            + next.visible_left_inset
+            - current.outer_width
+            + current.visible_right_inset;
+        bounds[index].1.origin.y = anchor_origin.y;
     }
     for index in anchor_index + 1..bounds.len() {
-        let previous = bounds[index - 1].1;
-        let current = &mut bounds[index].1;
-        current.origin.x = previous.origin.x + physical_widths[index - 1];
-        current.origin.y = anchor_origin.y;
+        let previous = frames[index - 1];
+        let current = frames[index];
+        bounds[index].1.origin.x = bounds[index - 1].1.origin.x
+            + previous.outer_width
+            - previous.visible_right_inset
+            - current.visible_left_inset;
+        bounds[index].1.origin.y = anchor_origin.y;
     }
 
     Some(bounds)
@@ -795,34 +847,51 @@ impl FloatingWindowManager {
         self.registry.windows.get(&panel)
     }
 
-    /// Returns each HWND's outer width in physical desktop pixels. Floating
-    /// Core bounds intentionally store physical origins but logical sizes, so
-    /// using Rect::size.width directly here would leave gaps at non-100% DPI.
-    fn physical_widths_for_bounds(&self, bounds: &[(FloatingGroupId, Rect)]) -> Vec<f32> {
+    /// Returns the outer HWND width and the inset to each visible frame edge.
+    /// GetWindowRect includes invisible resize borders; DWM's extended frame
+    /// bounds provide the visible edges used for a true visual edge-to-edge join.
+    fn frame_geometries_for_bounds(
+        &self,
+        bounds: &[(FloatingGroupId, Rect)],
+    ) -> Vec<NativeFrameGeometry> {
         bounds
             .iter()
             .map(|(group, bounds)| {
                 let Some(entry) = self.panel_window_for_group(*group) else {
-                    return bounds.size.width;
+                    return NativeFrameGeometry::without_frame(bounds.size.width)
+                        .expect("positive Core window width");
                 };
                 let Some(native_window) = entry.native_window else {
-                    return bounds.size.width * entry.native_scale_factor.unwrap_or(1.0);
+                    let scale = entry.native_scale_factor.unwrap_or(1.0);
+                    return NativeFrameGeometry::without_frame(bounds.size.width * scale)
+                        .unwrap_or(NativeFrameGeometry {
+                            outer_width: bounds.size.width,
+                            visible_left_inset: 0.0,
+                            visible_right_inset: 0.0,
+                        });
                 };
 
-                if let Ok(rect) = self.native_ops.window_rect(native_window) {
-                    let width = i64::from(rect.right) - i64::from(rect.left);
-                    if width > 0 {
-                        return width as f32;
-                    }
+                let outer = self.native_ops.window_rect(native_window).ok();
+                let visible = self.native_ops.visible_frame_rect(native_window).ok();
+                if let (Some(outer), Some(visible)) = (outer, visible)
+                    && let Some(geometry) = NativeFrameGeometry::from_rects(outer, visible)
+                {
+                    return geometry;
                 }
 
-                self.native_ops
+                let scale = self
+                    .native_ops
                     .scale_factor(native_window)
                     .ok()
                     .or(entry.native_scale_factor)
                     .filter(|scale| scale.is_finite() && *scale > 0.0)
-                    .map(|scale| bounds.size.width * scale)
-                    .unwrap_or(bounds.size.width)
+                    .unwrap_or(1.0);
+                NativeFrameGeometry::without_frame(bounds.size.width * scale)
+                    .unwrap_or(NativeFrameGeometry {
+                        outer_width: bounds.size.width,
+                        visible_left_inset: 0.0,
+                        visible_right_inset: 0.0,
+                    })
             })
             .collect()
     }
@@ -1965,9 +2034,9 @@ impl FloatingWindowManager {
                 reason: "window chain contains a FloatingGroup that no longer exists",
             });
         };
-        let physical_widths = self.physical_widths_for_bounds(&member_bounds);
+        let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
         let Some(bounds) =
-            arrange_contiguous_window_chain_bounds(member_bounds, &physical_widths, anchor)
+            arrange_contiguous_window_chain_bounds(member_bounds, &frame_geometries, anchor)
         else {
             return Err(dock_core::CommandError::InvalidTarget {
                 reason: "could not calculate physical widths for the Floating window chain",
@@ -2167,11 +2236,11 @@ impl FloatingWindowManager {
                 let Some(member_bounds) = member_bounds else {
                     continue;
                 };
-                let physical_widths = self.physical_widths_for_bounds(&member_bounds);
+                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
                 if let Some(anchor) = members.first().copied()
                     && let Some(bounds) = arrange_contiguous_window_chain_bounds(
                         member_bounds,
-                        &physical_widths,
+                        &frame_geometries,
                         anchor,
                     )
                 {
@@ -3774,7 +3843,9 @@ mod window_chain_registry_tests {
 
 #[cfg(test)]
 mod contiguous_window_chain_bounds_tests {
-    use super::{arrange_contiguous_window_chain_bounds, should_insert_window_before};
+    use super::{
+        NativeFrameGeometry, arrange_contiguous_window_chain_bounds, should_insert_window_before,
+    };
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
 
@@ -3793,12 +3864,13 @@ mod contiguous_window_chain_bounds_tests {
             (c, Rect::new(Point::new(900.0, 90.0), Size::new(180.0, 280.0))),
         ];
 
-        let arranged = arrange_contiguous_window_chain_bounds(
-            input,
-            &[120.0, 240.0, 180.0],
-            b,
-        )
-        .expect("anchor must belong to the chain");
+        let frames = [
+            NativeFrameGeometry::without_frame(120.0).unwrap(),
+            NativeFrameGeometry::without_frame(240.0).unwrap(),
+            NativeFrameGeometry::without_frame(180.0).unwrap(),
+        ];
+        let arranged = arrange_contiguous_window_chain_bounds(input, &frames, b)
+            .expect("anchor must belong to the chain");
 
         assert_eq!(arranged[0].1.origin, Point::new(380.0, 40.0));
         assert_eq!(arranged[1].1.origin, Point::new(500.0, 40.0));
@@ -3817,12 +3889,13 @@ mod contiguous_window_chain_bounds_tests {
             (c, Rect::new(Point::new(700.0, 48.0), Size::new(200.0, 260.0))),
         ];
 
-        let arranged = arrange_contiguous_window_chain_bounds(
-            input.clone(),
-            &[100.0, 150.0, 200.0],
-            a,
-        )
-        .expect("first member is a valid anchor");
+        let frames = [
+            NativeFrameGeometry::without_frame(100.0).unwrap(),
+            NativeFrameGeometry::without_frame(150.0).unwrap(),
+            NativeFrameGeometry::without_frame(200.0).unwrap(),
+        ];
+        let arranged = arrange_contiguous_window_chain_bounds(input.clone(), &frames, a)
+            .expect("first member is a valid anchor");
         assert_eq!(arranged[0].1.origin, Point::new(30.0, 8.0));
         assert_eq!(arranged[1].1.origin, Point::new(130.0, 8.0));
         assert_eq!(arranged[2].1.origin, Point::new(280.0, 8.0));
@@ -3830,7 +3903,7 @@ mod contiguous_window_chain_bounds_tests {
         assert!(
             arrange_contiguous_window_chain_bounds(
                 input,
-                &[100.0, 150.0, 200.0],
+                &frames,
                 FloatingGroupId::null(),
             )
             .is_none()
@@ -3838,7 +3911,7 @@ mod contiguous_window_chain_bounds_tests {
     }
 
     #[test]
-    fn uses_physical_window_widths_when_dpi_scales_logical_sizes() {
+    fn visible_frame_edges_touch_despite_invisible_resize_borders() {
         let (_ids, [a, b, c]) = groups();
         let input = vec![
             (a, Rect::new(Point::new(0.0, 20.0), Size::new(300.0, 240.0))),
@@ -3846,16 +3919,39 @@ mod contiguous_window_chain_bounds_tests {
             (c, Rect::new(Point::new(1800.0, 60.0), Size::new(200.0, 200.0))),
         ];
 
-        // The members have different monitor scales: 1.5x, 1.25x and 2x.
-        let arranged = arrange_contiguous_window_chain_bounds(
-            input,
-            &[450.0, 500.0, 400.0],
-            b,
-        )
-        .expect("physical widths must place the chain");
-        assert_eq!(arranged[0].1.origin, Point::new(550.0, 40.0));
+        // Outer widths are physical pixels. DWM-visible bounds are inset by
+        // each window's invisible resize border.
+        let frames = [
+            NativeFrameGeometry {
+                outer_width: 450.0,
+                visible_left_inset: 6.0,
+                visible_right_inset: 6.0,
+            },
+            NativeFrameGeometry {
+                outer_width: 500.0,
+                visible_left_inset: 8.0,
+                visible_right_inset: 8.0,
+            },
+            NativeFrameGeometry {
+                outer_width: 400.0,
+                visible_left_inset: 4.0,
+                visible_right_inset: 4.0,
+            },
+        ];
+        let arranged = arrange_contiguous_window_chain_bounds(input, &frames, b)
+            .expect("visible frame geometry must place the chain");
+        assert_eq!(arranged[0].1.origin, Point::new(562.0, 40.0));
         assert_eq!(arranged[1].1.origin, Point::new(1000.0, 40.0));
-        assert_eq!(arranged[2].1.origin, Point::new(1500.0, 40.0));
+        assert_eq!(arranged[2].1.origin, Point::new(1492.0, 40.0));
+
+        let a_visible_right =
+            arranged[0].1.origin.x + frames[0].outer_width - frames[0].visible_right_inset;
+        let b_visible_left = arranged[1].1.origin.x + frames[1].visible_left_inset;
+        let b_visible_right =
+            arranged[1].1.origin.x + frames[1].outer_width - frames[1].visible_right_inset;
+        let c_visible_left = arranged[2].1.origin.x + frames[2].visible_left_inset;
+        assert_eq!(a_visible_right, b_visible_left);
+        assert_eq!(b_visible_right, c_visible_left);
     }
 
     #[test]
@@ -3865,8 +3961,23 @@ mod contiguous_window_chain_bounds_tests {
             (a, Rect::new(Point::ZERO, Size::new(100.0, 200.0))),
             (b, Rect::new(Point::new(300.0, 0.0), Size::new(100.0, 200.0))),
         ];
-        assert!(arrange_contiguous_window_chain_bounds(input.clone(), &[100.0], a).is_none());
-        assert!(arrange_contiguous_window_chain_bounds(input, &[100.0, 0.0], a).is_none());
+        let valid = NativeFrameGeometry::without_frame(100.0).unwrap();
+        assert!(arrange_contiguous_window_chain_bounds(input.clone(), &[valid], a).is_none());
+        assert!(
+            arrange_contiguous_window_chain_bounds(
+                input,
+                &[
+                    valid,
+                    NativeFrameGeometry {
+                        outer_width: 100.0,
+                        visible_left_inset: 50.0,
+                        visible_right_inset: 50.0,
+                    },
+                ],
+                a,
+            )
+            .is_none()
+        );
     }
 
     #[test]
