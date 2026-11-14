@@ -1906,11 +1906,11 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
         target.bounds,
         Rect::new(
             Point::new(
-                420.0 - 300.0 - metrics.splitter_thickness,
+                420.0 - metrics.default_column_width - metrics.splitter_thickness,
                 60.0,
             ),
             Size::new(
-                300.0 + 420.0 + metrics.splitter_thickness,
+                metrics.default_column_width * 2.0 + metrics.splitter_thickness,
                 280.0,
             ),
         ),
@@ -1921,8 +1921,8 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
         Some(Node::Split(split))
             if split.axis == Axis::X
                 && split.children == vec![source_column, target_column]
-                && (split.ratios[0] - 300.0 / 720.0).abs() < 1.0e-4
-                && (split.ratios[1] - 420.0 / 720.0).abs() < 1.0e-4
+                && (split.ratios[0] - 0.5).abs() < 1.0e-4
+                && (split.ratios[1] - 0.5).abs() < 1.0e-4
     ));
     let rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
     assert_eq!(rects.splitters.len(), 1);
