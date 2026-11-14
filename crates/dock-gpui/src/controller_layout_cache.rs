@@ -78,11 +78,13 @@ impl DockController {
         group: FloatingGroupId,
         source: DropSource,
     ) -> Result<&dock_core::DropZoneResolver, ComputeRectsError> {
+        // Whole-Floating window moves use this resolver only to preview legal
+        // side-drop zones on another Floating window. The actual drop remains a
+        // native WindowChain operation and does not merge Core compositions.
         if !matches!(
             self.drag.session().state(),
             dock_core::DragState::Dragging { .. }
-        ) || self.drag.session().handle() == Some(dock_core::DragHandle::FloatingTitle)
-        {
+        ) {
             return Err(ComputeRectsError::InvalidLayoutState);
         }
 
