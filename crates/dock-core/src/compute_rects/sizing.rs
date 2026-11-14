@@ -168,7 +168,7 @@ pub(super) fn preferred_width(
         .node(id)
         .ok_or(ComputeRectsError::InvalidLayoutState)?;
     let width = match node {
-        Node::Column(column) => effective_column_width(column, metrics),
+        Node::Column(column) => column.effective_width(metrics),
         Node::Tabs(_) | Node::Panel(_) => metrics
             .default_column_width
             .max(minimum_node_size(layout, id, metrics, minimum_sizes)?.width),
@@ -194,14 +194,6 @@ pub(super) fn preferred_width(
         Err(ComputeRectsError::Geometry(
             GeometryError::ArithmeticOverflow,
         ))
-    }
-}
-
-fn effective_column_width(column: &Column, metrics: &DockMetrics) -> f32 {
-    match column.mode {
-        ColumnMode::Expanded => column.width,
-        ColumnMode::IconsAndLabels => metrics.min_column_width,
-        ColumnMode::IconsOnly => metrics.rail_width,
     }
 }
 
