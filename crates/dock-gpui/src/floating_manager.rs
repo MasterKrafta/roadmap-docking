@@ -423,13 +423,23 @@ impl FloatingWindowManager {
         self.registry.windows.get(&panel)
     }
 
-    /// Reads the destination monitor scale for a floating composition.
-    pub(crate) fn native_scale_factor_for_group(&self, group: FloatingGroupId) -> Option<f32> {
+    /// Reads the current physical cursor position and destination monitor scale.
+    ///
+    /// The pointer is sampled in desktop coordinates because the floating HWND
+    /// itself moves during a custom edge resize; window-local event coordinates
+    /// would shift with it and no longer describe the actual drag delta.
+    pub(crate) fn native_pointer_for_group(
+        &self,
+        group: FloatingGroupId,
+    ) -> Option<(PhysicalPoint, f32)> {
         let native_window = self.panel_window_for_group(group)?.native_window?;
-        self.native_ops
+        let cursor = self.native_ops.cursor_position().ok()?;
+        let scale = self
+            .native_ops
             .scale_factor(native_window)
             .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .filter(|scale| scale.is_finite() && *scale > 0.0)?;
+        Some((cursor, scale))
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
