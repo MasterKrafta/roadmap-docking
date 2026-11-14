@@ -5,8 +5,9 @@ use crate::{
 
 /// The horizontal edge of a floating native window that is being resized.
 ///
-/// Left resizes the first Column in a horizontal floating composition; Right
-/// resizes the last Column. Interior Columns keep their requested widths.
+/// In the Photoshop profile, Left resizes the first Column and Right resizes
+/// the last Column of a horizontal floating composition. Interior Columns
+/// keep their requested widths.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FloatingResizeEdge {
@@ -167,8 +168,9 @@ pub enum DockCommand {
     },
     /// Edge-aware form of ResizeFloatingBounds used by native frame resizing.
     ///
-    /// Only the first (Left) or last (Right) Column follows a horizontal window
-    /// edge; interior Columns and their splitters keep their requested positions.
+    /// In the Photoshop profile, only the first (Left) or last (Right) Column
+    /// follows a horizontal window edge; interior Columns and their splitters
+    /// keep their requested positions.
     /// The scale factor converts a constrained logical-width correction to the
     /// native physical origin when the left edge cannot reach its requested size.
     ResizeFloatingBoundsFromEdge {

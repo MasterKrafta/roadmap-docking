@@ -42,7 +42,7 @@ fn layout_split_for_floating(
         id,
         split,
         rect,
-        false,
+        true,
     )
 }
 

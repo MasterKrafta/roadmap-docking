@@ -1385,7 +1385,8 @@ impl Layout {
             ),
         );
 
-        if let Some(edge) = edge
+        if self.profile == Profile::Photoshop
+            && let Some(edge) = edge
             && let Some(Node::Split(split)) = self.nodes.get(root).cloned()
             && split.axis == Axis::X
             && split.children.iter().all(|child| {
