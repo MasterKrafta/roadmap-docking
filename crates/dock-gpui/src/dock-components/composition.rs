@@ -8,7 +8,7 @@ mod tab;
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
+    Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
     FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point, Rect,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
@@ -126,6 +126,7 @@ impl DockColumnView {
         toggle_group_menu: GroupMenuToggle,
         _middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
+        active_splitter: Option<(NodeId, usize, Axis)>,
         overflow: Option<VerticalOverflow>,
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
@@ -215,6 +216,8 @@ impl DockColumnView {
                     metrics,
                     theme,
                     raise_floating,
+                    active_splitter
+                        == Some((splitter.owner, splitter.boundary_index, splitter.axis)),
                 ));
             }
 
@@ -420,6 +423,7 @@ impl DockCompositionView {
         context_menu: crate::components::context_menu::GroupMenuToggle,
         middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
+        active_splitter: Option<(NodeId, usize, Axis)>,
         vertical_overflow: &[VerticalOverflow],
         scroll_handle: Option<ScrollHandle>,
         controller: Entity<DockController>,
@@ -488,6 +492,7 @@ impl DockCompositionView {
                 context_menu,
                 middle_click_closes_tabs,
                 &column_splitters,
+                active_splitter,
                 overflow,
                 scroll_handle,
                 controller,
