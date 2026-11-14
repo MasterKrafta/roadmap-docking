@@ -1765,8 +1765,38 @@ mod windows_impl {
             }
             assert_eq!(hit_test_code_for_resize(HTLEFT, true, true), HTLEFT as i32);
             assert_eq!(hit_test_code_for_resize(HTRIGHT, false, false), HTRIGHT as i32);
-            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false, true), HTTOPRIGHT as i32);
-            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false, false), HTBOTTOMRIGHT as i32);
+            assert_eq!(
+                hit_test_code_for_resize(HTBOTTOMRIGHT, false, false),
+                HTBOTTOMRIGHT as i32
+            );
+        }
+
+        #[test]
+        fn disabling_top_resize_keeps_the_header_corners_in_client_area() {
+            for hit_test in [HTTOP, HTTOPLEFT, HTTOPRIGHT] {
+                assert_eq!(
+                    hit_test_code_for_resize(hit_test, true, false),
+                    HTCLIENT as i32
+                );
+            }
+
+            assert_eq!(hit_test_code_for_resize(HTTOP, true, true), HTTOP as i32);
+            assert_eq!(
+                hit_test_code_for_resize(HTTOPRIGHT, false, false),
+                HTCLIENT as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTBOTTOMRIGHT, true, false),
+                HTBOTTOMRIGHT as i32
+            );
+        }
+
+        #[test]
+        fn secondary_top_left_corner_still_passes_through_to_the_previous_window() {
+            assert_eq!(
+                hit_test_code_for_resize(HTTOPLEFT, false, false),
+                HTTRANSPARENT
+            );
         }
 
         #[test]
