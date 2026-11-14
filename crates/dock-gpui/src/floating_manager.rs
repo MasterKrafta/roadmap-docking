@@ -128,6 +128,7 @@ struct PanelWindowEntry {
     bounds: Rect,
     native_min_size: Option<PhysicalSize>,
     native_horizontal_resize_min_widths: Option<(i32, i32)>,
+    native_left_resize_enabled: Option<bool>,
     native_scale_factor: Option<f32>,
     /// The HWND may differ from Core bounds after the OS-owned resize loop.
     /// A final reconciliation must write Core's canonical bounds back.
@@ -757,6 +758,7 @@ impl FloatingWindowManager {
                 bounds: current_native_bounds,
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
+                native_left_resize_enabled: None,
                 native_scale_factor: scale,
             native_bounds_dirty: false,
                 resize_enabled: false,
@@ -2265,6 +2267,7 @@ impl FloatingWindowManager {
                             );
                         }
                         entry.resize_enabled = false;
+                        entry.native_left_resize_enabled = None;
                     }
                     if entry.native_min_size.is_some() {
                         if let Err(error) = self.native_ops.set_min_size(native_window, None) {
@@ -2734,6 +2737,7 @@ impl FloatingWindowManager {
                     );
                 }
                 entry.resize_enabled = false;
+                entry.native_left_resize_enabled = None;
             }
             if entry.native_min_size.is_some() {
                 if let Err(error) = self.native_ops.set_min_size(native_window, None) {
@@ -2895,6 +2899,7 @@ impl FloatingWindowManager {
             bounds,
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
+            native_left_resize_enabled: None,
             native_scale_factor: None,
             native_bounds_dirty: false,
             resize_enabled: false,
@@ -2986,6 +2991,24 @@ impl FloatingWindowManager {
                     ?group.id,
                     %error,
                     "could not enable native floating-window resize"
+                ),
+            }
+        }
+
+        let desired_left_resize_enabled =
+            self.window_chains.members_for(group.id).first() == Some(&group.id);
+        if entry.native_left_resize_enabled != Some(desired_left_resize_enabled) {
+            match self
+                .native_ops
+                .set_left_resize_enabled(native_window, desired_left_resize_enabled)
+            {
+                Ok(()) => {
+                    entry.native_left_resize_enabled = Some(desired_left_resize_enabled);
+                }
+                Err(error) => tracing::warn!(
+                    ?group.id,
+                    %error,
+                    "could not synchronize the native left-edge resize policy"
                 ),
             }
         }
