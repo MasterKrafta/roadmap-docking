@@ -1135,14 +1135,14 @@ impl DragHostManager {
                             })
                         });
                         match joined {
-                            Some(Ok(Ok(()))) => {}
-                            Some(Ok(Err(error))) => tracing::warn!(
+                            Some(Ok(())) => {}
+                            Some(Err(error)) => tracing::warn!(
                                 ?id,
                                 ?anchor,
                                 %error,
                                 "could not join the newly floated Main DockArea windows to the target WindowChain"
                             ),
-                            _ => tracing::warn!(
+                            None => tracing::warn!(
                                 ?id,
                                 ?anchor,
                                 "FloatingWindowManager was unavailable after promoting the Main DockArea"
