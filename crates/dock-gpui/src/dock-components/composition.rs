@@ -266,8 +266,6 @@ impl DockColumnView {
             scroll_viewport = scroll_viewport.child(content);
         }
 
-        // TEMP: Separate outlines for the scroll viewport and its outer Column.
-        // These are overlays and do not participate in the layout.
         div()
             .id(format!("dock-column-{:?}", column.column))
             .absolute()
@@ -278,28 +276,6 @@ impl DockColumnView {
             .overflow_hidden()
             .bg(rgb(theme.colors.dock_background))
             .child(scroll_viewport)
-            .child(
-                div()
-                    .id(format!("dock-column-scroll-debug-{:?}", column.column))
-                    .absolute()
-                    .top(px(viewport_top))
-                    .left(px(viewport_left))
-                    .w(px(viewport_width))
-                    .h(px(viewport_height))
-                    .border_2()
-                    .border_color(rgb(0xFFFF00)),
-            )
-            .child(
-                div()
-                    .id(format!("dock-column-bounds-debug-{:?}", column.column))
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .w_full()
-                    .h_full()
-                    .border_2()
-                    .border_color(rgb(0x4488FF)),
-            )
     }
 
     fn render_groups(
