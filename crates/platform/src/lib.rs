@@ -215,6 +215,15 @@ pub trait NativeWindowOps {
 
     fn enable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
     fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError>;
+    /// Controls whether the native left edge and its corners initiate OS resizing.
+    /// The right edge remains available independently.
+    fn set_left_resize_enabled(
+        &self,
+        _window: NativeWindowId,
+        _enabled: bool,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
     /// Sets the minimum client-content size in physical pixels. The native
@@ -538,8 +547,17 @@ mod windows_impl {
     struct ResizeLoopState {
         active: bool,
         horizontal_edge: Option<NativeHorizontalResizeEdge>,
+        left_resize_enabled: bool,
         left_min_client_width: i32,
         right_min_client_width: i32,
+    }
+
+    fn hit_test_code_for_resize(hit_test: i32, left_resize_enabled: bool) -> i32 {
+        if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
+            HTCLIENT
+        } else {
+            hit_test
+        }
     }
 
     fn horizontal_resize_edge_from_sizing_code(
@@ -648,6 +666,19 @@ mod windows_impl {
 
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
         let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
+
+        if message == WM_NCHITTEST {
+            // A secondary Window Chain member must not expose a left resize
+            // handle: that edge is the join with its preceding native window.
+            // SAFETY: The subclass owns this state for the lifetime of the HWND.
+            let left_resize_enabled = unsafe { (*state).left_resize_enabled };
+            let hit_test = result.0 as i32;
+            let adjusted_hit_test =
+                hit_test_code_for_resize(hit_test, left_resize_enabled);
+            if adjusted_hit_test != hit_test {
+                return LRESULT(adjusted_hit_test as isize);
+            }
+        }
 
         // WM_SIZING carries a mutable outer-window RECT. Clamp it after the
         // downstream handler so no later handler can undo the composition floor.
@@ -1151,6 +1182,7 @@ mod windows_impl {
                 let pointer = Box::into_raw(Box::new(ResizeLoopState {
                     active: false,
                     horizontal_edge: None,
+                    left_resize_enabled: true,
                     left_min_client_width: 0,
                     right_min_client_width: 0,
                 }));
@@ -1363,6 +1395,33 @@ mod windows_impl {
             }
         }
 
+        fn set_left_resize_enabled(
+            &self,
+            window: NativeWindowId,
+            enabled: bool,
+        ) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).left_resize_enabled = enabled;
+            }
+            Ok(())
+        }
+
         fn set_horizontal_resize_min_widths(
             &self,
             window: NativeWindowId,
@@ -1545,6 +1604,20 @@ mod windows_impl {
             );
             assert_eq!(horizontal_resize_edge_from_sizing_code(3), None);
             assert_eq!(horizontal_resize_edge_from_sizing_code(6), None);
+        }
+
+        #[test]
+        fn disabling_left_resize_turns_left_edges_and_corners_into_client_area() {
+            for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
+                assert_eq!(
+                    hit_test_code_for_resize(hit_test, false),
+                    HTCLIENT
+                );
+            }
+            assert_eq!(hit_test_code_for_resize(HTLEFT, true), HTLEFT);
+            assert_eq!(hit_test_code_for_resize(HTRIGHT, false), HTRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTTOPRIGHT, false), HTTOPRIGHT);
+            assert_eq!(hit_test_code_for_resize(HTBOTTOMRIGHT, false), HTBOTTOMRIGHT);
         }
 
         #[test]
