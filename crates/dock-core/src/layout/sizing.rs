@@ -757,9 +757,9 @@ impl Layout {
                         matches!(self.nodes.get(*child), Some(Node::Column(_)))
                     }) =>
             {
-                // A native edge resize changes only the outer Column.
-                // Keep the OS track-size floor aligned with Core's minimum
-                // Expanded Column width, not the Column's current saved width.
+                // A Floating Split fills its client width with all Columns.
+                // Keep the OS track-size floor aligned with the sum of their
+                // minimum widths, including every intervening splitter.
                 let mut minimum = Size::ZERO;
                 for child in &split.children {
                     minimum.width += self.minimum_column_width(*child, metrics)?;
