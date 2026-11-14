@@ -1800,6 +1800,42 @@ impl FloatingWindowManager {
         });
     }
 
+    /// Applies chain compaction after the current reconcile update has unwound.
+    ///
+    /// Publishing LayoutChanged synchronously from inside reconcile would
+    /// re-enter this same GPUI entity through its controller subscription.
+    fn schedule_chain_compaction(
+        &self,
+        commands: Vec<DockCommand>,
+        cx: &mut Context<Self>,
+    ) {
+        if commands.is_empty() {
+            return;
+        }
+
+        let controller = self.controller.clone();
+        cx.spawn(async move |_, app| {
+            app.background_executor()
+                .timer(Duration::from_millis(1))
+                .await;
+            let result = controller.update(app, |controller, controller_cx| {
+                controller.dispatch_sequence_in(commands, controller_cx)
+            });
+            match result {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => tracing::warn!(
+                    %error,
+                    "could not compact a Window Chain after an empty FloatingGroup was removed"
+                ),
+                Err(error) => tracing::warn!(
+                    %error,
+                    "could not update the controller while compacting a Window Chain"
+                ),
+            }
+        })
+        .detach();
+    }
+
     fn mark_group_native_bounds_dirty(&mut self, group: FloatingGroupId) {
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return;
@@ -1938,23 +1974,7 @@ impl FloatingWindowManager {
                 .collect::<Vec<_>>();
 
             if !commands.is_empty() {
-                let result = self.controller.update(cx, |controller, controller_cx| {
-                    controller.dispatch_sequence_in(commands, controller_cx)
-                });
-                match result {
-                    Ok(_) => {
-                        let bounds_by_group = compacted_bounds.into_iter().collect::<HashMap<_, _>>();
-                        for group in &mut groups {
-                            if let Some(bounds) = bounds_by_group.get(&group.id) {
-                                group.bounds = *bounds;
-                            }
-                        }
-                    }
-                    Err(error) => tracing::warn!(
-                        %error,
-                        "could not compact a Window Chain after an empty FloatingGroup was removed"
-                    ),
-                }
+                self.schedule_chain_compaction(commands, cx);
             }
         }
 
