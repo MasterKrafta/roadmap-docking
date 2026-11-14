@@ -3,7 +3,10 @@ use crate::{
     PanelConstraints, PanelId, PanelKey, Point, Rect, Size,
 };
 
-/// The horizontal edge of a native Floating window being resized.
+/// Legacy horizontal-edge hint retained for serialized resize-command compatibility.
+///
+/// Floating compositions now fill the native client area, so this value no
+/// longer selects an individual Column to resize.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum FloatingResizeEdge {
@@ -162,8 +165,11 @@ pub enum DockCommand {
         group: FloatingGroupId,
         bounds: Rect,
     },
-    /// Resize a floating window from one horizontal edge while keeping the
-    /// opposite edge and the internal horizontal Column split stationary.
+    /// Legacy edge-aware form of ResizeFloatingBounds.
+    ///
+    /// The edge and scale factor remain in the command shape for compatibility
+    /// with existing serialized workspaces; floating Columns are now allocated
+    /// from the full client area and are never resized by the native window edge.
     ResizeFloatingBoundsFromEdge {
         group: FloatingGroupId,
         bounds: Rect,
