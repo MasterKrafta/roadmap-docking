@@ -148,15 +148,27 @@ fn layout_split_inner(
                     .map(|child| preferred_width(layout, *child, metrics, minimum_sizes))
                     .collect::<Result<Vec<_>, _>>()?
             } else {
-                let minimum_widths = split
-                    .children
-                    .iter()
-                    .map(|child| {
-                        let minimum =
-                            minimum_node_size(layout, *child, metrics, minimum_sizes)?.width;
-                        Ok(minimum.max(metrics.min_column_width))
-                    })
-                    .collect::<Result<Vec<f32>, ComputeRectsError>>()?;
+                let minimum_widths = if direct_columns {
+                    split
+                        .children
+                        .iter()
+                        .map(|child| {
+                            layout
+                                .minimum_column_width(*child, metrics)
+                                .map_err(|_| ComputeRectsError::InvalidLayoutState)
+                        })
+                        .collect::<Result<Vec<f32>, ComputeRectsError>>()?
+                } else {
+                    split
+                        .children
+                        .iter()
+                        .map(|child| {
+                            let minimum =
+                                minimum_node_size(layout, *child, metrics, minimum_sizes)?.width;
+                            Ok(minimum.max(metrics.min_column_width))
+                        })
+                        .collect::<Result<Vec<f32>, ComputeRectsError>>()?
+                };
                 weighted_sizes(&split.ratios, content_width, &minimum_widths, Axis::X)?
             };
             let required = widths.iter().sum::<f32>() + gap_total;
