@@ -137,6 +137,11 @@ pub trait NativeWindowOps {
     fn key_down(&self, key: NativeKey) -> Result<bool, NativeError>;
 
     fn window_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError>;
+    /// Returns the visible DWM frame bounds, excluding invisible resize borders.
+    /// Platforms without a distinct visible frame may use the outer window rect.
+    fn visible_frame_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError> {
+        self.window_rect(window)
+    }
     fn client_origin(&self, window: NativeWindowId) -> Result<PhysicalPoint, NativeError>;
     /// Returns client-content dimensions in physical pixels, excluding the non-client frame.
     fn client_size(&self, window: NativeWindowId) -> Result<PhysicalSize, NativeError>;
@@ -305,9 +310,12 @@ mod windows_impl {
         Foundation::{
             GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SetLastError, WIN32_ERROR, WPARAM,
         },
-        Graphics::Gdi::{
-            ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, InvalidateRect,
-            MONITORINFO,
+        Graphics::{
+            Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
+            Gdi::{
+                ClientToScreen, EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, InvalidateRect,
+                MONITORINFO,
+            },
         },
         Media::{timeBeginPeriod, timeEndPeriod},
         UI::{
@@ -823,6 +831,28 @@ mod windows_impl {
             unsafe { GetWindowRect(hwnd(window), &mut rect) }
                 .map_err(|error| platform_error("GetWindowRect", error))?;
             Ok(rect_from_native(rect))
+        }
+
+        fn visible_frame_rect(&self, window: NativeWindowId) -> Result<PhysicalRect, NativeError> {
+            let mut rect = RECT::default();
+            // DWM reports the visible frame without the invisible resize border
+            // included by GetWindowRect. This is the edge users see when windows
+            // are placed next to one another.
+            // SAFETY: rect is writable and window is a live GPUI-owned HWND.
+            if unsafe {
+                DwmGetWindowAttribute(
+                    hwnd(window),
+                    DWMWA_EXTENDED_FRAME_BOUNDS,
+                    &mut rect as *mut RECT as *mut _,
+                    size_of::<RECT>() as u32,
+                )
+            }
+            .is_ok()
+            {
+                return Ok(rect_from_native(rect));
+            }
+
+            self.window_rect(window)
         }
 
         fn client_origin(&self, window: NativeWindowId) -> Result<PhysicalPoint, NativeError> {
