@@ -14,7 +14,7 @@ pub(super) struct AdjacentColumnResize<'a> {
 }
 
 impl Layout {
-    pub(super) fn minimum_column_width(
+    pub(crate) fn minimum_column_width(
         &self,
         column_id: NodeId,
         metrics: &DockMetrics,
