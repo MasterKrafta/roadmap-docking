@@ -2551,3 +2551,113 @@ mod floating_dock_area_header_hit_tests {
         );
     }
 }
+
+
+#[cfg(test)]
+mod floating_window_resize_tests {
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::Key;
+
+    use super::{
+        FloatingWindowResizeEdge, FloatingWindowResizePress, floating_window_resize_bounds,
+        floating_window_resize_edge,
+    };
+
+    fn press(edge: FloatingWindowResizeEdge) -> FloatingWindowResizePress {
+        FloatingWindowResizePress {
+            group: FloatingGroupId::null(),
+            edge,
+            start_cursor: platform::PhysicalPoint { x: 1_000, y: 1_000 },
+            start_bounds: Rect::new(
+                Point::new(100.0, 200.0),
+                Size::new(500.0, 400.0),
+            ),
+            scale_factor: 1.5,
+        }
+    }
+
+    #[test]
+    fn resize_hit_test_detects_edges_and_corners() {
+        let rect = Rect::new(Point::ZERO, Size::new(500.0, 400.0));
+
+        assert_eq!(
+            floating_window_resize_edge(rect, Point::new(1.0, 200.0)),
+            Some(FloatingWindowResizeEdge::Left),
+        );
+        assert_eq!(
+            floating_window_resize_edge(rect, Point::new(499.0, 399.0)),
+            Some(FloatingWindowResizeEdge::BottomRight),
+        );
+        assert_eq!(
+            floating_window_resize_edge(rect, Point::new(250.0, 200.0)),
+            None,
+        );
+    }
+
+    #[test]
+    fn left_edge_tracks_pointer_direction_and_keeps_right_edge_anchored() {
+        let (bounds, edge) = floating_window_resize_bounds(
+            press(FloatingWindowResizeEdge::Left),
+            Point::new(40.0, 0.0),
+            Size::new(100.0, 100.0),
+            Some((300.0, 300.0)),
+        );
+
+        assert_eq!(edge, Some(dock_core::FloatingResizeEdge::Left));
+        assert_eq!(bounds.size.width, 460.0);
+        assert_eq!(bounds.origin.x, 160.0);
+        assert_eq!(
+            bounds.origin.x + bounds.size.width * 1.5,
+            850.0,
+        );
+    }
+
+    #[test]
+    fn left_edge_minimum_clamps_width_without_moving_the_opposite_edge() {
+        let (bounds, _) = floating_window_resize_bounds(
+            press(FloatingWindowResizeEdge::Left),
+            Point::new(240.0, 0.0),
+            Size::new(100.0, 100.0),
+            Some((350.0, 300.0)),
+        );
+
+        assert_eq!(bounds.size.width, 350.0);
+        assert_eq!(bounds.origin.x, 325.0);
+        assert_eq!(
+            bounds.origin.x + bounds.size.width * 1.5,
+            850.0,
+        );
+    }
+
+    #[test]
+    fn right_edge_changes_width_without_moving_the_left_edge() {
+        let (bounds, edge) = floating_window_resize_bounds(
+            press(FloatingWindowResizeEdge::Right),
+            Point::new(40.0, 0.0),
+            Size::new(100.0, 100.0),
+            Some((300.0, 300.0)),
+        );
+
+        assert_eq!(edge, Some(dock_core::FloatingResizeEdge::Right));
+        assert_eq!(bounds.size.width, 540.0);
+        assert_eq!(bounds.origin.x, 100.0);
+    }
+
+    #[test]
+    fn top_edge_keeps_the_bottom_edge_anchored() {
+        let (bounds, edge) = floating_window_resize_bounds(
+            press(FloatingWindowResizeEdge::Top),
+            Point::new(0.0, 60.0),
+            Size::new(100.0, 100.0),
+            None,
+        );
+
+        assert_eq!(edge, None);
+        assert_eq!(bounds.size.height, 340.0);
+        assert_eq!(bounds.origin.y, 290.0);
+        assert_eq!(
+            bounds.origin.y + bounds.size.height * 1.5,
+            800.0,
+        );
+    }
+}
