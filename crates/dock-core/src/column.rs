@@ -1,4 +1,4 @@
-use crate::{NodeId, PanelId, Rect};
+use crate::{DockMetrics, NodeId, PanelId, Rect};
 
 /// A profile-specific column containing an ordered vertical sequence of groups.
 ///
@@ -14,6 +14,17 @@ pub struct Column {
     /// Last user-selected width while expanded; rail width is presentation-only.
     #[cfg_attr(feature = "serde", serde(default))]
     pub last_expanded_width: Option<f32>,
+}
+
+impl Column {
+    /// Returns the width used when this Column participates in a horizontal Split.
+    pub(crate) fn effective_width(&self, metrics: &DockMetrics) -> f32 {
+        match self.mode {
+            ColumnMode::Expanded => self.width,
+            ColumnMode::IconsAndLabels => metrics.min_column_width,
+            ColumnMode::IconsOnly => metrics.rail_width,
+        }
+    }
 }
 
 /// Presentation mode of a Photoshop-style dock column.
