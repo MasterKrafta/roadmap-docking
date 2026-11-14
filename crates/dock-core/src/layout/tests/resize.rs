@@ -1453,3 +1453,140 @@ fn floating_right_edge_resize_changes_only_last_column_and_keeps_inner_splitters
     }
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+
+#[test]
+fn floating_left_edge_resize_keeps_right_edge_anchored_after_repeated_minimum_clamp_samples() {
+    let metrics = DockMetrics::default();
+    let scale_factor = 1.5;
+    let widths = [260.0_f32, 340.0];
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let columns = std::array::from_fn(|index| {
+        let (_, panel) = builder.panel(
+            PanelKey::new(if index == 0 {
+                "floating-minimum-anchor-left"
+            } else {
+                "floating-minimum-anchor-right"
+            })
+            .unwrap(),
+            descriptors()[0].1,
+        );
+        let group = builder.tabs(vec![panel], 0, false);
+        builder.column(
+            widths[index],
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        )
+    });
+    let total_column_width = widths.iter().sum::<f32>();
+    let total_width = total_column_width + metrics.splitter_thickness;
+    let split = builder.split(
+        Axis::X,
+        columns.to_vec(),
+        widths.map(|width| width / total_column_width).to_vec(),
+    );
+    let floating = builder.floating_group(
+        split,
+        Rect::new(Point::new(100.0, 80.0), Size::new(total_width, 420.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    // First put the right Column at its minimum, as in the reported sequence.
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let right_width = rects
+        .columns
+        .iter()
+        .find(|column| column.column == columns[1])
+        .unwrap()
+        .rect
+        .size
+        .width;
+    let right_minimum = layout.minimum_column_width(columns[1], &metrics).unwrap();
+    let right_shrink = right_width - right_minimum;
+    let bounds = layout.floating_group(floating).unwrap().bounds;
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    bounds.origin,
+                    Size::new(bounds.size.width - right_shrink, bounds.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Right,
+                scale_factor,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    // Then shrink the left Column until the whole composition reaches its
+    // combined minimum width.
+    let rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let left_width = rects
+        .columns
+        .iter()
+        .find(|column| column.column == columns[0])
+        .unwrap()
+        .rect
+        .size
+        .width;
+    let left_minimum = layout.minimum_column_width(columns[0], &metrics).unwrap();
+    let left_shrink = left_width - left_minimum;
+    let bounds = layout.floating_group(floating).unwrap().bounds;
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    Point::new(
+                        bounds.origin.x + left_shrink * scale_factor,
+                        bounds.origin.y,
+                    ),
+                    Size::new(bounds.size.width - left_shrink, bounds.size.height),
+                ),
+                edge: crate::FloatingResizeEdge::Left,
+                scale_factor,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let minimum_bounds = layout.floating_group(floating).unwrap().bounds;
+    let minimum_size = layout.floating_minimum_size(floating, &metrics).unwrap();
+    assert!((minimum_bounds.size.width - minimum_size.width).abs() < 1.0e-3);
+    let anchored_right = minimum_bounds.origin.x + minimum_bounds.size.width * scale_factor;
+
+    // A rapid follow-up WM_SIZING sample may still be narrower than the Core
+    // minimum. Core must retain that minimum and compensate the left origin.
+    let overdrag = 24.0;
+    let undersized_native_bounds = Rect::new(
+        Point::new(
+            minimum_bounds.origin.x + overdrag * scale_factor,
+            minimum_bounds.origin.y,
+        ),
+        Size::new(minimum_bounds.size.width - overdrag, minimum_bounds.size.height),
+    );
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: undersized_native_bounds,
+                edge: crate::FloatingResizeEdge::Left,
+                scale_factor,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let corrected = layout.floating_group(floating).unwrap().bounds;
+    assert_eq!(corrected.size.width, minimum_bounds.size.width);
+    assert!((corrected.origin.x - minimum_bounds.origin.x).abs() < 1.0e-3);
+    assert!(
+        (corrected.origin.x + corrected.size.width * scale_factor - anchored_right).abs()
+            < 1.0e-3
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
