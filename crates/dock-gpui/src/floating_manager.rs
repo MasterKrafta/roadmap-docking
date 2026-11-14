@@ -8,14 +8,14 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    FloatingResizeEdge, Node, NodeId, PanelId, Point, Rect, Size,
+    Node, NodeId, PanelId, Point, Rect, Size,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeKey, NativeResizeEdge, NativeWindowAtPoint, NativeWindowId,
+    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId,
     NativeWindowOps, PhysicalPoint, PhysicalRect, PhysicalSize, SystemNativeWindowOps,
 };
 
@@ -291,7 +291,6 @@ struct NativeResizeSession {
     group: FloatingGroupId,
     window_id: WindowId,
     transaction_started: bool,
-    horizontal_edge: Option<FloatingResizeEdge>,
 }
 
 /// Reconciles the native-window registry with the current Core Layout.
@@ -637,20 +636,10 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return;
         }
-        // WM_SIZING records the exact system edge even when observation
-        // begins after Windows entered its modal sizing loop.
-        let horizontal_edge = self
-            .native_ops
-            .resizing_edge(native_window)
-            .ok()
-            .flatten()
-            .map(core_resize_edge);
-
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
             transaction_started: false,
-            horizontal_edge,
         });
         self.schedule_native_resize(cx, group, window_id);
     }
@@ -698,15 +687,6 @@ impl FloatingWindowManager {
             return false;
         };
 
-        if state.horizontal_edge.is_none() {
-            state.horizontal_edge = self
-                .native_ops
-                .resizing_edge(native_window)
-                .ok()
-                .flatten()
-                .map(core_resize_edge);
-        }
-
         let resizing = self.native_ops.is_resizing(native_window).unwrap_or(false);
         if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
             let current = self.controller.update(cx, |controller, _| {
@@ -721,21 +701,7 @@ impl FloatingWindowManager {
                     });
                 }
                 if state.transaction_started {
-                    let scale_factor = self
-                        .native_ops
-                        .scale_factor(native_window)
-                        .ok()
-                        .filter(|scale| scale.is_finite() && *scale > 0.0)
-                        .unwrap_or(1.0);
-                    let command = match state.horizontal_edge {
-                        Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
-                            group,
-                            bounds,
-                            edge,
-                            scale_factor,
-                        },
-                        None => DockCommand::ResizeFloatingBounds { group, bounds },
-                    };
+                    let command = DockCommand::ResizeFloatingBounds { group, bounds };
                     let result = self.controller.update(cx, |controller, controller_cx| {
                         controller.dispatch_in(command, controller_cx)
                     });
@@ -2342,13 +2308,6 @@ impl FloatingWindowManager {
     }
 }
 
-
-fn core_resize_edge(edge: NativeResizeEdge) -> FloatingResizeEdge {
-    match edge {
-        NativeResizeEdge::Left => FloatingResizeEdge::Left,
-        NativeResizeEdge::Right => FloatingResizeEdge::Right,
-    }
-}
 
 fn is_managed_foreground_window(
     foreground: NativeWindowId,
