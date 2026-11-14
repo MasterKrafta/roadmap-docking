@@ -1306,12 +1306,9 @@ impl Render for FloatingHost {
                             return;
                         }
                         if let Some(press) = window_resize_press_for_move.get() {
-                            if !DockInteractionCoordinator::ensure_current(
-                                &controller_for_move,
-                                window,
-                                &pointer_capture_for_move,
-                                app,
-                            ) || DockInteractionCoordinator::capture_was_lost(
+                            // This gesture owns a history transaction, not a Core
+                            // splitter interaction; validate only the GPUI capture.
+                            if DockInteractionCoordinator::capture_was_lost(
                                 window,
                                 &pointer_capture_for_move,
                             ) {
