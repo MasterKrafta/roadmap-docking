@@ -1112,26 +1112,6 @@ impl Layout {
             }
         };
 
-        // A floating root Column fills its native window, so its saved
-        // Column width is not consulted until it becomes a child of Split(X).
-        // Capture the actual window width before composing the two roots.
-        if !source_was_split {
-            let Some(Node::Column(column)) = self.nodes.get_mut(source_root) else {
-                return Err(CommandError::InvalidTarget {
-                    reason: "source Floating Column changed unexpectedly",
-                });
-            };
-            column.width = source_floating.bounds.size.width;
-        }
-        if !target_was_split {
-            let Some(Node::Column(column)) = self.nodes.get_mut(target_root) else {
-                return Err(CommandError::InvalidTarget {
-                    reason: "target Floating Column changed unexpectedly",
-                });
-            };
-            column.width = target_floating.bounds.size.width;
-        }
-
         let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
         for (index, target_column) in target_columns.iter().copied().enumerate() {
             if index == insertion_index {
@@ -1160,21 +1140,30 @@ impl Layout {
         let splitter_width = metrics.splitter_thickness
             * children.len().saturating_sub(1) as f32;
         let required_width = total_column_width + splitter_width;
-        let combined_window_width = source_floating.bounds.size.width
-            + target_floating.bounds.size.width
-            + metrics.splitter_thickness;
+        let source_column_widths = source_columns
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "source Floating composition must contain only Columns",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let source_composition_width = source_column_widths.iter().sum::<f32>()
+            + metrics.splitter_thickness
+                * source_columns.len().saturating_sub(1) as f32;
         if !total_column_width.is_finite()
             || total_column_width <= 0.0
             || !required_width.is_finite()
-            || !combined_window_width.is_finite()
-            || combined_window_width <= 0.0
+            || !source_composition_width.is_finite()
+            || source_composition_width <= 0.0
         {
             return Err(CommandError::InvalidValue {
                 field: "width",
                 reason: "combined floating composition width must be finite and positive",
             });
         }
-        let window_width = required_width.max(combined_window_width);
+        let window_width = required_width;
         let ratios = normalized_ratios(column_widths.into_iter().map(Some).collect());
 
         // Detaching the source root unregisters its FloatingGroup and DockArea,
@@ -1199,7 +1188,7 @@ impl Layout {
         // or internal insertion grows it to the right.
         let target_origin_x = if insertion_index == 0 {
             target_floating.bounds.origin.x
-                - source_floating.bounds.size.width
+                - source_composition_width
                 - metrics.splitter_thickness
         } else {
             target_floating.bounds.origin.x
