@@ -423,6 +423,15 @@ impl FloatingWindowManager {
         self.registry.windows.get(&panel)
     }
 
+    /// Reads the destination monitor scale for a floating composition.
+    pub(crate) fn native_scale_factor_for_group(&self, group: FloatingGroupId) -> Option<f32> {
+        let native_window = self.panel_window_for_group(group)?.native_window?;
+        self.native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+    }
+
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
     /// The main HWND is retained as the native owner for each floating host.
@@ -1670,7 +1679,6 @@ impl FloatingWindowManager {
                 monitor_corrections.push((group.id, corrected_bounds));
                 entry.bounds = corrected_bounds;
             }
-            self.sync_native_resize(&mut entry, group);
             self.registry.windows.insert(panel, entry);
             active_hosts.insert(group.id, panel);
         }
@@ -2109,7 +2117,9 @@ impl FloatingWindowManager {
             kind: WindowKind::Floating,
             is_movable: true,
             app_owns_titlebar_drag: true,
-            is_resizable: true,
+            // Floating composition resize is handled by the same client-area
+            // gesture model as Qt's QWidgetResizeHandler, not by WS_THICKFRAME.
+            is_resizable: false,
             is_minimizable: false,
             ..Default::default()
         };
@@ -2298,70 +2308,6 @@ impl FloatingWindowManager {
             }
         }
         work_areas.first().copied()
-    }
-
-    fn sync_native_resize(
-        &self,
-        entry: &mut PanelWindowEntry,
-        group: &FloatingGroupSnapshot,
-    ) {
-        let Some(native_window) = entry.native_window else {
-            return;
-        };
-
-        if !entry.resize_enabled {
-            match self.native_ops.enable_resize(native_window) {
-                Ok(()) => entry.resize_enabled = true,
-                Err(error) => tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not enable native floating-window resize"
-                ),
-            }
-        }
-
-        let scale = self
-            .native_ops
-            .scale_factor(native_window)
-            .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(1.0);
-        let desired_minimum = group
-            .minimum_size
-            .and_then(|minimum| DockGeometry::physical_size_from_logical(minimum, scale));
-
-        if entry.native_min_size != desired_minimum {
-            match self.native_ops.set_min_size(native_window, desired_minimum) {
-                Ok(()) => entry.native_min_size = desired_minimum,
-                Err(error) => tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not synchronize native floating-window minimum size"
-                ),
-            }
-        }
-
-        let desired_edge_minimums = group.horizontal_resize_minimum_widths.and_then(
-            |(left_width, right_width)| {
-                Some((
-                    DockGeometry::physical_coordinate(left_width, scale)?,
-                    DockGeometry::physical_coordinate(right_width, scale)?,
-                ))
-            },
-        );
-        if entry.native_horizontal_resize_min_widths != desired_edge_minimums {
-            match self
-                .native_ops
-                .set_horizontal_resize_min_widths(native_window, desired_edge_minimums)
-            {
-                Ok(()) => entry.native_horizontal_resize_min_widths = desired_edge_minimums,
-                Err(error) => tracing::warn!(
-                    ?group.id,
-                    %error,
-                    "could not synchronize side-specific native minimum widths"
-                ),
-            }
-        }
     }
 
     /// Recomputes native minimum sizes from the live Core layout during an OS resize.
