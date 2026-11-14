@@ -1151,7 +1151,6 @@ impl DragHostManager {
                     }
                     return;
                 }
-
             }
             if chain_join.is_some() {
                 // Core has already detached the source into independent
