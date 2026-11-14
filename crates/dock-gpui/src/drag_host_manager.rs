@@ -1877,6 +1877,7 @@ impl Render for DragHostSurface {
                 toggle_menu,
                 true,
                 &snapshot.splitters,
+                None,
                 &snapshot.vertical_overflow,
                 &snapshot.node_ids,
                 &snapshot.node_sides,
