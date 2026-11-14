@@ -19,6 +19,30 @@ pub(super) fn layout_split(
         id,
         split,
         rect,
+        false,
+    )
+}
+
+fn layout_split_for_floating(
+    layout: &Layout,
+    id: NodeId,
+    split: &crate::Split,
+    rect: Rect,
+    metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
+    output: &mut LayoutRects,
+) -> Result<(), ComputeRectsError> {
+    layout_split_inner(
+        SplitLayoutContext {
+            layout,
+            metrics,
+            minimum_sizes,
+            output,
+        },
+        id,
+        split,
+        rect,
+        true,
     )
 }
 
@@ -59,6 +83,25 @@ pub(super) fn layout_floating_root(
         );
     }
 
+    if let Some(Node::Split(split)) = layout.node(id)
+        && split.axis == Axis::X
+        && split.children.len() >= 2
+        && split
+            .children
+            .iter()
+            .all(|child| matches!(layout.node(*child), Some(Node::Column(_))))
+    {
+        return layout_split_for_floating(
+            layout,
+            id,
+            split,
+            rect,
+            metrics,
+            minimum_sizes,
+            output,
+        );
+    }
+
     layout_node(layout, id, rect, metrics, minimum_sizes, output)
 }
 
@@ -74,6 +117,7 @@ fn layout_split_inner(
     id: NodeId,
     split: &crate::Split,
     rect: Rect,
+    distribute_direct_columns_by_ratios: bool,
 ) -> Result<(), ComputeRectsError> {
     let SplitLayoutContext {
         layout,
@@ -97,7 +141,7 @@ fn layout_split_inner(
             let gap_total =
                 metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
             let content_width = rect.size.width - gap_total;
-            let widths = if direct_columns {
+            let widths = if direct_columns && !distribute_direct_columns_by_ratios {
                 split
                     .children
                     .iter()
