@@ -288,7 +288,6 @@ struct FloatingGroupSnapshot {
     panels: Vec<PanelId>,
 }
 
-#[derive(Clone, Copy)]
 /// Reconciles the native-window registry with the current Core Layout.
 pub struct FloatingWindowManager {
     controller: Entity<DockController>,
