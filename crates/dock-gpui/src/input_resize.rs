@@ -375,14 +375,21 @@ pub(crate) fn resize_preview_for_interaction(
 }
 
 fn splitter_preview_rect(start: Rect, axis: Axis, dx: f32, dy: f32) -> Option<Rect> {
+    let preview_thickness = 3.0;
     let rect = match axis {
         Axis::X => Rect::new(
-            Point::new(start.origin.x + dx - 1.5, start.origin.y),
-            Size::new(3.0, start.size.height),
+            Point::new(
+                start.origin.x + (start.size.width - preview_thickness) * 0.5 + dx,
+                start.origin.y,
+            ),
+            Size::new(preview_thickness, start.size.height),
         ),
         Axis::Y => Rect::new(
-            Point::new(start.origin.x, start.origin.y + dy - 1.5),
-            Size::new(start.size.width, 3.0),
+            Point::new(
+                start.origin.x,
+                start.origin.y + (start.size.height - preview_thickness) * 0.5 + dy,
+            ),
+            Size::new(start.size.width, preview_thickness),
         ),
     };
     rect.validate_non_empty().ok()?;
@@ -417,12 +424,18 @@ mod tests {
     }
 
     #[test]
-    fn splitter_preview_uses_the_full_delta_from_its_original_rect() {
-        let original = Rect::new(Point::new(200.0, 40.0), Size::new(4.0, 300.0));
+    fn splitter_preview_is_centered_in_the_hit_zone_and_uses_the_full_delta() {
+        let original = Rect::new(Point::new(200.0, 40.0), Size::new(8.0, 300.0));
 
         assert_eq!(
             splitter_preview_rect(original, Axis::X, 24.0, 0.0),
-            Some(Rect::new(Point::new(222.5, 40.0), Size::new(3.0, 300.0),))
+            Some(Rect::new(Point::new(226.5, 40.0), Size::new(3.0, 300.0),))
+        );
+
+        let horizontal = Rect::new(Point::new(40.0, 200.0), Size::new(300.0, 8.0));
+        assert_eq!(
+            splitter_preview_rect(horizontal, Axis::Y, 0.0, 24.0),
+            Some(Rect::new(Point::new(40.0, 226.5), Size::new(300.0, 3.0),))
         );
     }
 
