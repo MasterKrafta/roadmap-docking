@@ -777,6 +777,27 @@ impl Layout {
             });
         }
 
+        let floating_group = self
+            .find_floating_root_containing(*split)
+            .and_then(|root| {
+                self.floating_groups.iter().find_map(|(id, floating)| {
+                    self.dock_areas
+                        .get(floating.area)
+                        .is_some_and(|area| area.root == root)
+                        .then_some(id)
+                })
+            });
+        if let Some(floating_group) = floating_group {
+            return self.apply_resize_floating_split_column_boundary_command(
+                *split,
+                *boundary_index,
+                *delta,
+                floating_group,
+                &current_split,
+                metrics,
+            );
+        }
+
         let left_id = current_split.children[*boundary_index];
         let right_id = current_split.children[*boundary_index + 1];
         let left = match self.nodes.get(left_id) {
@@ -838,6 +859,108 @@ impl Layout {
             inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeSplitColumnBoundary {
                 split: *split,
                 boundary_index: *boundary_index,
+                delta: -actual_delta,
+            }),
+            persistent: true,
+        })
+    }
+
+    fn apply_resize_floating_split_column_boundary_command(
+        &mut self,
+        split_id: NodeId,
+        boundary_index: usize,
+        delta: f32,
+        floating_group: crate::FloatingGroupId,
+        split: &Split,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        let rects = self
+            .compute_floating_rects(floating_group, metrics)
+            .map_err(|_| CommandError::InvalidTarget {
+                reason: "could not compute the current Floating composition geometry",
+            })?;
+
+        let mut widths = split
+            .children
+            .iter()
+            .map(|child_id| {
+                rects
+                    .columns
+                    .iter()
+                    .find(|column| column.column == *child_id)
+                    .map(|column| column.rect.size.width)
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "Floating Split is missing a current Column rectangle",
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let left_id = split.children[boundary_index];
+        let right_id = split.children[boundary_index + 1];
+        let mut left = match self.nodes.get(left_id) {
+            Some(Node::Column(column)) => column.clone(),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating Split boundary references a non-Column node",
+                });
+            }
+        };
+        let mut right = match self.nodes.get(right_id) {
+            Some(Node::Column(column)) => column.clone(),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "floating Split boundary references a non-Column node",
+                });
+            }
+        };
+        left.width = widths[boundary_index];
+        right.width = widths[boundary_index + 1];
+
+        let actual_delta = self.resize_adjacent_columns(AdjacentColumnResize {
+            left_id,
+            right_id,
+            left: &left,
+            right: &right,
+            requested_delta: delta,
+            metrics,
+            width_error_reason: "resized floating Column width is not finite and positive",
+        })?;
+
+        if actual_delta != 0.0 {
+            widths[boundary_index] += actual_delta;
+            widths[boundary_index + 1] -= actual_delta;
+
+            // Floating Split ratios describe the current visible widths.
+            // Persist those widths too, so docking this composition elsewhere
+            // retains the proportions the user just arranged.
+            for (child_id, width) in split.children.iter().zip(&widths) {
+                if let Some(Node::Column(column)) = self.nodes.get_mut(*child_id) {
+                    column.width = *width;
+                    if column.mode == ColumnMode::Expanded {
+                        column.last_expanded_width = Some(*width);
+                    }
+                }
+            }
+
+            let total_width = widths.iter().sum::<f32>();
+            if !total_width.is_finite() || total_width <= 0.0 {
+                return Err(CommandError::InvalidValue {
+                    field: "delta",
+                    reason: "floating Column widths must have a finite positive total",
+                });
+            }
+            if let Some(Node::Split(split_node)) = self.nodes.get_mut(split_id) {
+                for (ratio, width) in split_node.ratios.iter_mut().zip(widths) {
+                    *ratio = width / total_width;
+                }
+            }
+        }
+
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::ColumnBoundaryDelta(actual_delta)),
+            inverse: (actual_delta != 0.0).then_some(DockCommand::ResizeSplitColumnBoundary {
+                split: split_id,
+                boundary_index,
                 delta: -actual_delta,
             }),
             persistent: true,
