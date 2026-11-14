@@ -40,6 +40,7 @@ impl MainDockView {
         context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
         splitters: &[SplitterRect],
+        active_splitter: Option<(NodeId, usize, Axis)>,
         vertical_overflow: &[VerticalOverflow],
         main_node_ids: &HashSet<NodeId>,
         main_node_sides: &HashMap<NodeId, DockSide>,
@@ -88,6 +89,7 @@ impl MainDockView {
                 context_menu.clone(),
                 middle_click_closes_tabs,
                 splitters,
+                active_splitter,
                 vertical_overflow,
                 scroll_handles.get(&column.column).cloned(),
                 controller.clone(),
@@ -116,6 +118,8 @@ impl MainDockView {
                 metrics,
                 theme,
                 None,
+                active_splitter
+                    == Some((splitter.owner, splitter.boundary_index, splitter.axis)),
             ));
         }
 
