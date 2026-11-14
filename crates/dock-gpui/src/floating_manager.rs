@@ -273,11 +273,20 @@ enum NativeMoveTarget {
 }
 
 #[derive(Clone, Copy)]
+struct NativeMoveWindow {
+    group: FloatingGroupId,
+    native_window: NativeWindowId,
+    /// Actual outer-window origin used as the drag baseline.
+    drag_origin: PhysicalPoint,
+    /// Original origin restored when the gesture is cancelled.
+    cancel_origin: PhysicalPoint,
+}
+
+#[derive(Clone, Copy)]
 struct NativeMoveSession {
     group: FloatingGroupId,
     native_window: NativeWindowId,
     hide_header: bool,
-    grab_offset: PhysicalPoint,
     initial_cursor: PhysicalPoint,
     start_bounds: Rect,
     start_pointer: Point,
@@ -492,6 +501,7 @@ pub struct FloatingWindowManager {
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
     native_move: Option<NativeMoveSession>,
+    native_move_windows: Vec<NativeMoveWindow>,
     native_resize: Option<NativeResizeSession>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
@@ -510,6 +520,7 @@ impl FloatingWindowManager {
             main_native_window: None,
             main_host_origin: Point::ZERO,
             native_move: None,
+            native_move_windows: Vec::new(),
             native_resize: None,
             drag_host_manager: None,
             reconciling: false,
@@ -1145,6 +1156,37 @@ impl FloatingWindowManager {
         let scale = self.native_ops.scale_factor(native_window).ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
+        let mut move_windows = Vec::new();
+        for member in self.window_chains.members_for(group) {
+            let Some(member_entry) = self.panel_window_for_group(member) else {
+                return false;
+            };
+            let Some(member_window) = member_entry.native_window else {
+                return false;
+            };
+            let member_rect = if member_window == native_window {
+                native_rect
+            } else {
+                match self.native_ops.window_rect(member_window) {
+                    Ok(rect) => rect,
+                    Err(_) => return false,
+                }
+            };
+            let origin = PhysicalPoint {
+                x: member_rect.left,
+                y: member_rect.top,
+            };
+            move_windows.push(NativeMoveWindow {
+                group: member,
+                native_window: member_window,
+                drag_origin: origin,
+                cancel_origin: origin,
+            });
+        }
+        if !move_windows.iter().any(|member| member.group == group) {
+            return false;
+        }
+
         let hidden_header_offset = if hide_header {
             let Some(offset) = DockGeometry::physical_coordinate(metrics.column_header_height, scale) else {
                 return false;
@@ -1153,30 +1195,30 @@ impl FloatingWindowManager {
         } else {
             0
         };
-        let grab_origin = PhysicalPoint {
-            x: native_rect.left,
-            y: native_rect.top.saturating_add(hidden_header_offset),
-        };
-        let grab_offset = DockGeometry::physical_delta_between(cursor, grab_origin);
         if !self.controller.update(cx, |controller, _| {
             controller.begin_floating_window_move(group, pointer)
         }) {
             return false;
         }
-        if hide_header {
-            let position = DockGeometry::physical_position_for_grab(cursor, grab_offset);
-            if let Err(error) = self.native_ops.move_window(native_window, position) {
-                tracing::warn!(?group, %error, "could not align floating window after hiding ColumnHeader");
-                self.cancel_controller_move(cx);
-                return false;
+        if hidden_header_offset != 0 {
+            for member in &mut move_windows {
+                member.drag_origin.y = member.drag_origin.y.saturating_add(hidden_header_offset);
+                if let Err(error) = self.native_ops.move_window(member.native_window, member.drag_origin) {
+                    tracing::warn!(?group, %error, "could not align native chain after hiding ColumnHeader");
+                    for restore in &move_windows {
+                        let _ = self.native_ops.move_window(restore.native_window, restore.cancel_origin);
+                    }
+                    self.cancel_controller_move(cx);
+                    return false;
+                }
             }
         }
+        self.native_move_windows = move_windows;
         let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
         self.native_move = Some(NativeMoveSession {
             group,
             native_window,
             hide_header,
-            grab_offset,
             initial_cursor: cursor,
             start_bounds,
             start_pointer: pointer,
@@ -1211,12 +1253,10 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
-        if self.panel_window_for_group(group).is_none_or(|entry| entry.window_id != window_id) {
-            self.native_move = None;
-            if state.high_resolution_timer {
-                let _ = self.native_ops.end_high_resolution_timer();
-            }
-            self.cancel_controller_move(cx);
+        if self.panel_window_for_group(group).is_none_or(|entry| entry.window_id != window_id)
+            || self.native_move_windows.is_empty()
+        {
+            self.cancel_native_move(state, cx);
             return false;
         }
         let pointer_interaction_active = self.controller.update(cx, |controller, _| {
@@ -1234,9 +1274,9 @@ impl FloatingWindowManager {
             self.cancel_native_move(state, cx);
             return false;
         };
+        let dx = cursor.x.saturating_sub(state.initial_cursor.x);
+        let dy = cursor.y.saturating_sub(state.initial_cursor.y);
         if !state.threshold_crossed {
-            let dx = cursor.x.saturating_sub(state.initial_cursor.x);
-            let dy = cursor.y.saturating_sub(state.initial_cursor.y);
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
@@ -1265,12 +1305,20 @@ impl FloatingWindowManager {
                 }
             });
         }
-        let position = DockGeometry::physical_position_for_grab(cursor, state.grab_offset);
-        if let Err(error) = self.native_ops.move_window(state.native_window, position) {
-            tracing::warn!(?group, %error, "native floating-window move failed");
-            self.cancel_native_move(state, cx);
-            return false;
+
+        let moving_windows = self.native_move_windows.clone();
+        for member in moving_windows {
+            let position = PhysicalPoint {
+                x: member.drag_origin.x.saturating_add(dx),
+                y: member.drag_origin.y.saturating_add(dy),
+            };
+            if let Err(error) = self.native_ops.move_window(member.native_window, position) {
+                tracing::warn!(?group, moving_group = ?member.group, %error, "native floating chain move failed");
+                self.cancel_native_move(state, cx);
+                return false;
+            }
         }
+
         self.update_native_drop_target(&mut state, cursor, cx);
         self.native_move = Some(state);
         if !self.native_ops.left_button_down().unwrap_or(false) {
@@ -1302,7 +1350,14 @@ impl FloatingWindowManager {
         };
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window { known.push(main); }
-        known.extend(self.registry.windows.values().filter_map(|entry| entry.native_window));
+        known.extend(self.registry.windows.values().filter_map(|entry| {
+            let native_window = entry.native_window?;
+            let is_moving_member = self
+                .native_move_windows
+                .iter()
+                .any(|moving| moving.native_window == native_window);
+            (!is_moving_member).then_some(native_window)
+        }));
         let target_window = match self.native_ops.window_from_point(
             cursor,
             &known,
@@ -1525,6 +1580,7 @@ impl FloatingWindowManager {
             let _ = self.native_ops.end_high_resolution_timer();
         }
 
+        let moving_windows = std::mem::take(&mut self.native_move_windows);
         let mut floating_bounds = self.controller.update(cx, |controller, _| {
             controller
                 .layout()
@@ -1532,9 +1588,6 @@ impl FloatingWindowManager {
                 .map(|floating| floating.bounds)
         }).unwrap_or(state.start_bounds);
 
-        // The native move can cross onto a monitor with a different DPI.
-        // Read the actual outer origin and client size before deciding whether
-        // this is a normal move or a chain insertion.
         if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
             floating_bounds = native_bounds;
         } else if let Ok(rect) = self.native_ops.window_rect(state.native_window) {
@@ -1552,6 +1605,19 @@ impl FloatingWindowManager {
                 insert_before,
                 cx,
             ),
+            drop_target if moving_windows.len() > 1 => {
+                // A chain header can move the chain, but cannot detach one
+                // member by dropping it into Main or onto empty desktop space.
+                let bounds = self.native_bounds_for_move_windows(&moving_windows, cx);
+                match bounds {
+                    Some(bounds) => self.controller.update(cx, |controller, controller_cx| {
+                        controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
+                    }),
+                    None => Err(dock_core::CommandError::InvalidTarget {
+                        reason: "could not read the final bounds of every window in the chain",
+                    }),
+                }
+            }
             drop_target => {
                 let dock_target = match drop_target {
                     Some(NativeMoveTarget::MainDock { target, point }) => Some((target, point)),
@@ -1571,12 +1637,45 @@ impl FloatingWindowManager {
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
-            self.mark_group_native_bounds_dirty(state.group);
+            for member in &moving_windows {
+                self.mark_group_native_bounds_dirty(member.group);
+            }
+            if moving_windows.is_empty() {
+                self.mark_group_native_bounds_dirty(state.group);
+            }
             self.reconcile(cx);
         }
 
         self.redraw_visible_hosts(cx);
         cx.notify();
+    }
+
+    fn native_bounds_for_move_windows(
+        &self,
+        moving_windows: &[NativeMoveWindow],
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<(FloatingGroupId, Rect)>> {
+        let mut bounds = self.controller.update(cx, |controller, _| {
+            moving_windows
+                .iter()
+                .map(|moving| {
+                    controller
+                        .layout()
+                        .floating_group(moving.group)
+                        .map(|floating| (moving.group, floating.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
+        })?;
+
+        for (index, moving) in moving_windows.iter().enumerate() {
+            if let Some(native_bounds) = self.core_bounds_from_native_window(moving.native_window) {
+                bounds[index].1 = native_bounds;
+            } else if let Ok(rect) = self.native_ops.window_rect(moving.native_window) {
+                bounds[index].1.origin = Point::new(rect.left as f32, rect.top as f32);
+            }
+        }
+
+        Some(bounds)
     }
 
     /// Joins whole native Floating windows without changing their Core ownership.
@@ -1625,6 +1724,7 @@ impl FloatingWindowManager {
 
     fn cancel_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
         self.native_move = None;
+        let moving_windows = std::mem::take(&mut self.native_move_windows);
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -1634,10 +1734,10 @@ impl FloatingWindowManager {
             controller_cx.notify();
             result
         });
-        if let Some(position) = self.physical_origin_for_bounds(state.start_bounds)
-            && let Err(error) = self.native_ops.move_window(state.native_window, position)
-        {
-            tracing::warn!(?state.group, %error, "could not restore floating window after Escape");
+        for member in moving_windows {
+            if let Err(error) = self.native_ops.move_window(member.native_window, member.cancel_origin) {
+                tracing::warn!(?state.group, moving_group = ?member.group, %error, "could not restore floating chain member after Escape");
+            }
         }
         cx.notify();
     }
