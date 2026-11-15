@@ -86,6 +86,53 @@ impl WindowGrid {
         })
     }
 
+    /// Chooses the member on the side of this component that faces the target.
+    ///
+    /// When a grid has a single exposed member on that edge, it is used even
+    /// when a different member initiated the drag. For a multi-contact edge,
+    /// prefer the grabbed member if it is itself on that boundary; otherwise
+    /// the placement is ambiguous and must not be committed.
+    fn boundary_member(
+        &self,
+        outward_side: WindowGridDirection,
+        preferred: FloatingGroupId,
+    ) -> Option<FloatingGroupId> {
+        let mut candidates = self
+            .members
+            .iter()
+            .copied()
+            .filter(|member| {
+                !self.links.iter().any(|link| {
+                    if link.from == *member {
+                        link.direction == outward_side
+                    } else if link.to == *member {
+                        link.direction.opposite() == outward_side
+                    } else {
+                        false
+                    }
+                })
+            });
+
+        let first = candidates.next()?;
+        if candidates.any(|candidate| candidate == preferred) {
+            return Some(preferred);
+        }
+        if self.members.iter().filter(|member| {
+            !self.links.iter().any(|link| {
+                if link.from == **member {
+                    link.direction == outward_side
+                } else if link.to == **member {
+                    link.direction.opposite() == outward_side
+                } else {
+                    false
+                }
+            })
+        }).count() == 1 {
+            return Some(first);
+        }
+        None
+    }
+
     /// Removes a member and reconnects a simple straight-through pair.
     ///
     /// A two-neighbour horizontal or vertical chain remains contiguous. At a
@@ -349,7 +396,12 @@ impl WindowGridRegistry {
 
         let mut links = anchor_grid.links;
         links.extend(moving_grid.links);
-        let Some(link) = WindowGridLink::new(anchor, moving, side) else {
+        let Some(moving_boundary) =
+            moving_grid.boundary_member(side.opposite(), moving)
+        else {
+            return false;
+        };
+        let Some(link) = WindowGridLink::new(anchor, moving_boundary, side) else {
             return false;
         };
         links.push(link);
@@ -646,7 +698,8 @@ mod tests {
             assert!(grid.link_sequence_to_side(anchor, &[a, b, c], side));
             assert_eq!(grid.direction_between(a, b), Some(WindowGridDirection::Right));
             assert_eq!(grid.direction_between(b, c), Some(WindowGridDirection::Right));
-            assert_eq!(grid.direction_between(anchor, a), Some(side));
+            let attached = if side == WindowGridDirection::Left { c } else { a };
+            assert_eq!(grid.direction_between(anchor, attached), Some(side));
             assert!(grid.is_valid());
         }
     }
