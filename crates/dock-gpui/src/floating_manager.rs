@@ -1945,7 +1945,7 @@ impl FloatingWindowManager {
                             matches!(controller.layout().node(area.root), Some(Node::Column(_)))
                         })
                 })
-            }).unwrap_or(false);
+            });
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
                 state.drop_target = None;
@@ -2232,16 +2232,14 @@ impl FloatingWindowManager {
                         controller_cx,
                     )
                 }) {
-                    Ok(result) => result,
+                    Ok(()) => Ok(()),
                     Err(error) => {
                         tracing::warn!(
                             ?state.group,
                             %error,
-                            "could not access the controller to dock the Floating WindowChain into Main"
+                            "could not dock the Floating WindowChain into Main"
                         );
-                        Err(dock_core::CommandError::InvalidTarget {
-                            reason: "could not access the controller to dock the Floating WindowChain into Main",
-                        })
+                        Err(error)
                     }
                 }
             }
@@ -2973,23 +2971,16 @@ impl FloatingWindowManager {
                         controller_cx,
                     )
                 }) {
-                    Ok(Ok(())) => {
+                    Ok(()) => {
                         let _ = manager.update(app, |manager, _| {
                             manager.pending_window_chain_alignment.remove(&anchor);
                         });
-                    }
-                    Ok(Err(error)) => {
-                        tracing::debug!(
-                            ?anchor,
-                            %error,
-                            "could not commit initial native-frame alignment for the Floating WindowChain"
-                        );
                     }
                     Err(error) => {
                         tracing::debug!(
                             ?anchor,
                             %error,
-                            "could not access the controller to align the Floating WindowChain"
+                            "could not commit initial native-frame alignment for the Floating WindowChain"
                         );
                     }
                 }
@@ -3030,7 +3021,7 @@ impl FloatingWindowManager {
                 continue;
             }
 
-            let member_bounds = match self.controller.update(cx, |controller, _| {
+            let Some(member_bounds) = self.controller.update(cx, |controller, _| {
                 members
                     .iter()
                     .map(|member| {
@@ -3040,17 +3031,8 @@ impl FloatingWindowManager {
                             .map(|floating| (*member, floating.bounds))
                     })
                     .collect::<Option<Vec<_>>>()
-            }) {
-                Ok(Some(bounds)) => bounds,
-                Ok(None) => continue,
-                Err(error) => {
-                    tracing::debug!(
-                        ?anchor,
-                        %error,
-                        "could not read Floating bounds for initial WindowChain alignment"
-                    );
-                    continue;
-                }
+            }) else {
+                continue;
             };
 
             let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
