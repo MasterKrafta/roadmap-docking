@@ -97,7 +97,7 @@ impl WindowGrid {
         outward_side: WindowGridDirection,
         preferred: FloatingGroupId,
     ) -> Option<FloatingGroupId> {
-        let mut candidates = self
+        let candidates = self
             .members
             .iter()
             .copied()
@@ -111,26 +111,16 @@ impl WindowGrid {
                         false
                     }
                 })
-            });
-
-        let first = candidates.next()?;
-        if candidates.any(|candidate| candidate == preferred) {
-            return Some(preferred);
-        }
-        if self.members.iter().filter(|member| {
-            !self.links.iter().any(|link| {
-                if link.from == **member {
-                    link.direction == outward_side
-                } else if link.to == **member {
-                    link.direction.opposite() == outward_side
-                } else {
-                    false
-                }
             })
-        }).count() == 1 {
-            return Some(first);
+            .collect::<Vec<_>>();
+
+        if candidates.contains(&preferred) {
+            Some(preferred)
+        } else if candidates.len() == 1 {
+            candidates.first().copied()
+        } else {
+            None
         }
-        None
     }
 
     /// Removes a member and reconnects a simple straight-through pair.
@@ -391,16 +381,17 @@ impl WindowGridRegistry {
             }
         };
 
-        let mut members = anchor_grid.members;
-        members.splice(insertion_index..insertion_index, moving_grid.members);
-
-        let mut links = anchor_grid.links;
-        links.extend(moving_grid.links);
         let Some(moving_boundary) =
             moving_grid.boundary_member(side.opposite(), moving)
         else {
             return false;
         };
+
+        let mut members = anchor_grid.members;
+        members.splice(insertion_index..insertion_index, moving_grid.members);
+
+        let mut links = anchor_grid.links;
+        links.extend(moving_grid.links);
         let Some(link) = WindowGridLink::new(anchor, moving_boundary, side) else {
             return false;
         };
