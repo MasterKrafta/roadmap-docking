@@ -1789,14 +1789,56 @@ impl Render for FloatingHost {
                         });
                         if should_activate {
                             controller_for_up.update(app, |controller, cx| {
-                                if let Err(error) = controller.dispatch_in(
-                                    DockCommand::ActivateTab {
-                                        group: press.tab_group,
-                                        panel: press.panel,
-                                    },
-                                    cx,
-                                ) {
-                                    tracing::debug!(%error, "could not activate floating tab");
+                                let changes_active_tab = {
+                                    let layout = controller.layout();
+                                    match layout.node(press.tab_group) {
+                                        Some(Node::Tabs(tabs)) => tabs
+                                            .active_child()
+                                            .and_then(|child| match layout.node(child) {
+                                                Some(Node::Panel(value)) => Some(value.panel_id),
+                                                _ => None,
+                                            })
+                                            != Some(press.panel),
+                                        _ => false,
+                                    }
+                                };
+
+                                let mut commands = vec![DockCommand::ActivateTab {
+                                    group: press.tab_group,
+                                    panel: press.panel,
+                                }];
+                                if changes_active_tab {
+                                    let metrics = controller.metrics();
+                                    let layout = controller.layout();
+                                    if let (Some(bounds), Ok(preferred_height)) = (
+                                        layout.floating_group(group).map(|floating| floating.bounds),
+                                        layout.floating_preferred_height_for_tab(
+                                            group,
+                                            press.tab_group,
+                                            press.panel,
+                                            &metrics,
+                                        ),
+                                    ) {
+                                        if bounds.size.height != preferred_height {
+                                            commands.push(DockCommand::ResizeFloatingBounds {
+                                                group,
+                                                bounds: Rect::new(
+                                                    bounds.origin,
+                                                    dock_core::Size::new(
+                                                        bounds.size.width,
+                                                        preferred_height,
+                                                    ),
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+
+                                if let Err(error) = controller.dispatch_sequence_in(commands, cx) {
+                                    tracing::debug!(
+                                        %error,
+                                        "could not activate and resize the floating tab"
+                                    );
                                 }
                             });
                             app.stop_propagation();
