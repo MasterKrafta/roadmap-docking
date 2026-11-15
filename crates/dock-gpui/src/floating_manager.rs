@@ -552,7 +552,17 @@ impl FloatingWindowManager {
 
         let member_bounds = match direction {
             WindowGridDirection::Above | WindowGridDirection::Below => {
-                match_moving_window_width_to_target(member_bounds, anchor, groups[0])
+                let minimum_width = self
+                    .floating_minimum_width(groups[0], cx)
+                    .ok_or(dock_core::CommandError::InvalidTarget {
+                        reason: "could not read the minimum width of the moving FloatingGroup",
+                    })?;
+                match_moving_window_width_to_target(
+                    member_bounds,
+                    anchor,
+                    groups[0],
+                    minimum_width,
+                )
             }
             WindowGridDirection::Left | WindowGridDirection::Right => Some(member_bounds),
         }
@@ -821,6 +831,20 @@ impl FloatingWindowManager {
                 )
             })
             .collect()
+    }
+
+    fn floating_minimum_width(
+        &self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> Option<f32> {
+        self.controller.update(cx, |controller, _| {
+            controller
+                .layout()
+                .floating_minimum_size(group, &controller.metrics())
+                .ok()
+                .map(|minimum| minimum.width)
+        })
     }
 
     /// Computes a complete grid from native frame measurements and the current
@@ -2088,7 +2112,17 @@ impl FloatingWindowManager {
 
         let member_bounds = match direction {
             WindowGridDirection::Above | WindowGridDirection::Below => {
-                match_moving_window_width_to_target(member_bounds, anchor, moving)
+                let minimum_width = self
+                    .floating_minimum_width(moving, cx)
+                    .ok_or(dock_core::CommandError::InvalidTarget {
+                        reason: "could not read the minimum width of the moving FloatingGroup",
+                    })?;
+                match_moving_window_width_to_target(
+                    member_bounds,
+                    anchor,
+                    moving,
+                    minimum_width,
+                )
             }
             WindowGridDirection::Left | WindowGridDirection::Right => Some(member_bounds),
         }
