@@ -205,36 +205,108 @@ fn panel_self_and_same_tab_position_resolve_to_noop() {
 }
 
 #[test]
-fn panel_tab_drop_on_its_own_group_edge_is_no_op() {
+fn panel_tab_can_split_from_its_own_multi_tab_floating_group() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
-    let (panel, p0) = builder.panel(key("own-edge-panel"), constraints());
-    let (_, p1) = builder.panel(key("own-edge-sibling"), constraints());
-    let group = builder.tabs(vec![p0, p1], 0, false);
+    let (panel, panel_node) = builder.panel(key("own-edge-panel"), constraints());
+    let (remaining_panel, remaining_node) =
+        builder.panel(key("own-edge-sibling"), constraints());
+    let group = builder.tabs(vec![panel_node, remaining_node], 0, false);
     let column = builder.column(
         metrics.default_column_width,
         ColumnMode::Expanded,
         vec![group],
         vec![1.0],
     );
-    builder.main_area(DockSide::Left, column);
+    let floating = builder.floating_group(column, bounds(420.0, 100.0), 1);
     let layout = builder.build();
-    let request = DragDropRequest {
-        payload: DragPayload::Panel { panel },
-        handle: DragHandle::PanelTab,
-        origin: Point::ZERO,
-        point: Point::new(4.0, 0.0),
-        target: Some(DropTarget::GroupEdge {
-            group,
-            zone: crate::DropZone::Bottom,
-        }),
-        floating_bounds: None,
-    };
 
-    assert_eq!(
-        layout.resolve_drag_drop(&request, &metrics).unwrap(),
-        DragDropAction::NoOp
+    for zone in [DropZone::Top, DropZone::Bottom] {
+        let target = DropTarget::GroupEdge { group, zone };
+        let request = DragDropRequest {
+            payload: DragPayload::Panel { panel },
+            handle: DragHandle::PanelTab,
+            origin: Point::ZERO,
+            point: Point::new(4.0, 0.0),
+            target: Some(target),
+            floating_bounds: None,
+        };
+        assert_eq!(
+            layout.resolve_drag_drop(&request, &metrics).unwrap(),
+            DragDropAction::Command(DockCommand::MovePanel { panel, target })
+        );
+
+        let mut updated = layout.clone();
+        updated.apply(DockCommand::MovePanel { panel, target }, &metrics).unwrap();
+        let area = updated.floating_group(floating).unwrap().area;
+        let root = updated.dock_area(area).unwrap().root;
+        let Some(Node::Column(updated_column)) = updated.node(root) else {
+            panic!("the Floating composition must retain its Column root");
+        };
+        assert_eq!(updated_column.groups.len(), 2);
+        let expected_groups = if zone == DropZone::Top {
+            vec![updated_column.groups[0], group]
+        } else {
+            vec![group, updated_column.groups[1]]
+        };
+        assert_eq!(updated_column.groups, expected_groups);
+
+        let detached_group = if zone == DropZone::Top {
+            updated_column.groups[0]
+        } else {
+            updated_column.groups[1]
+        };
+        assert!(matches!(
+            updated.node(detached_group),
+            Some(Node::Tabs(tabs))
+                if tabs.children.len() == 1
+                    && matches!(
+                        updated.node(tabs.children[0]),
+                        Some(Node::Panel(value)) if value.panel_id == panel
+                    )
+        ));
+        assert!(matches!(
+            updated.node(group),
+            Some(Node::Tabs(tabs))
+                if tabs.children == vec![remaining_node]
+                    && matches!(
+                        updated.node(tabs.children[0]),
+                        Some(Node::Panel(value)) if value.panel_id == remaining_panel
+                    )
+        ));
+        assert_eq!(updated.validate(&metrics), Ok(()));
+    }
+}
+
+#[test]
+fn panel_tab_drop_on_its_own_single_tab_group_edge_is_no_op() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) = builder.panel(key("own-single-edge-panel"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
     );
+    builder.floating_group(column, bounds(420.0, 100.0), 1);
+    let layout = builder.build();
+
+    for zone in [DropZone::Top, DropZone::Bottom] {
+        let request = DragDropRequest {
+            payload: DragPayload::Panel { panel },
+            handle: DragHandle::PanelTab,
+            origin: Point::ZERO,
+            point: Point::new(4.0, 0.0),
+            target: Some(DropTarget::GroupEdge { group, zone }),
+            floating_bounds: None,
+        };
+        assert_eq!(
+            layout.resolve_drag_drop(&request, &metrics).unwrap(),
+            DragDropAction::NoOp
+        );
+    }
 }
 
 #[test]
