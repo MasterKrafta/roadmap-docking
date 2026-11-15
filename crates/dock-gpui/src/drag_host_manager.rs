@@ -219,9 +219,9 @@ impl DragHostManager {
         )
     }
 
-    /// Opens DragHost for a detached Panel with its Floating composition header reserved.
-    /// The same native window can be promoted to Floating after release.
-    pub fn open_panel_with_composition_header_at_cursor(
+    /// Opens DragHost for a Main-host tab tear-off that can be promoted to Floating
+    /// after release without replacing its native window.
+    pub fn open_panel_tab_at_cursor(
         &mut self,
         panel: PanelId,
         grab_offset: Point,
@@ -306,7 +306,7 @@ impl DragHostManager {
             None,
             Some(side),
             true,
-            true,
+            false,
             cx,
         )
     }
@@ -2072,67 +2072,38 @@ impl Render for DragHostSurface {
                 })
             })
         {
-            if reserve_composition_header {
-                root = root.child(DockCompositionView::render_header(
-                    format!("drag-dock-area-composition-header-{side:?}"),
-                    Rect::new(
-                        Point::ZERO,
-                        Size::new(
-                            self.composition_header_width,
-                            snapshot.metrics.column_header_height,
-                        ),
-                    ),
-                    &[],
-                    snapshot.metrics,
-                    self.theme,
-                ));
-            }
-
-            let content_top = if reserve_composition_header {
-                snapshot.metrics.column_header_height
-            } else {
-                0.0
-            };
             let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
-            root = root.child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top(px(content_top))
-                    .w_full()
-                    .h(px(self.drag_content_size.height))
-                    .child(MainDockView::render(
-                        &snapshot.columns,
-                        &snapshot.groups,
-                        snapshot.panels,
-                        None,
-                        None,
-                        &snapshot.tab_strips,
-                        &snapshot.tab_headers,
-                        &snapshot.tab_overflows,
-                        &snapshot.presentations,
-                        &snapshot.rail_display_orders,
-                        None,
-                        None,
-                        &[],
-                        snapshot.metrics,
-                        None,
-                        toggle_menu,
-                        true,
-                        &snapshot.splitters,
-                        None,
-                        &snapshot.vertical_overflow,
-                        &snapshot.node_ids,
-                        &snapshot.node_sides,
-                        &snapshot.column_sides,
-                        &snapshot.column_groups,
-                        &snapshot.column_modes,
-                        &HashMap::new(),
-                        self.controller.clone(),
-                        self.theme,
-                        true,
-                    )),
-            );
+            root = root.child(MainDockView::render(
+                &snapshot.columns,
+                &snapshot.groups,
+                snapshot.panels,
+                None,
+                None,
+                &snapshot.tab_strips,
+                &snapshot.tab_headers,
+                &snapshot.tab_overflows,
+                &snapshot.presentations,
+                &snapshot.rail_display_orders,
+                None,
+                None,
+                &[],
+                snapshot.metrics,
+                None,
+                toggle_menu,
+                true,
+                &snapshot.splitters,
+                None,
+                &snapshot.vertical_overflow,
+                &snapshot.node_ids,
+                &snapshot.node_sides,
+                &snapshot.column_sides,
+                &snapshot.column_groups,
+                &snapshot.column_modes,
+                &HashMap::new(),
+                self.controller.clone(),
+                self.theme,
+                true,
+            ));
         } else if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let (source_host, source_window_id, panel) = {
