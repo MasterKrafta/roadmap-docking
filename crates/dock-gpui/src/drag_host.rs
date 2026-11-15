@@ -154,22 +154,27 @@ impl DragHostSession {
     pub(crate) fn can_begin_group_view_transfer(
         &self,
         group: NodeId,
-        _panel: PanelId,
+        panels: &[PanelId],
     ) -> bool {
         self.handle == dock_core::DragHandle::GroupGrip
             && matches!(self.payload, dock_core::DragPayload::Group { group: active } if active == group)
             && self.transferred_panels.is_empty()
+            && !panels.is_empty()
+            && panels
+                .iter()
+                .enumerate()
+                .all(|(index, panel)| !panels[..index].contains(panel))
     }
 
     pub(crate) fn begin_group_view_transfer(
         &mut self,
         group: NodeId,
-        panel: PanelId,
+        panels: &[PanelId],
     ) -> bool {
-        if self.transport_host.is_none() || !self.can_begin_group_view_transfer(group, panel) {
+        if self.transport_host.is_none() || !self.can_begin_group_view_transfer(group, panels) {
             return false;
         }
-        self.transferred_panels.push(panel);
+        self.transferred_panels.extend_from_slice(panels);
         true
     }
 
@@ -347,14 +352,16 @@ mod tests {
     }
 
     #[test]
-    fn group_drag_transfers_only_the_active_panel_view_after_host_is_attached() {
+    fn group_drag_transfers_every_tab_view_with_active_panel_first() {
         use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
         use slotmap::SlotMap;
 
         let mut group_ids = SlotMap::<NodeId, ()>::with_key();
         let group = group_ids.insert(());
         let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
-        let panel = panel_ids.insert(());
+        let active_panel = panel_ids.insert(());
+        let inactive_panel = panel_ids.insert(());
+        let panels = [active_panel, inactive_panel];
         let mut session = super::DragHostSession::new(
             DragPayload::Group { group },
             DragHandle::GroupGrip,
@@ -364,14 +371,15 @@ mod tests {
         let drag_host = DragHostId::from_raw(21);
 
         assert_eq!(session.payload(), DragPayload::Group { group });
-        assert!(session.can_begin_group_view_transfer(group, panel));
-        assert!(!session.begin_group_view_transfer(group, panel));
+        assert!(session.can_begin_group_view_transfer(group, &panels));
+        assert!(!session.begin_group_view_transfer(group, &panels));
 
         assert!(session.attach_transport_host(drag_host));
-        assert!(session.begin_group_view_transfer(group, panel));
-        assert_eq!(session.transferred_panel(), Some(panel));
-        assert!(!session.can_begin_group_view_transfer(group, panel));
-        assert!(!session.begin_group_view_transfer(group, panel));
+        assert!(session.begin_group_view_transfer(group, &panels));
+        assert_eq!(session.transferred_panel(), Some(active_panel));
+        assert_eq!(session.transferred_panels(), &panels);
+        assert!(!session.can_begin_group_view_transfer(group, &panels));
+        assert!(!session.begin_group_view_transfer(group, &panels));
         assert_eq!(session.payload(), DragPayload::Group { group });
     }
 
