@@ -327,7 +327,7 @@ mod windows_impl {
     use super::*;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::mem::size_of;
-    use windows::core::{BOOL, PWSTR};
+    use windows::core::BOOL;
     use windows::Win32::{
         Foundation::{
             GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SetLastError, WIN32_ERROR, WPARAM,
@@ -1668,11 +1668,7 @@ mod windows_impl {
                         let mut class_name = [0u16; 64];
                         // SAFETY: class_name is a valid writable UTF-16 buffer.
                         let class_name_len = unsafe {
-                            GetClassNameW(
-                                native,
-                                PWSTR(class_name.as_mut_ptr()),
-                                class_name.len() as i32,
-                            )
+                            GetClassNameW(native, &mut class_name)
                         };
                         if class_name_len > 0
                             && is_desktop_shell_class_name(
