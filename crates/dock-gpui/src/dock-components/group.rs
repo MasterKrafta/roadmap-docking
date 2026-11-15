@@ -104,6 +104,7 @@ impl DockGroupView {
         group_id: NodeId,
         panel: PanelId,
         content_size: Size,
+        tab_width: f32,
         presentation: &GroupPresentation,
         panel_view: gpui::AnyView,
         metrics: DockMetrics,
@@ -129,7 +130,14 @@ impl DockGroupView {
         let strip_width = (content_size.width - 2.0 * control_width).max(0.0);
         let strip_rect = Rect::new(group_origin, Size::new(strip_width, strip_height));
         let strip = TabStripRect::new(group_id, strip_rect);
-        let header = TabHeaderRect::new(group_id, panel, 0, strip_rect);
+        // Keep the detached label at its source width; the rest of the strip
+        // remains available as the Group drag lane.
+        let header_width = tab_width.min(strip_rect.size.width).max(0.0);
+        let header_rect = Rect::new(
+            strip_rect.origin,
+            Size::new(header_width, strip_rect.size.height),
+        );
+        let header = TabHeaderRect::new(group_id, panel, 0, header_rect);
         let panel_rect = Rect::new(
             Point::new(group_origin.x, group_origin.y + strip_height),
             Size::new(
