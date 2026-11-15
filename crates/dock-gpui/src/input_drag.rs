@@ -192,6 +192,8 @@ pub(crate) fn begin_panel_drag_host(
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
+        // Main-origin tabs retain delayed LayoutChanged publication so their
+        // DragHost can be adopted before FloatingWindowManager reconciles.
         let promote_on_float = matches!(
             (source_host, handle),
             (DragSourceHost::Main, DragHandle::PanelTab)
@@ -320,10 +322,9 @@ pub(crate) fn begin_group_drag_host(
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
-        // A Main-host Group tear-off can keep its DragHost HWND and promote it
-        // directly into the resulting Floating composition. A Group detached
-        // from an existing Floating host keeps the regular handoff path because
-        // that composition already owns a registered native window.
+        // Preserve Main-origin event ordering: publish LayoutChanged only
+        // after its DragHost has been adopted. Floating-origin content can also
+        // adopt the temporary HWND; DragHostManager handles host re-registration.
         let promote_on_float = matches!(source_host, DragSourceHost::Main);
         let group_rect = match source_host {
             DragSourceHost::Main => controller
