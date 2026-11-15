@@ -268,6 +268,10 @@ enum NativeMoveTarget {
         target: DropTarget,
         point: Point,
     },
+    FloatingDock {
+        target: DropTarget,
+        point: Point,
+    },
     FloatingChain {
         anchor: FloatingGroupId,
         insert_before: bool,
@@ -1852,16 +1856,15 @@ impl FloatingWindowManager {
                     .prepare_floating_window_drop_resolver(target_window_id, target_group, source)
                     .and_then(|resolver| resolver.resolve(point));
                 let target = match resolved {
-                    Ok(Some(target @ DropTarget::GroupEdge {
-                        zone: dock_core::DropZone::Left | dock_core::DropZone::Right,
-                        ..
-                    })) => Some(target),
-                    Ok(_) => None,
+                    // Keep every legal target from the Floating resolver. Left/Right
+                    // are interpreted as native WindowChain insertion on release;
+                    // all other zones remain ordinary Core docking destinations.
+                    Ok(target) => target,
                     Err(error) => {
                         tracing::debug!(
                             ?target_group,
                             %error,
-                            "could not resolve Floating-to-Floating side drop zone"
+                            "could not resolve Floating-to-Floating drop zone"
                         );
                         controller.drag_mut().clear_resolver();
                         None
@@ -1879,14 +1882,16 @@ impl FloatingWindowManager {
                 target
             });
 
-            let Some(insert_before) = floating_window_chain_insert_before(resolved_target) else {
-                state.drop_target = None;
-                return;
-            };
-            Some(NativeMoveTarget::FloatingChain {
-                anchor: target_group,
-                insert_before,
-            })
+            match resolved_target {
+                Some(target) => match floating_window_chain_insert_before(Some(target)) {
+                    Some(insert_before) => Some(NativeMoveTarget::FloatingChain {
+                        anchor: target_group,
+                        insert_before,
+                    }),
+                    None => Some(NativeMoveTarget::FloatingDock { target, point }),
+                },
+                None => None,
+            }
         };
         state.drop_target = resolved;
     }
@@ -2088,7 +2093,10 @@ impl FloatingWindowManager {
             }
             drop_target => {
                 let dock_target = match drop_target {
-                    Some(NativeMoveTarget::MainDock { target, point }) => Some((target, point)),
+                    Some(NativeMoveTarget::MainDock { target, point })
+                    | Some(NativeMoveTarget::FloatingDock { target, point }) => {
+                        Some((target, point))
+                    }
                     _ => None,
                 };
                 self.controller.update(cx, |controller, controller_cx| {
