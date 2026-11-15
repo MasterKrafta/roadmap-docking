@@ -309,6 +309,111 @@ fn panel_tab_drop_on_its_own_single_tab_group_edge_is_no_op() {
 }
 
 #[test]
+fn floating_panel_tab_can_split_between_groups_in_another_floating_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (panel, panel_node) =
+        builder.panel(key("floating-tab-stack-source"), constraints());
+    let (remaining_panel, remaining_node) =
+        builder.panel(key("floating-tab-stack-source-remaining"), constraints());
+    let source_group = builder.tabs(vec![panel_node, remaining_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.floating_group(source_column, bounds(100.0, 100.0), 1);
+
+    let (_, first_target_node) =
+        builder.panel(key("floating-tab-stack-target-first"), constraints());
+    let first_target_group = builder.tabs(vec![first_target_node], 0, false);
+    let (_, second_target_node) =
+        builder.panel(key("floating-tab-stack-target-second"), constraints());
+    let second_target_group = builder.tabs(vec![second_target_node], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![first_target_group, second_target_group],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(target_column, bounds(620.0, 100.0), 2);
+    let layout = builder.build();
+
+    let rects = layout
+        .compute_floating_rects(target_floating, &metrics)
+        .unwrap();
+    let source = DropSource::Panel { panel };
+    let target = DropTarget::GroupEdge {
+        group: first_target_group,
+        zone: DropZone::Bottom,
+    };
+    let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+    let zone = zones
+        .iter()
+        .find(|zone| zone.zone == DropZone::Bottom && zone.target == target)
+        .expect("a Floating PanelTab drag must expose the boundary between target Groups");
+    let point = Point::new(
+        zone.rect.origin.x + zone.rect.size.width * 0.5,
+        zone.rect.origin.y + zone.rect.size.height * 0.5,
+    );
+    let resolved = layout
+        .prepare_drop_resolver(source, &rects, &metrics)
+        .unwrap()
+        .resolve(point)
+        .unwrap()
+        .expect("the inter-Group Floating boundary must resolve");
+    assert_eq!(resolved.target, target);
+
+    let request = DragDropRequest {
+        payload: DragPayload::Panel { panel },
+        handle: DragHandle::PanelTab,
+        origin: Point::ZERO,
+        point,
+        target: Some(target),
+        floating_bounds: None,
+    };
+    assert_eq!(
+        layout.resolve_drag_drop(&request, &metrics).unwrap(),
+        DragDropAction::Command(DockCommand::MovePanel { panel, target })
+    );
+
+    let mut updated = layout.clone();
+    updated
+        .apply(DockCommand::MovePanel { panel, target }, &metrics)
+        .unwrap();
+    let area = updated.floating_group(target_floating).unwrap().area;
+    let root = updated.dock_area(area).unwrap().root;
+    let Some(Node::Column(column)) = updated.node(root) else {
+        panic!("the destination Floating must retain its Column root");
+    };
+    assert_eq!(column.groups.len(), 3);
+    assert_eq!(column.groups[0], first_target_group);
+    assert_eq!(column.groups[2], second_target_group);
+    let inserted_group = column.groups[1];
+    assert!(matches!(
+        updated.node(inserted_group),
+        Some(Node::Tabs(tabs))
+            if tabs.children.len() == 1
+                && matches!(
+                    updated.node(tabs.children[0]),
+                    Some(Node::Panel(value)) if value.panel_id == panel
+                )
+    ));
+    assert!(matches!(
+        updated.node(source_group),
+        Some(Node::Tabs(tabs))
+            if tabs.children == vec![remaining_node]
+                && matches!(
+                    updated.node(tabs.children[0]),
+                    Some(Node::Panel(value)) if value.panel_id == remaining_panel
+                )
+    ));
+    assert_eq!(updated.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn panel_and_group_free_area_drops_require_adapter_bounds_and_resolve_to_float() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
