@@ -419,11 +419,17 @@ pub(crate) fn match_moving_window_width_to_target(
     mut bounds: Vec<(FloatingGroupId, Rect)>,
     target: FloatingGroupId,
     moving: FloatingGroupId,
+    moving_minimum_width: f32,
 ) -> Option<Vec<(FloatingGroupId, Rect)>> {
     let target_index = bounds.iter().position(|(group, _)| *group == target)?;
     let moving_index = bounds.iter().position(|(group, _)| *group == moving)?;
     let target_width = bounds[target_index].1.size.width;
-    if !target_width.is_finite() || target_width <= 0.0 {
+    if !target_width.is_finite()
+        || target_width <= 0.0
+        || !moving_minimum_width.is_finite()
+        || moving_minimum_width <= 0.0
+        || target_width < moving_minimum_width
+    {
         return None;
     }
     bounds[moving_index].1.size.width = target_width;
@@ -921,6 +927,7 @@ mod window_grid_bounds_tests {
             vec![(target, target_bounds), (moving, moving_bounds)],
             target,
             moving,
+            120.0,
         )
         .expect("both windows must exist");
 
@@ -928,6 +935,25 @@ mod window_grid_bounds_tests {
         assert_eq!(result[1].1.size.width, 240.0);
         assert_eq!(result[1].1.size.height, moving_bounds.size.height);
     }
+
+    #[test]
+    fn moving_width_normalization_rejects_a_target_below_the_moving_minimum() {
+        let [target, moving] = groups(2).try_into().expect("two group ids");
+        let target_bounds = Rect::new(Point::new(20.0, 30.0), Size::new(240.0, 300.0));
+        let moving_bounds = Rect::new(Point::new(800.0, 50.0), Size::new(420.0, 500.0));
+
+        assert!(
+            match_moving_window_width_to_target(
+                vec![(target, target_bounds), (moving, moving_bounds)],
+                target,
+                moving,
+                280.0,
+            )
+            .is_none(),
+            "the target width must not be expanded to satisfy the moving window"
+        );
+    }
+}
 }
 
 #[cfg(test)]
