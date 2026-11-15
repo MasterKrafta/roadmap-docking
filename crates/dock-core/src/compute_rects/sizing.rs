@@ -224,6 +224,26 @@ pub(super) fn minimum_floating_node_size(
         })
 }
 
+/// Selects the Main or Floating minimum-size policy for recursive geometry.
+pub(super) fn layout_minimum_size(
+    layout: &Layout,
+    id: NodeId,
+    metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
+    floating_root: Option<NodeId>,
+) -> Result<Size, ComputeRectsError> {
+    match floating_root {
+        Some(root) => minimum_floating_node_size(
+            layout,
+            id,
+            root,
+            metrics,
+            minimum_sizes,
+        ),
+        None => minimum_node_size(layout, id, metrics, minimum_sizes),
+    }
+}
+
 /// Computes the minimum geometry of a node, including panel-content constraints
 /// and the chrome consumed by expanded Tabs groups.
 pub(super) fn minimum_node_size(
