@@ -16,6 +16,8 @@ pub mod dock_host;
 pub mod drag_host;
 pub mod drag_host_manager;
 pub mod floating_manager;
+mod window_chain;
+mod window_chain_geometry;
 
 mod geometry;
 pub mod input;
