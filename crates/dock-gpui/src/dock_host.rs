@@ -18,7 +18,9 @@ use crate::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
     },
-    dock_components::{collect_group_presentations, GroupPresentation},
+    dock_components::{
+        collect_group_presentations, GroupPresentation, PanelTransferPresentation,
+    },
     geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
     input::{
         PointerPress, ResizePreview, ResizePreviewKind, floating_bounds, map_hit_test_point,
@@ -494,30 +496,15 @@ impl Render for DockHost {
         let transferred_panels = self.controller.update(cx, |controller, _| {
             controller.transferred_panel_views_from(source_window_id)
         });
-        let transferred_panel_set = transferred_panels.iter().copied().collect::<HashSet<_>>();
-        let groups_without_visible_tabs = group_presentations
-            .iter()
-            .filter_map(|(group, presentation)| {
-                (presentation.tab_count() > 0
-                    && presentation
-                        .tabs
-                        .iter()
-                        .all(|tab| transferred_panel_set.contains(&tab.panel)))
-                .then_some(*group)
-            })
-            .collect::<HashSet<_>>();
-        let panels_in_hidden_groups = group_presentations
-            .iter()
-            .filter(|(group, _)| groups_without_visible_tabs.contains(group))
-            .flat_map(|(_, presentation)| presentation.tabs.iter().map(|tab| tab.panel))
-            .collect::<HashSet<_>>();
+        let transfer_presentation =
+            PanelTransferPresentation::new(&group_presentations, &transferred_panels);
         let main_groups = rects
             .as_ref()
             .map(|rects| {
                 rects
                     .groups
                     .iter()
-                    .filter(|group| !groups_without_visible_tabs.contains(&group.group))
+                    .filter(|group| !transfer_presentation.groups_without_visible_tabs.contains(&group.group))
                     .copied()
                     .collect::<Vec<_>>()
             })
@@ -528,7 +515,7 @@ impl Render for DockHost {
                 rects
                     .tab_strips
                     .iter()
-                    .filter(|strip| !groups_without_visible_tabs.contains(&strip.group))
+                    .filter(|strip| !transfer_presentation.groups_without_visible_tabs.contains(&strip.group))
                     .copied()
                     .collect::<Vec<_>>()
             })
@@ -539,7 +526,7 @@ impl Render for DockHost {
                 rects
                     .tab_headers
                     .iter()
-                    .filter(|header| !transferred_panel_set.contains(&header.panel))
+                    .filter(|header| !transfer_presentation.transferred_panels.contains(&header.panel))
                     .copied()
                     .collect::<Vec<_>>()
             })
@@ -574,7 +561,8 @@ impl Render for DockHost {
             .filter(|(panel, _)| {
                 main_active_panels.contains(&panel.panel)
                     && !active_flyout.is_some_and(|flyout| flyout.panel == panel.panel)
-                    && !panels_in_hidden_groups.contains(&panel.panel)
+                    && !transfer_presentation.transferred_panels.contains(&panel.panel)
+                    && !transfer_presentation.panels_in_hidden_groups.contains(&panel.panel)
                     && mounted_panel_ids.insert(panel.panel)
             })
             .cloned()

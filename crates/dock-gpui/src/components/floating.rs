@@ -20,7 +20,7 @@ use ui::Theme;
 use crate::{
     dock_components::{
         collect_group_presentations, CompositionDragArea, DockCompositionView,
-        DockGroupView, DockTab, GroupDragArea, GroupPresentation,
+        DockGroupView, DockTab, GroupDragArea, GroupPresentation, PanelTransferPresentation,
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -1843,6 +1843,11 @@ impl Render for FloatingHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(window_id)
         });
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(window_id)
+        });
+        let transfer_presentation =
+            PanelTransferPresentation::new(&snapshot.group_presentations, &transferred_panels);
         if !pending_transfers.is_empty()
             && pending_transfers.iter().all(|panel| {
                 panel_views
@@ -1893,6 +1898,63 @@ impl Render for FloatingHost {
                 }
             });
         }
+
+        let rendered_groups = snapshot
+            .rects
+            .groups
+            .iter()
+            .filter(|group| {
+                !transfer_presentation
+                    .groups_without_visible_tabs
+                    .contains(&group.group)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let rendered_tab_strips = snapshot
+            .rects
+            .tab_strips
+            .iter()
+            .filter(|strip| {
+                !transfer_presentation
+                    .groups_without_visible_tabs
+                    .contains(&strip.group)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let rendered_tab_headers = snapshot
+            .rects
+            .tab_headers
+            .iter()
+            .filter(|header| {
+                !transfer_presentation
+                    .transferred_panels
+                    .contains(&header.panel)
+                    && !transfer_presentation
+                        .groups_without_visible_tabs
+                        .contains(&header.group)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let rendered_tab_overflows = snapshot
+            .rects
+            .tab_overflows
+            .iter()
+            .filter(|overflow| {
+                !transfer_presentation
+                    .groups_without_visible_tabs
+                    .contains(&overflow.group)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let rendered_panel_views = panel_views
+            .into_iter()
+            .filter(|(panel, _)| {
+                !transfer_presentation.transferred_panels.contains(&panel.panel)
+                    && !transfer_presentation
+                        .panels_in_hidden_groups
+                        .contains(&panel.panel)
+            })
+            .collect::<Vec<_>>();
 
         if self.open_context_menu.as_ref().is_some_and(|open| {
             !context_menu_target_exists(
@@ -1952,12 +2014,12 @@ impl Render for FloatingHost {
         root = root.child(FloatingWindowContent::render(
             snapshot.floating,
             &snapshot.rects.columns,
-            &snapshot.rects.groups,
-            panel_views,
+            &rendered_groups,
+            rendered_panel_views,
             dragged_group,
-            &snapshot.rects.tab_strips,
-            &snapshot.rects.tab_headers,
-            &snapshot.rects.tab_overflows,
+            &rendered_tab_strips,
+            &rendered_tab_headers,
+            &rendered_tab_overflows,
             &snapshot.group_presentations,
             &snapshot.column_groups,
             &snapshot.column_modes,

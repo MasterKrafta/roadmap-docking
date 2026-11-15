@@ -936,46 +936,54 @@ impl FloatingWindowManager {
             return false;
         };
 
-        // A floating source may already use this PanelId as its composition-host
-        // registry key. Preserve that HWND for the source remainder, then let the
-        // temporary DragHost become the host for the detached destination.
-        let source_host_reassignment = if self.registry.windows.contains_key(&panel) {
-            let Some(source_group) = self
-                .registry
-                .windows
-                .get(&panel)
-                .and_then(|entry| entry.host_group)
-            else {
-                return false;
-            };
-            if source_group == group {
-                return false;
-            }
+        enum SourceHostReassignment {
+            DormantPanelWindow,
+            ActiveComposition {
+                source_group: FloatingGroupId,
+                replacement_panel: Option<PanelId>,
+            },
+        }
 
-            let source_panels = self.controller.update(cx, |controller, _| {
-                let floating = controller.layout().floating_group(source_group)?;
-                let area = controller.layout().dock_area(floating.area)?;
-                let mut panels = Vec::new();
-                let mut seen = HashSet::new();
-                collect_panel_order(controller.layout(), area.root, &mut panels, &mut seen);
-                Some(panels)
-            });
-            match source_panels {
-                Some(panels) => {
-                    let Some(replacement_panel) =
-                        panels.into_iter().find(|candidate| *candidate != panel)
-                    else {
-                        return false;
-                    };
-                    if self.registry.windows.contains_key(&replacement_panel) {
-                        return false;
-                    }
-                    Some((source_group, Some(replacement_panel)))
+        let source_host_reassignment = match self
+            .registry
+            .windows
+            .get(&panel)
+            .map(|entry| entry.host_group)
+        {
+            None => None,
+            Some(None) => Some(SourceHostReassignment::DormantPanelWindow),
+            Some(Some(source_group)) => {
+                if source_group == group {
+                    return false;
                 }
-                None => Some((source_group, None)),
+
+                let replacement_panel = self.controller.update(cx, |controller, _| {
+                    let floating = controller.layout().floating_group(source_group)?;
+                    let area = controller.layout().dock_area(floating.area)?;
+                    let mut panels = Vec::new();
+                    let mut seen = HashSet::new();
+                    collect_panel_order(controller.layout(), area.root, &mut panels, &mut seen);
+                    Some(panels.into_iter().find(|candidate| *candidate != panel))
+                }).flatten();
+
+                // Every open panel may already own a dormant, hidden HWND. That is
+                // not a conflict: retire it and move the active source-composition
+                // HWND to that PanelId instead. Only another active composition host
+                // is a genuine key collision.
+                if replacement_panel.is_some_and(|replacement| {
+                    self.registry
+                        .windows
+                        .get(&replacement)
+                        .is_some_and(|entry| entry.host_group.is_some())
+                }) {
+                    return false;
+                }
+
+                Some(SourceHostReassignment::ActiveComposition {
+                    source_group,
+                    replacement_panel,
+                })
             }
-        } else {
-            None
         };
 
         // DragHost was created before the persistent Floating composition header
@@ -991,16 +999,30 @@ impl FloatingWindowManager {
         }
 
         match source_host_reassignment {
-            Some((source_group, Some(replacement_panel))) => {
+            Some(SourceHostReassignment::DormantPanelWindow) => {
+                // The panel had a per-panel HWND, but it was not hosting a
+                // composition. DragHost replaces that hidden native surface.
+                self.release_panel_window(panel, cx);
+            }
+            Some(SourceHostReassignment::ActiveComposition {
+                source_group,
+                replacement_panel: Some(replacement_panel),
+            }) => {
                 let Some(existing_entry) = self.registry.windows.remove(&panel) else {
                     return false;
                 };
+                if self.registry.windows.contains_key(&replacement_panel) {
+                    self.release_panel_window(replacement_panel, cx);
+                }
                 self.registry.windows.insert(replacement_panel, existing_entry);
                 self.host_registry
                     .floating_groups
                     .insert(source_group, replacement_panel);
             }
-            Some((source_group, None)) => {
+            Some(SourceHostReassignment::ActiveComposition {
+                source_group,
+                replacement_panel: None,
+            }) => {
                 // The detached content was the source composition's last
                 // remaining content. Its old host is no longer needed.
                 self.release_panel_window(panel, cx);

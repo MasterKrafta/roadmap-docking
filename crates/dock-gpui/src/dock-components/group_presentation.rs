@@ -27,6 +27,45 @@ pub(crate) struct GroupPresentation {
     pub tabs: Vec<TabPresentation>,
 }
 
+/// Source-side presentation changes while one or more cached PanelViews are transported.
+#[derive(Clone, Default)]
+pub(crate) struct PanelTransferPresentation {
+    pub transferred_panels: HashSet<PanelId>,
+    pub groups_without_visible_tabs: HashSet<NodeId>,
+    pub panels_in_hidden_groups: HashSet<PanelId>,
+}
+
+impl PanelTransferPresentation {
+    pub(crate) fn new(
+        group_presentations: &HashMap<NodeId, GroupPresentation>,
+        transferred_panels: &[PanelId],
+    ) -> Self {
+        let transferred_panels = transferred_panels.iter().copied().collect::<HashSet<_>>();
+        let groups_without_visible_tabs = group_presentations
+            .iter()
+            .filter_map(|(group, presentation)| {
+                (presentation.tab_count() > 0
+                    && presentation
+                        .tabs
+                        .iter()
+                        .all(|tab| transferred_panels.contains(&tab.panel)))
+                .then_some(*group)
+            })
+            .collect::<HashSet<_>>();
+        let panels_in_hidden_groups = group_presentations
+            .iter()
+            .filter(|(group, _)| groups_without_visible_tabs.contains(group))
+            .flat_map(|(_, presentation)| presentation.tabs.iter().map(|tab| tab.panel))
+            .collect::<HashSet<_>>();
+
+        Self {
+            transferred_panels,
+            groups_without_visible_tabs,
+            panels_in_hidden_groups,
+        }
+    }
+}
+
 /// Builds presentation metadata for Tabs nodes without retaining another tree.
 pub(crate) fn collect_group_presentations(
     layout: &Layout,
@@ -121,6 +160,54 @@ mod tests {
             None,
         );
         assert!(groups.is_empty());
+    }
+
+
+    #[test]
+    fn panel_transfer_presentation_hides_only_groups_without_remaining_tabs() {
+        use std::collections::HashMap;
+
+        use dock_core::PanelId;
+        use slotmap::SlotMap;
+
+        use super::{GroupPresentation, PanelTransferPresentation, TabPresentation};
+
+        let mut group_ids = SlotMap::<NodeId, ()>::with_key();
+        let group = group_ids.insert(());
+        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
+        let moved = panel_ids.insert(());
+        let remaining = panel_ids.insert(());
+        let presentations = HashMap::from([(
+            group,
+            GroupPresentation {
+                active_panel: Some(moved),
+                tabs: vec![
+                    TabPresentation {
+                        panel: moved,
+                        title: "Moved".into(),
+                        icon: None,
+                        index: 0,
+                    },
+                    TabPresentation {
+                        panel: remaining,
+                        title: "Remaining".into(),
+                        icon: None,
+                        index: 1,
+                    },
+                ],
+                ..GroupPresentation::default()
+            },
+        )]);
+
+        let partial = PanelTransferPresentation::new(&presentations, &[moved]);
+        assert!(partial.transferred_panels.contains(&moved));
+        assert!(!partial.groups_without_visible_tabs.contains(&group));
+        assert!(!partial.panels_in_hidden_groups.contains(&remaining));
+
+        let complete = PanelTransferPresentation::new(&presentations, &[moved, remaining]);
+        assert!(complete.groups_without_visible_tabs.contains(&group));
+        assert!(complete.panels_in_hidden_groups.contains(&moved));
+        assert!(complete.panels_in_hidden_groups.contains(&remaining));
     }
 }
 

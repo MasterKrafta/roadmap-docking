@@ -317,12 +317,17 @@ fn topmost_known_window_under_point(
     NativeWindowAtPoint::Empty
 }
 
+#[cfg(any(windows, test))]
+fn is_desktop_shell_class_name(class_name: &str) -> bool {
+    matches!(class_name, "Progman" | "WorkerW")
+}
+
 #[cfg(windows)]
 mod windows_impl {
     use super::*;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::mem::size_of;
-    use windows::core::BOOL;
+    use windows::core::{BOOL, PWSTR};
     use windows::Win32::{
         Foundation::{
             GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SetLastError, WIN32_ERROR, WPARAM,
@@ -1659,6 +1664,28 @@ mod windows_impl {
                         if !visible {
                             continue;
                         }
+
+                        let mut class_name = [0u16; 64];
+                        // SAFETY: class_name is a valid writable UTF-16 buffer.
+                        let class_name_len = unsafe {
+                            GetClassNameW(
+                                native,
+                                PWSTR(class_name.as_mut_ptr()),
+                                class_name.len() as i32,
+                            )
+                        };
+                        if class_name_len > 0
+                            && is_desktop_shell_class_name(
+                                &String::from_utf16_lossy(
+                                    &class_name[..class_name_len as usize],
+                                ),
+                            )
+                        {
+                            // Progman/WorkerW are the desktop surface, not an
+                            // application window that should block a floating tear-off.
+                            continue;
+                        }
+
                         let mut rect = RECT::default();
                         // SAFETY: rect is a valid writable RECT.
                         if unsafe { GetWindowRect(native, &mut rect) }.is_ok() {
@@ -2008,6 +2035,14 @@ mod drop_window_target_tests {
             }
             result
         })
+    }
+
+    #[test]
+    fn desktop_shell_classes_are_not_treated_as_foreign_application_windows() {
+        assert!(super::is_desktop_shell_class_name("Progman"));
+        assert!(super::is_desktop_shell_class_name("WorkerW"));
+        assert!(!super::is_desktop_shell_class_name("Chrome_WidgetWin_1"));
+        assert!(!super::is_desktop_shell_class_name(""));
     }
 
     #[test]
