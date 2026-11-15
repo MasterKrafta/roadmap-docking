@@ -590,9 +590,9 @@ mod tests {
         assert!(grid.link_after(a, b));
         assert!(grid.link_after(b, c));
         assert!(grid.link_before(b, d));
-        assert_eq!(grid.members_for(a), vec![a, d, b, c]);
-        assert_eq!(grid.members_for(c), vec![a, d, b, c]);
-        assert_eq!(grid.direction_between(a, d), Some(WindowGridDirection::Right));
+        assert_eq!(grid.members_for(a), vec![d, a, b, c]);
+        assert_eq!(grid.members_for(c), vec![d, a, b, c]);
+        assert_eq!(grid.direction_between(b, d), Some(WindowGridDirection::Left));
     }
 
     #[test]
