@@ -247,29 +247,32 @@ impl DragHostManager {
         )
     }
 
-    /// Opens DragHost with the source Group's original tabs and active cached PanelView.
+    /// Opens DragHost with every cached PanelView belonging to the source Group.
     ///
-    /// For a Main-host tear-off, the same native window is adopted as the
-    /// resulting Floating composition when released over free space.
+    /// The active tab is first so the same native window can be adopted as the
+    /// resulting Floating composition when the group is released over free space.
     pub fn open_group_at_cursor(
         &mut self,
         group: NodeId,
-        panel: PanelId,
+        panels: Vec<PanelId>,
         grab_offset: Point,
         logical_size: Size,
         promote_on_float: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         let can_transfer = self.controller.update(cx, |controller, _| {
-            controller.can_begin_group_view_transfer(group, panel)
+            controller.can_begin_group_view_transfer(group, &panels)
         });
         if !can_transfer {
-            return Err(DragHostError::PanelTransferUnavailable(panel));
+            return Err(panels.first().copied().map_or(
+                DragHostError::ContentTransferUnavailable,
+                DragHostError::PanelTransferUnavailable,
+            ));
         }
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
-            vec![panel],
+            panels,
             Some(group),
             None,
             promote_on_float,
@@ -555,8 +558,8 @@ impl DragHostManager {
         let host_state_ready = self.controller.update(cx, |controller, controller_cx| {
             let attached = controller.drag_mut().attach_transport_host(id);
             let transferred = match (group, dock_area, panels.as_slice()) {
-                (Some(group), None, [panel]) => {
-                    controller.begin_group_view_transfer(group, *panel)
+                (Some(group), None, panels) => {
+                    controller.begin_group_view_transfer(group, panels)
                 }
                 (None, Some(side), panels) => {
                     controller.begin_dock_area_view_transfer(side, panels)
