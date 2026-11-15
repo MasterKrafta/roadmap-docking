@@ -4,58 +4,158 @@
 //! The initial extraction preserves the existing horizontal calculations;
 //! vertical placement and grid-wide resize geometry are added in later stages.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
-use dock_core::{FloatingGroupId, Rect};
-use platform::PhysicalRect;
+use dock_core::{FloatingGroupId, Point, Rect, Size};
+use platform::{PhysicalPoint, PhysicalRect, PhysicalSize};
 
-use crate::window_chain::WindowGridRegistry;
+use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridRegistry};
 
-/// Native outer width and DWM-visible insets, all expressed in physical pixels.
+/// Native frame and client measurements, all in physical desktop pixels.
+///
+/// Core stores each window's outer origin in physical pixels and client size in
+/// logical pixels. Keeping the native client insets and scale beside the Core
+/// bounds lets vertical header overlap be calculated without mixing DPI spaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct NativeFrameGeometry {
     pub(crate) outer_width: f32,
+    pub(crate) outer_height: f32,
     pub(crate) visible_left_inset: f32,
     pub(crate) visible_right_inset: f32,
+    pub(crate) client_left_inset: f32,
+    pub(crate) client_top_inset: f32,
+    pub(crate) client_right_inset: f32,
+    pub(crate) client_bottom_inset: f32,
+    pub(crate) client_width: f32,
+    pub(crate) client_height: f32,
+    pub(crate) scale_factor: f32,
 }
 
 impl NativeFrameGeometry {
-    pub(crate) fn from_rects(outer: PhysicalRect, visible: PhysicalRect) -> Option<Self> {
+    pub(crate) fn from_native_rects(
+        outer: PhysicalRect,
+        visible: PhysicalRect,
+        client_origin: PhysicalPoint,
+        client_size: PhysicalSize,
+        scale_factor: f32,
+    ) -> Option<Self> {
         let outer_width = i64::from(outer.right) - i64::from(outer.left);
+        let outer_height = i64::from(outer.bottom) - i64::from(outer.top);
         let visible_left_inset = i64::from(visible.left) - i64::from(outer.left);
         let visible_right_inset = i64::from(outer.right) - i64::from(visible.right);
+        let client_left_inset = i64::from(client_origin.x) - i64::from(outer.left);
+        let client_top_inset = i64::from(client_origin.y) - i64::from(outer.top);
+        let client_right_inset = i64::from(outer.right)
+            - (i64::from(client_origin.x) + i64::from(client_size.width));
+        let client_bottom_inset = i64::from(outer.bottom)
+            - (i64::from(client_origin.y) + i64::from(client_size.height));
 
         if outer_width <= 0
+            || outer_height <= 0
+            || !client_size.is_valid()
+            || !scale_factor.is_finite()
+            || scale_factor <= 0.0
             || visible_left_inset < 0
             || visible_right_inset < 0
             || visible_left_inset + visible_right_inset >= outer_width
+            || client_left_inset < 0
+            || client_top_inset < 0
+            || client_right_inset < 0
+            || client_bottom_inset < 0
+            || client_left_inset + i64::from(client_size.width) + client_right_inset
+                != outer_width
+            || client_top_inset + i64::from(client_size.height) + client_bottom_inset
+                != outer_height
         {
             return None;
         }
 
         Some(Self {
             outer_width: outer_width as f32,
+            outer_height: outer_height as f32,
             visible_left_inset: visible_left_inset as f32,
             visible_right_inset: visible_right_inset as f32,
+            client_left_inset: client_left_inset as f32,
+            client_top_inset: client_top_inset as f32,
+            client_right_inset: client_right_inset as f32,
+            client_bottom_inset: client_bottom_inset as f32,
+            client_width: client_size.width as f32,
+            client_height: client_size.height as f32,
+            scale_factor,
         })
     }
 
-    pub(crate) fn without_frame(outer_width: f32) -> Option<Self> {
-        (outer_width.is_finite() && outer_width > 0.0).then_some(Self {
+    /// Fallback for a not-yet-created HWND. Its future client is treated as a
+    /// frame-less window; reconciliation replaces this estimate with native data.
+    pub(crate) fn without_frame_size(
+        logical_size: Size,
+        scale_factor: f32,
+    ) -> Option<Self> {
+        if !logical_size.width.is_finite()
+            || logical_size.width <= 0.0
+            || !logical_size.height.is_finite()
+            || logical_size.height <= 0.0
+            || !scale_factor.is_finite()
+            || scale_factor <= 0.0
+        {
+            return None;
+        }
+
+        let outer_width = logical_size.width * scale_factor;
+        let outer_height = logical_size.height * scale_factor;
+        let geometry = Self {
             outer_width,
+            outer_height,
             visible_left_inset: 0.0,
             visible_right_inset: 0.0,
-        })
+            client_left_inset: 0.0,
+            client_top_inset: 0.0,
+            client_right_inset: 0.0,
+            client_bottom_inset: 0.0,
+            client_width: outer_width,
+            client_height: outer_height,
+            scale_factor,
+        };
+        geometry.is_valid().then_some(geometry)
+    }
+
+    /// Horizontal-only compatibility helper for tests without a real HWND.
+    pub(crate) fn without_frame(outer_width: f32) -> Option<Self> {
+        Self::without_frame_size(Size::new(outer_width, 1.0), 1.0)
     }
 
     fn is_valid(self) -> bool {
         self.outer_width.is_finite()
             && self.outer_width > 0.0
+            && self.outer_height.is_finite()
+            && self.outer_height > 0.0
             && self.visible_left_inset.is_finite()
             && self.visible_right_inset.is_finite()
             && self.visible_left_inset >= 0.0
             && self.visible_right_inset >= 0.0
             && self.visible_left_inset + self.visible_right_inset < self.outer_width
+            && self.client_left_inset.is_finite()
+            && self.client_top_inset.is_finite()
+            && self.client_right_inset.is_finite()
+            && self.client_bottom_inset.is_finite()
+            && self.client_left_inset >= 0.0
+            && self.client_top_inset >= 0.0
+            && self.client_right_inset >= 0.0
+            && self.client_bottom_inset >= 0.0
+            && self.client_width.is_finite()
+            && self.client_width > 0.0
+            && self.client_height.is_finite()
+            && self.client_height > 0.0
+            && self.scale_factor.is_finite()
+            && self.scale_factor > 0.0
+            && (self.client_left_inset + self.client_width + self.client_right_inset
+                - self.outer_width)
+                .abs()
+                < 0.5
+            && (self.client_top_inset + self.client_height + self.client_bottom_inset
+                - self.outer_height)
+                .abs()
+                < 0.5
     }
 }
 
@@ -93,6 +193,224 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
     }
 
     Some(bounds)
+}
+
+/// Calculates every member's physical desktop origin from the WindowGrid links.
+///
+/// The anchor remains fixed. Horizontal neighbors meet at their DWM-visible
+/// frame edges. Vertical neighbors align their client left edges and overlap
+/// exactly the lower window's CompositionHeader height, so the upper HWND
+/// covers the lower header. Repeated links on one side are laid out as a
+/// deterministic outward lane in member order.
+pub(crate) fn arrange_window_grid_bounds(
+    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    frames: &[NativeFrameGeometry],
+    links: &[WindowGridLink],
+    anchor: FloatingGroupId,
+    header_height: f32,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    if bounds.len() != frames.len()
+        || bounds.is_empty()
+        || frames.iter().any(|frame| !frame.is_valid())
+        || !header_height.is_finite()
+        || header_height <= 0.0
+    {
+        return None;
+    }
+
+    let mut indices = HashMap::with_capacity(bounds.len());
+    for (index, (group, rect)) in bounds.iter().enumerate() {
+        if indices.insert(*group, index).is_some()
+            || !rect.origin.x.is_finite()
+            || !rect.origin.y.is_finite()
+            || !rect.size.width.is_finite()
+            || rect.size.width <= 0.0
+            || !rect.size.height.is_finite()
+            || rect.size.height <= 0.0
+        {
+            return None;
+        }
+    }
+
+    let anchor_index = *indices.get(&anchor)?;
+    if bounds.len() == 1 {
+        return links.is_empty().then_some(bounds);
+    }
+    if links.len() != bounds.len() - 1 {
+        return None;
+    }
+
+    let mut adjacency = vec![Vec::<(usize, WindowGridDirection)>::new(); bounds.len()];
+    let mut edges = HashSet::new();
+    for link in links {
+        let from = *indices.get(&link.from)?;
+        let to = *indices.get(&link.to)?;
+        if from == to
+            || !edges.insert(if from < to { (from, to) } else { (to, from) })
+        {
+            return None;
+        }
+        adjacency[from].push((to, link.direction));
+        adjacency[to].push((from, opposite_direction(link.direction)));
+    }
+
+    let mut visited = HashSet::from([anchor_index]);
+    let mut pending = VecDeque::from([anchor_index]);
+    // These are the physical neighbors after same-side branches are packed
+    // into one outward lane. They are used to reject unrelated window overlap.
+    let mut physical_edges = HashSet::new();
+
+    while let Some(current) = pending.pop_front() {
+        for direction in [
+            WindowGridDirection::Left,
+            WindowGridDirection::Right,
+            WindowGridDirection::Above,
+            WindowGridDirection::Below,
+        ] {
+            let mut neighbours = adjacency[current]
+                .iter()
+                .filter_map(|(index, candidate_direction)| {
+                    (*candidate_direction == direction && !visited.contains(index))
+                        .then_some(*index)
+                })
+                .collect::<Vec<_>>();
+
+            // The nearest member stays beside the target. Additional members
+            // on that same side extend the lane outward from the previous one.
+            neighbours.sort_by_key(|index| match direction {
+                WindowGridDirection::Left | WindowGridDirection::Above => {
+                    std::cmp::Reverse(*index)
+                }
+                WindowGridDirection::Right | WindowGridDirection::Below => *index,
+            });
+
+            let mut previous = current;
+            for neighbour in neighbours {
+                place_grid_neighbour(
+                    &bounds[previous].1,
+                    &frames[previous],
+                    &mut bounds[neighbour].1,
+                    &frames[neighbour],
+                    direction,
+                    header_height,
+                )?;
+                if !visited.insert(neighbour) {
+                    return None;
+                }
+                physical_edges.insert(if previous < neighbour {
+                    (previous, neighbour)
+                } else {
+                    (neighbour, previous)
+                });
+                pending.push_back(neighbour);
+                previous = neighbour;
+            }
+        }
+    }
+
+    if visited.len() != bounds.len() {
+        return None;
+    }
+
+    // An unrelated pair must not overlap in client space. Intentional vertical
+    // header overlap is allowed only for the physical adjacent pairs above.
+    for first in 0..bounds.len() {
+        for second in first + 1..bounds.len() {
+            if physical_edges.contains(&(first, second)) {
+                continue;
+            }
+            if client_rects_overlap(
+                bounds[first].1,
+                frames[first],
+                bounds[second].1,
+                frames[second],
+            ) {
+                return None;
+            }
+        }
+    }
+
+    Some(bounds)
+}
+
+fn opposite_direction(direction: WindowGridDirection) -> WindowGridDirection {
+    match direction {
+        WindowGridDirection::Left => WindowGridDirection::Right,
+        WindowGridDirection::Right => WindowGridDirection::Left,
+        WindowGridDirection::Above => WindowGridDirection::Below,
+        WindowGridDirection::Below => WindowGridDirection::Above,
+    }
+}
+
+fn place_grid_neighbour(
+    from_bounds: &Rect,
+    from_frame: &NativeFrameGeometry,
+    to_bounds: &mut Rect,
+    to_frame: &NativeFrameGeometry,
+    direction: WindowGridDirection,
+    header_height: f32,
+) -> Option<()> {
+    let x = match direction {
+        WindowGridDirection::Left => {
+            from_bounds.origin.x + from_frame.visible_left_inset
+                - to_frame.outer_width
+                + to_frame.visible_right_inset
+        }
+        WindowGridDirection::Right => {
+            from_bounds.origin.x + from_frame.outer_width
+                - from_frame.visible_right_inset
+                - to_frame.visible_left_inset
+        }
+        WindowGridDirection::Above | WindowGridDirection::Below => {
+            from_bounds.origin.x + from_frame.client_left_inset - to_frame.client_left_inset
+        }
+    };
+
+    let y = match direction {
+        WindowGridDirection::Left | WindowGridDirection::Right => from_bounds.origin.y,
+        WindowGridDirection::Below => {
+            let from_client_bottom = from_bounds.origin.y
+                + from_frame.client_top_inset
+                + from_frame.client_height;
+            let overlap = header_height * to_frame.scale_factor;
+            from_client_bottom - overlap - to_frame.client_top_inset
+        }
+        WindowGridDirection::Above => {
+            let from_client_top = from_bounds.origin.y + from_frame.client_top_inset;
+            let overlap = header_height * from_frame.scale_factor;
+            from_client_top + overlap
+                - to_frame.client_top_inset
+                - to_frame.client_height
+        }
+    };
+
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    to_bounds.origin = Point::new(x, y);
+    Some(())
+}
+
+fn client_rects_overlap(
+    first_bounds: Rect,
+    first_frame: NativeFrameGeometry,
+    second_bounds: Rect,
+    second_frame: NativeFrameGeometry,
+) -> bool {
+    let first_left = first_bounds.origin.x + first_frame.client_left_inset;
+    let first_top = first_bounds.origin.y + first_frame.client_top_inset;
+    let first_right = first_left + first_frame.client_width;
+    let first_bottom = first_top + first_frame.client_height;
+
+    let second_left = second_bounds.origin.x + second_frame.client_left_inset;
+    let second_top = second_bounds.origin.y + second_frame.client_top_inset;
+    let second_right = second_left + second_frame.client_width;
+    let second_bottom = second_top + second_frame.client_height;
+
+    first_left < second_right
+        && first_right > second_left
+        && first_top < second_bottom
+        && first_bottom > second_top
 }
 
 /// Normalizes only the moving window's logical width to the target window.
