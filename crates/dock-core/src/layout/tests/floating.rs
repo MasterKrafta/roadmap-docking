@@ -2688,11 +2688,19 @@ fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomica
     let left_area = builder.main_area(DockSide::Left, left_column);
 
     let widths = [240.0, 340.0, 280.0];
+    let panel_heights = [(60.0, 100.0), (80.0, 220.0), (300.0, 420.0)];
     let mut source_columns = Vec::new();
-    for (index, width) in widths.into_iter().enumerate() {
+    for (index, (width, (minimum_height, preferred_height))) in
+        widths.into_iter().zip(panel_heights).enumerate()
+    {
         let (_, panel) = builder.panel(
             PanelKey::new(format!("float-main-column-{index}")).unwrap(),
-            descriptors()[0].1,
+            PanelConstraints::new(
+                Size::new(120.0, minimum_height),
+                Size::new(280.0, preferred_height),
+                None,
+                false,
+            ),
         );
         let tabs = builder.tabs(vec![panel], 0, false);
         let column = builder.column(
@@ -2740,11 +2748,11 @@ fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomica
     assert!(layout.node(source_split).is_none());
 
     let mut expected_x = origin.x;
-    for ((group_id, column_id), width) in created_groups
+    for ((group_id, column_id), (width, preferred_height)) in created_groups
         .iter()
         .copied()
         .zip(source_columns.iter().copied())
-        .zip(widths)
+        .zip(widths.into_iter().zip([160.0, 280.0, 480.0]))
     {
         let floating = layout
             .floating_group(group_id)
@@ -2756,7 +2764,10 @@ fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomica
         );
         assert_eq!(
             floating.bounds,
-            Rect::new(Point::new(expected_x, origin.y), Size::new(width, 280.0))
+            Rect::new(
+                Point::new(expected_x, origin.y),
+                Size::new(width, preferred_height),
+            )
         );
         assert!(matches!(layout.node(column_id), Some(Node::Column(_))));
         expected_x += width;
