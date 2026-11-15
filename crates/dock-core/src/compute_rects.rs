@@ -201,7 +201,15 @@ impl Layout {
                 Point::new(right_x, viewport.origin.y),
                 Size::new(right_width, viewport.size.height),
             );
-            layout_node(self, root, area, metrics, &mut minimum_sizes, &mut output)?;
+            layout_node(
+                self,
+                root,
+                area,
+                metrics,
+                None,
+                &mut minimum_sizes,
+                &mut output,
+            )?;
         }
 
         // Add a distinct hit target at each main dock's canvas-facing outer
