@@ -464,9 +464,10 @@ impl Layout {
             && self
                 .tab_parent_index(panel_node)
                 .is_some_and(|(source_group, _)| source_group == target_group)
+            && !self.can_split_panel_from_own_group_edge(panel_node, *target)
         {
-            // Dropping a panel on the edge of its own group is intentionally a
-            // no-op. Use a different group's edge to detach the panel into a new group.
+            // A self-edge remains a no-op unless a PanelTab is leaving a
+            // multi-tab Group through its vertical edge; that creates a sibling Group.
             return Ok(CommandApplication::persistent());
         }
         self.validate_panel_ids_allowed_for_target(&[*panel], *target)?;
