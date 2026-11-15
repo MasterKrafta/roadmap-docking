@@ -1030,12 +1030,20 @@ impl DragHostManager {
 
             let mut created_groups = Vec::new();
             if let Some(mut request) = request {
-                if chain_join.is_some() {
-                    // Whole Main DockArea side drops create independent native
-                    // Floating windows. The destination window is joined at the
-                    // WindowChain layer after those Core FloatingGroups exist.
+                if let Some((anchor, insert_before)) = chain_join {
+                    // Content side drops create an independent Core FloatingGroup.
+                    // The native HWND is linked to the target only after that group
+                    // exists; the DragHost bounds are the requested floating bounds.
                     request.target = Some(DropTarget::FreeArea);
                     request.floating_bounds = free_area_bounds;
+                    if request.floating_bounds.is_none() {
+                        tracing::warn!(
+                            ?id,
+                            ?anchor,
+                            insert_before,
+                            "WindowChain side drop has no valid DragHost bounds"
+                        );
+                    }
                 } else if request.target == Some(DropTarget::FreeArea) {
                     request.floating_bounds = free_area_bounds;
                     if request.floating_bounds.is_none() {
@@ -1109,6 +1117,24 @@ impl DragHostManager {
             && !finished
         {
             tracing::debug!(?id, ?panel, "DragHost release was cancelled; source view will be restored");
+        }
+
+        // A side-chain request must produce a new Core FloatingGroup. Do not
+        // resolve the still-source-owned Panel back to its original group when
+        // the command was skipped or rejected (for example, missing bounds).
+        if finished && chain_join.is_some() && created_groups.is_empty() {
+            tracing::warn!(
+                ?id,
+                ?target,
+                ?drag_handle,
+                has_free_area_bounds = free_area_bounds.is_some(),
+                "WindowChain content drop did not create a FloatingGroup; retaining the source layout"
+            );
+            self.flush_controller_events(cx);
+            if let Err(error) = self.close(id, cx) {
+                tracing::warn!(?id, %error, "could not close DragHost after rejected WindowChain drop");
+            }
+            return;
         }
 
         let floating_target = if finished {
