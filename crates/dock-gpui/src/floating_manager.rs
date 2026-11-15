@@ -2965,9 +2965,9 @@ impl FloatingWindowManager {
 
     /// Activates the persistent destination after its temporary DragHost has closed.
     ///
-    /// Closing the owned DragHost can restore Main as the foreground window.
-    /// Only reclaim focus from Main; never steal it back after the user has
-    /// already moved to another application or another floating window.
+    /// Closing the owned DragHost can restore Main or the window that was
+    /// foreground at release. Activate the destination while focus is unchanged;
+    /// preserve a different focus choice made after release.
     pub(crate) fn activate_handoff_target(
         &self,
         group: FloatingGroupId,
