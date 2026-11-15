@@ -167,7 +167,12 @@ impl Layout {
         self.remember_subtree_dock_locations(*node);
         self.detach_node(*node)?;
         let root = self.floating_root_for_node(*node, bounds.size.width, metrics)?;
-        let floating_group = self.insert_floating_group(root, *bounds, next_z);
+        let preferred_height = self.floating_preferred_height_for_node(root, metrics)?;
+        let floating_bounds = Rect::new(
+            bounds.origin,
+            Size::new(bounds.size.width, preferred_height),
+        );
+        let floating_group = self.insert_floating_group(root, floating_bounds, next_z);
         Ok(CommandApplication {
             actual_value: Some(CommandValue::FloatingGroup(floating_group)),
             inverse: None,
@@ -287,9 +292,10 @@ impl Layout {
                     reason: "floating z-order overflow while creating Main DockArea windows",
                 },
             )?;
+            let preferred_height = self.floating_preferred_height_for_node(column, metrics)?;
             let floating_bounds = Rect::new(
                 Point::new(next_x, bounds.origin.y),
-                Size::new(width, bounds.size.height),
+                Size::new(width, preferred_height),
             );
             floating_bounds
                 .validate_non_empty()
