@@ -259,7 +259,7 @@ pub(crate) fn begin_panel_drag_host(
             grab_offset,
             preferred_size,
             promote_on_float,
-            matches!(handle, DragHandle::PanelTab | DragHandle::FlyoutPanel),
+            handle == DragHandle::PanelTab,
         ))
     });
     let Some((panel, grab_offset, preferred_size, promote_on_float, reserve_composition_header)) = candidate else {
@@ -275,7 +275,7 @@ pub(crate) fn begin_panel_drag_host(
 
     match drag_host_manager.update(app, |manager, manager_cx| {
         if reserve_composition_header {
-            manager.open_panel_with_composition_header_at_cursor(
+            manager.open_panel_tab_at_cursor(
                 panel,
                 grab_offset,
                 preferred_size,
@@ -1076,28 +1076,19 @@ fn floating_bounds_for_request_in_host(
     let mut bounds =
         desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)?;
 
-    // Content payloads become a new Floating composition and need a header band.
-    // A FloatingGroup already owns that band, so adding it again would double-count.
-    bounds = floating_bounds_with_composition_header(
-        bounds,
-        request.payload,
-        column_header_height,
-    );
+    // A detached PanelTab becomes a one-tab Group inside a Floating composition.
+    // Reserve the composition-header band above that Group so promotion does not
+    // push the tab down relative to the pointer when the header becomes visible.
+    if matches!(
+        (request.handle, request.payload),
+        (DragHandle::PanelTab, DragPayload::Panel { .. })
+    ) {
+        bounds.origin.y -= column_header_height;
+        bounds.size.height += column_header_height;
+    }
 
     bounds.validate_non_empty().ok()?;
     Some(bounds)
-}
-
-fn floating_bounds_with_composition_header(
-    mut bounds: Rect,
-    payload: DragPayload,
-    header_height: f32,
-) -> Rect {
-    if !matches!(payload, DragPayload::FloatingGroup { .. }) {
-        bounds.origin.y -= header_height;
-        bounds.size.height += header_height;
-    }
-    bounds
 }
 
 fn source_rect_for_request(
@@ -1236,14 +1227,9 @@ mod main_drop_resolution_tests {
 
 #[cfg(test)]
 mod floating_bounds_tests {
-    use dock_core::{
-        DockSide, DragPayload, FloatingGroupId, NodeId, PanelId, Point, Rect, Size,
-    };
-    use slotmap::Key;
+    use dock_core::{Point, Rect, Size};
 
-    use super::{
-        desired_floating_bounds, floating_bounds_with_composition_header,
-    };
+    use super::desired_floating_bounds;
 
     #[test]
     fn desired_bounds_preserve_the_cursor_offset_without_viewport_clamping() {
@@ -1276,48 +1262,6 @@ mod floating_bounds_tests {
         assert_eq!(
             bounds,
             Rect::new(Point::new(540.0, 500.0), Size::new(160.0, 100.0))
-        );
-    }
-
-    #[test]
-    fn detached_panel_group_and_dock_area_reserve_the_composition_header() {
-        let content_bounds = Rect::new(Point::new(120.0, 240.0), Size::new(500.0, 320.0));
-        let expected = Rect::new(Point::new(120.0, 208.0), Size::new(500.0, 352.0));
-        let payloads = [
-            DragPayload::Panel {
-                panel: PanelId::null(),
-            },
-            DragPayload::Group {
-                group: NodeId::null(),
-            },
-            DragPayload::DockArea {
-                side: DockSide::Left,
-            },
-        ];
-
-        for payload in payloads {
-            let bounds =
-                floating_bounds_with_composition_header(content_bounds, payload, 32.0);
-            assert_eq!(bounds, expected);
-            assert_eq!(
-                bounds.origin.y + bounds.size.height,
-                content_bounds.origin.y + content_bounds.size.height
-            );
-        }
-    }
-
-    #[test]
-    fn moving_an_existing_floating_group_does_not_reserve_a_second_header() {
-        let bounds = Rect::new(Point::new(120.0, 208.0), Size::new(500.0, 352.0));
-        assert_eq!(
-            floating_bounds_with_composition_header(
-                bounds,
-                DragPayload::FloatingGroup {
-                    group: FloatingGroupId::null(),
-                },
-                32.0,
-            ),
-            bounds
         );
     }
 
