@@ -506,7 +506,12 @@ impl Render for DockHost {
                 rects
                     .groups
                     .iter()
-                    .filter(|group| !transfer_presentation.groups_without_visible_tabs.contains(&group.group))
+                    .filter(|group| {
+                        !transfer_presentation
+                            .groups_without_visible_tabs
+                            .contains(&group.group)
+                            || dragged_group == Some(group.group)
+                    })
                     .copied()
                     .collect::<Vec<_>>()
             })
@@ -517,7 +522,12 @@ impl Render for DockHost {
                 rects
                     .tab_strips
                     .iter()
-                    .filter(|strip| !transfer_presentation.groups_without_visible_tabs.contains(&strip.group))
+                    .filter(|strip| {
+                        !transfer_presentation
+                            .groups_without_visible_tabs
+                            .contains(&strip.group)
+                            || dragged_group == Some(strip.group)
+                    })
                     .copied()
                     .collect::<Vec<_>>()
             })
