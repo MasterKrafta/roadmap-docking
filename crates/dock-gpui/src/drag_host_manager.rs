@@ -73,6 +73,7 @@ struct ActiveDragHost {
 #[derive(Clone, Copy)]
 struct DragHostHandoff {
     target_group: FloatingGroupId,
+    foreground_at_release: Option<NativeWindowId>,
     source_placeholder_rendered: bool,
     source_released: bool,
 }
@@ -966,6 +967,10 @@ impl DragHostManager {
         let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
             return;
         };
+        // Remember the foreground window at the exact release point. The OS may
+        // restore it (or Main) after DragHost closes; a different window appearing
+        // afterward means the user deliberately changed focus during handoff.
+        let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
@@ -1145,7 +1150,7 @@ impl DragHostManager {
                             "could not close the DockArea DragHost after WindowChain insertion"
                         );
                     }
-                } else if !self.begin_floating_handoff(id, target_group, cx) {
+                } else if !self.begin_floating_handoff(id, target_group, foreground_at_release, cx) {
                     tracing::warn!(
                         ?id,
                         ?target_group,
@@ -1162,7 +1167,7 @@ impl DragHostManager {
                 self.flush_controller_events(cx);
             }
 
-            if !self.begin_floating_handoff(id, target_group, cx) {
+            if !self.begin_floating_handoff(id, target_group, foreground_at_release, cx) {
                 tracing::warn!(
                     ?id,
                     ?target_group,
@@ -1332,6 +1337,7 @@ impl DragHostManager {
         &mut self,
         id: DragHostId,
         target_group: FloatingGroupId,
+        foreground_at_release: Option<NativeWindowId>,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(active) = self.active.as_mut().filter(|active| active.id == id) else {
@@ -1339,6 +1345,7 @@ impl DragHostManager {
         };
         active.handoff = Some(DragHostHandoff {
             target_group,
+            foreground_at_release,
             source_placeholder_rendered: false,
             source_released: false,
         });
@@ -1410,7 +1417,7 @@ impl DragHostManager {
         id: DragHostId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((target_group, panels, placeholder_rendered, source_released)) = self
+        let Some((target_group, foreground_at_release, panels, placeholder_rendered, source_released)) = self
             .active
             .as_ref()
             .filter(|active| active.id == id)
@@ -1418,6 +1425,7 @@ impl DragHostManager {
                 let handoff = active.handoff?;
                 Some((
                     handoff.target_group,
+                    handoff.foreground_at_release,
                     active.panels.clone(),
                     handoff.source_placeholder_rendered,
                     handoff.source_released,
@@ -1507,7 +1515,11 @@ impl DragHostManager {
                         .timer(Duration::from_millis(16))
                         .await;
                     activated = floating_manager.update(app, |manager, _| {
-                        manager.activate_handoff_target(target_group, closing_drag_host)
+                        manager.activate_handoff_target(
+                            target_group,
+                            closing_drag_host,
+                            foreground_at_release,
+                        )
                     });
                     if activated {
                         break;
