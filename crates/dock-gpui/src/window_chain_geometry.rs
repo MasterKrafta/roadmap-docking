@@ -1075,6 +1075,7 @@ mod moving_window_width_tests {
             vec![(target, target_bounds), (moving, moving_bounds)],
             target,
             moving,
+            120.0,
         )
         .expect("both windows must exist");
 
@@ -1094,6 +1095,7 @@ mod moving_window_width_tests {
             vec![(target, target_bounds), (moving, moving_bounds)],
             target,
             moving,
+            120.0,
         )
         .expect("both windows must exist");
 
