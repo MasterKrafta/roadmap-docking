@@ -3051,7 +3051,16 @@ fn floating_group_creation_uses_the_active_tabs_preferred_height() {
         ),
     );
     let tabs_group = builder.tabs(vec![compact_node, tall_node], 0, false);
-    let source_group = builder.tabs(vec![compact_node], 0, false);
+    let (_remaining_panel, remaining_node) = builder.panel(
+        PanelKey::new("floating-create-remaining").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(280.0, 220.0),
+            None,
+            false,
+        ),
+    );
+    let source_group = builder.tabs(vec![remaining_node], 0, false);
     let source_column = builder.column(
         metrics.default_column_width,
         crate::ColumnMode::Expanded,
