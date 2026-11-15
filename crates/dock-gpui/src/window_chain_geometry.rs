@@ -58,6 +58,9 @@ impl NativeFrameGeometry {
             || visible_left_inset < 0
             || visible_right_inset < 0
             || visible_left_inset + visible_right_inset >= outer_width
+            || i64::from(visible.top) < i64::from(outer.top)
+            || i64::from(visible.bottom) > i64::from(outer.bottom)
+            || visible.bottom <= visible.top
             || client_left_inset < 0
             || client_top_inset < 0
             || client_right_inset < 0
