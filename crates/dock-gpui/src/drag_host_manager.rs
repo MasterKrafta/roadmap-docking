@@ -33,7 +33,7 @@ use crate::{
 };
 
 fn source_layout_rects(
-    controller: &DockController,
+    controller: &mut DockController,
     source_host: DragSourceHost,
     source_window_id: WindowId,
 ) -> Option<dock_core::LayoutRects> {
@@ -2265,22 +2265,17 @@ impl Render for DragHostSurface {
                         .remove(&group)?;
                         presentation.tabs.retain(|tab| tab.panel == panel);
                         presentation.tabs.first()?;
-                        let source_header = controller
-                            .drag()
-                            .host_session()
-                            .and_then(|session| {
-                                let source_window_id = session.source_window_id()?;
-                                let rects = source_layout_rects(
-                                    controller,
-                                    session.source_host(),
-                                    source_window_id,
-                                )?;
-                                rects
-                                    .tab_headers
-                                    .iter()
-                                    .find(|header| header.group == group && header.panel == panel)
-                                    .copied()
-                            })?;
+                        let (source_host, source_window_id) = {
+                            let session = controller.drag().host_session()?;
+                            (session.source_host(), session.source_window_id()?)
+                        };
+                        let rects =
+                            source_layout_rects(controller, source_host, source_window_id)?;
+                        let source_header = rects
+                            .tab_headers
+                            .iter()
+                            .find(|header| header.group == group && header.panel == panel)
+                            .copied()?;
                         presentation.active_panel = Some(panel);
                         presentation.collapsed = false;
                         presentation.model_collapsed = false;
