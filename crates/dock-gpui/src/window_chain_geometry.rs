@@ -187,7 +187,7 @@ pub(crate) fn floating_groups_in_native_z_order(
 mod contiguous_window_chain_bounds_tests {
     use super::{NativeFrameGeometry, arrange_contiguous_window_chain_bounds};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
-    use slotmap::SlotMap;
+    use slotmap::{Key, SlotMap};
 
     fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
