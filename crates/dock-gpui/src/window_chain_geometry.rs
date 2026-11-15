@@ -95,6 +95,25 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
     Some(bounds)
 }
 
+/// Normalizes only the moving window's logical width to the target window.
+///
+/// This is used for a vertical Drop: the target window remains the width
+/// reference and is never resized to accommodate the moving window.
+pub(crate) fn match_moving_window_width_to_target(
+    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    target: FloatingGroupId,
+    moving: FloatingGroupId,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    let target_index = bounds.iter().position(|(group, _)| *group == target)?;
+    let moving_index = bounds.iter().position(|(group, _)| *group == moving)?;
+    let target_width = bounds[target_index].1.size.width;
+    if !target_width.is_finite() || target_width <= 0.0 {
+        return None;
+    }
+    bounds[moving_index].1.size.width = target_width;
+    Some(bounds)
+}
+
 /// Returns the change in a resized window's right edge in physical pixels.
 pub(crate) fn native_resize_right_edge_delta(
     previous: Rect,
@@ -411,3 +430,54 @@ mod native_z_order_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod moving_window_width_tests {
+    use super::match_moving_window_width_to_target;
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::SlotMap;
+
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 2]) {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let groups = [ids.insert(()), ids.insert(())];
+        (ids, groups)
+    }
+
+    #[test]
+    fn moving_window_wider_than_target_is_narrowed_without_resizing_target() {
+        let (_ids, [target, moving]) = groups();
+        let target_bounds = Rect::new(Point::new(20.0, 30.0), Size::new(240.0, 300.0));
+        let moving_bounds = Rect::new(Point::new(800.0, 50.0), Size::new(420.0, 500.0));
+
+        let result = match_moving_window_width_to_target(
+            vec![(target, target_bounds), (moving, moving_bounds)],
+            target,
+            moving,
+        )
+        .expect("both windows must exist");
+
+        assert_eq!(result[0].1, target_bounds);
+        assert_eq!(result[1].1.size.width, 240.0);
+        assert_eq!(result[1].1.size.height, moving_bounds.size.height);
+        assert_eq!(result[1].1.origin, moving_bounds.origin);
+    }
+
+    #[test]
+    fn moving_window_narrower_than_target_is_widened_to_target_width() {
+        let (_ids, [target, moving]) = groups();
+        let target_bounds = Rect::new(Point::new(20.0, 30.0), Size::new(360.0, 300.0));
+        let moving_bounds = Rect::new(Point::new(800.0, 50.0), Size::new(180.0, 500.0));
+
+        let result = match_moving_window_width_to_target(
+            vec![(target, target_bounds), (moving, moving_bounds)],
+            target,
+            moving,
+        )
+        .expect("both windows must exist");
+
+        assert_eq!(result[0].1, target_bounds);
+        assert_eq!(result[1].1.size.width, 360.0);
+        assert_eq!(result[1].1.size.height, moving_bounds.size.height);
+    }
+}
+
