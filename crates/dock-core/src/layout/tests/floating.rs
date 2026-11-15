@@ -2935,3 +2935,88 @@ fn floating_preferred_height_sums_vertical_groups_in_its_own_window() {
         metrics.column_header_height + first_height + second_height + metrics.splitter_thickness
     );
 }
+
+#[test]
+fn floating_preferred_heights_are_independent_between_chained_window_candidates() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (short_panel, short_node) = builder.panel(
+        PanelKey::new("floating-independent-short").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 60.0),
+            Size::new(220.0, 100.0),
+            None,
+            false,
+        ),
+    );
+    let (tall_panel, tall_node) = builder.panel(
+        PanelKey::new("floating-independent-tall").unwrap(),
+        PanelConstraints::new(
+            Size::new(140.0, 300.0),
+            Size::new(280.0, 420.0),
+            None,
+            false,
+        ),
+    );
+    let short_tabs = builder.tabs(vec![short_node], 0, false);
+    let tall_tabs = builder.tabs(vec![tall_node], 0, false);
+    let short_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![short_tabs],
+        vec![1.0],
+    );
+    let tall_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![tall_tabs],
+        vec![1.0],
+    );
+    let short_floating = builder.floating_group(
+        short_column,
+        Rect::new(Point::new(40.0, 50.0), Size::new(360.0, 260.0)),
+        1,
+    );
+    let tall_floating = builder.floating_group(
+        tall_column,
+        Rect::new(Point::new(420.0, 50.0), Size::new(360.0, 620.0)),
+        2,
+    );
+    let layout = builder.build();
+
+    let group_chrome = metrics.header_height.max(metrics.tab_strip_height);
+    assert_eq!(
+        layout
+            .floating_preferred_height_for_tab(
+                short_floating,
+                short_tabs,
+                short_panel,
+                &metrics,
+            )
+            .unwrap(),
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 100.0)
+    );
+    assert_eq!(
+        layout
+            .floating_preferred_height_for_tab(
+                tall_floating,
+                tall_tabs,
+                tall_panel,
+                &metrics,
+            )
+            .unwrap(),
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 420.0)
+    );
+    assert!(
+        layout
+            .floating_preferred_height_for_tab(
+                short_floating,
+                tall_tabs,
+                tall_panel,
+                &metrics,
+            )
+            .is_err()
+    );
+}
