@@ -819,14 +819,13 @@ impl Layout {
                 for group in &column.groups {
                     let group_minimum = match self.nodes.get(*group) {
                         Some(Node::Tabs(tabs)) if tabs.collapsed => {
-                            let mut minimum = Size::ZERO;
+                            let mut width = 0.0_f32;
                             for child in &tabs.children {
-                                let child_size =
-                                    self.minimum_node_size_with_cache(*child, metrics, cache)?;
-                                minimum.width = minimum.width.max(child_size.width);
-                                minimum.height = minimum.height.max(child_size.height);
+                                width = width.max(
+                                    self.minimum_node_size_with_cache(*child, metrics, cache)?.width,
+                                );
                             }
-                            minimum
+                            Size::new(width, metrics.effective_collapsed_group_height())
                         }
                         Some(_) => self.minimum_floating_node_size_with_cache(
                             *group,
@@ -1166,13 +1165,13 @@ impl Layout {
     ) -> Result<Size, CommandError> {
         let minimum = match self.nodes.get(node_id) {
             Some(Node::Tabs(tabs)) if tabs.collapsed && !tabs.children.is_empty() => {
-                let mut minimum = Size::ZERO;
+                let mut width = 0.0_f32;
                 for child in &tabs.children {
-                    let child_size = self.minimum_node_size_with_cache(*child, metrics, cache)?;
-                    minimum.width = minimum.width.max(child_size.width);
-                    minimum.height = minimum.height.max(child_size.height);
+                    width = width.max(
+                        self.minimum_node_size_with_cache(*child, metrics, cache)?.width,
+                    );
                 }
-                minimum
+                Size::new(width, metrics.effective_collapsed_group_height())
             }
             Some(Node::Split(split))
                 if split.axis == Axis::X
