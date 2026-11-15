@@ -277,11 +277,9 @@ pub(crate) fn arrange_window_grid_bounds(
 
             // The nearest member stays beside the target. Additional members
             // on that same side extend the lane outward from the previous one.
-            neighbours.sort_by_key(|index| match direction {
-                WindowGridDirection::Left | WindowGridDirection::Above => {
-                    std::cmp::Reverse(*index)
-                }
-                WindowGridDirection::Right | WindowGridDirection::Below => *index,
+            neighbours.sort_by(|left, right| match direction {
+                WindowGridDirection::Left | WindowGridDirection::Above => right.cmp(left),
+                WindowGridDirection::Right | WindowGridDirection::Below => left.cmp(right),
             });
 
             let mut previous = current;
@@ -532,6 +530,28 @@ mod contiguous_window_chain_bounds_tests {
         (ids, groups)
     }
 
+    fn frame(
+        outer_width: f32,
+        outer_height: f32,
+        visible_left_inset: f32,
+        visible_right_inset: f32,
+        scale_factor: f32,
+    ) -> NativeFrameGeometry {
+        NativeFrameGeometry {
+            outer_width,
+            outer_height,
+            visible_left_inset,
+            visible_right_inset,
+            client_left_inset: 0.0,
+            client_top_inset: 0.0,
+            client_right_inset: 0.0,
+            client_bottom_inset: 0.0,
+            client_width: outer_width,
+            client_height: outer_height,
+            scale_factor,
+        }
+    }
+
     #[test]
     fn keeps_anchor_and_places_neighbours_edge_to_edge() {
         let (_ids, [a, b, c]) = groups();
@@ -593,21 +613,9 @@ mod contiguous_window_chain_bounds_tests {
         ];
 
         let frames = [
-            NativeFrameGeometry {
-                outer_width: 450.0,
-                visible_left_inset: 6.0,
-                visible_right_inset: 6.0,
-            },
-            NativeFrameGeometry {
-                outer_width: 500.0,
-                visible_left_inset: 8.0,
-                visible_right_inset: 8.0,
-            },
-            NativeFrameGeometry {
-                outer_width: 400.0,
-                visible_left_inset: 4.0,
-                visible_right_inset: 4.0,
-            },
+            frame(450.0, 360.0, 6.0, 6.0, 1.5),
+            frame(500.0, 480.0, 8.0, 8.0, 1.25),
+            frame(400.0, 300.0, 4.0, 4.0, 2.0),
         ];
         let arranged = arrange_contiguous_window_chain_bounds(input, &frames, b)
             .expect("visible frame geometry must place the chain");
@@ -639,16 +647,247 @@ mod contiguous_window_chain_bounds_tests {
                 input,
                 &[
                     valid,
-                    NativeFrameGeometry {
-                        outer_width: 100.0,
-                        visible_left_inset: 50.0,
-                        visible_right_inset: 50.0,
-                    },
+                    frame(100.0, 200.0, 50.0, 50.0, 1.0),
                 ],
                 a,
             )
             .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod window_grid_bounds_tests {
+    use super::{
+        NativeFrameGeometry, arrange_window_grid_bounds,
+        match_moving_window_width_to_target,
+    };
+    use crate::window_chain::{WindowGridDirection, WindowGridLink};
+    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use slotmap::SlotMap;
+
+    fn groups(count: usize) -> Vec<FloatingGroupId> {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        (0..count).map(|_| ids.insert(())).collect()
+    }
+
+    fn bounds(
+        id: FloatingGroupId,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) -> (FloatingGroupId, Rect) {
+        (id, Rect::new(Point::new(x, y), Size::new(width, height)))
+    }
+
+    fn frame(logical_width: f32, logical_height: f32, scale: f32) -> NativeFrameGeometry {
+        NativeFrameGeometry::without_frame_size(
+            Size::new(logical_width, logical_height),
+            scale,
+        )
+        .unwrap()
+    }
+
+    fn link(from: FloatingGroupId, to: FloatingGroupId, direction: WindowGridDirection) -> WindowGridLink {
+        WindowGridLink { from, to, direction }
+    }
+
+    #[test]
+    fn places_a_vertical_stack_with_header_overlap_and_preserves_anchor() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let input = vec![
+            bounds(a, 100.0, 100.0, 300.0, 300.0),
+            bounds(b, 900.0, 20.0, 300.0, 200.0),
+            bounds(c, 1500.0, 40.0, 300.0, 100.0),
+        ];
+        let frames = [
+            frame(300.0, 300.0, 1.0),
+            frame(300.0, 200.0, 1.5),
+            frame(300.0, 100.0, 1.0),
+        ];
+        let links = [
+            link(a, b, WindowGridDirection::Below),
+            link(b, c, WindowGridDirection::Below),
+        ];
+
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+            .expect("a vertical grid should have finite bounds");
+
+        assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
+        assert_eq!(arranged[1].1.origin, Point::new(100.0, 352.0));
+        assert_eq!(arranged[2].1.origin, Point::new(100.0, 620.0));
+        assert_eq!(arranged[0].1.size, Size::new(300.0, 300.0));
+        assert_eq!(arranged[1].1.size, Size::new(300.0, 200.0));
+        assert_eq!(arranged[2].1.size, Size::new(300.0, 100.0));
+
+        let a_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
+        let b_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
+        assert_eq!(a_client_bottom - b_client_top, 48.0);
+
+        let b_client_bottom = arranged[1].1.origin.y + frames[1].client_height;
+        let c_client_top = arranged[2].1.origin.y;
+        assert_eq!(b_client_bottom - c_client_top, 32.0);
+    }
+
+    #[test]
+    fn places_a_window_above_the_target_and_keeps_target_fixed() {
+        let [moving, target] = groups(2).try_into().expect("two group ids");
+        let input = vec![
+            bounds(moving, 700.0, 900.0, 300.0, 200.0),
+            bounds(target, 120.0, 500.0, 300.0, 300.0),
+        ];
+        let frames = [frame(300.0, 200.0, 1.5), frame(300.0, 300.0, 1.0)];
+        let links = [link(target, moving, WindowGridDirection::Above)];
+
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, target, 32.0)
+            .expect("the upper window should be positioned");
+
+        assert_eq!(arranged[1].1.origin, Point::new(120.0, 500.0));
+        assert_eq!(arranged[0].1.origin, Point::new(120.0, 232.0));
+        let moving_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
+        let target_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
+        assert_eq!(moving_client_bottom - target_client_top, 32.0);
+    }
+
+    #[test]
+    fn keeps_the_existing_horizontal_join_formula_unchanged() {
+        let [a, b] = groups(2).try_into().expect("two group ids");
+        let input = vec![
+            bounds(a, 10.0, 70.0, 200.0, 120.0),
+            bounds(b, 800.0, 20.0, 150.0, 120.0),
+        ];
+        let frames = [frame(200.0, 120.0, 1.0), frame(150.0, 120.0, 1.0)];
+        let links = [link(a, b, WindowGridDirection::Right)];
+
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+            .expect("the horizontal grid should be positioned");
+
+        assert_eq!(arranged[0].1.origin, Point::new(10.0, 70.0));
+        assert_eq!(arranged[1].1.origin, Point::new(210.0, 70.0));
+    }
+
+    #[test]
+    fn supports_a_t_shaped_grid_without_unrelated_client_overlap() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let input = vec![
+            bounds(a, 100.0, 100.0, 200.0, 200.0),
+            bounds(b, 700.0, 500.0, 200.0, 100.0),
+            bounds(c, 900.0, 800.0, 100.0, 200.0),
+            bounds(d, 1200.0, 900.0, 100.0, 100.0),
+        ];
+        let frames = [
+            frame(200.0, 200.0, 1.0),
+            frame(200.0, 100.0, 1.0),
+            frame(100.0, 200.0, 1.0),
+            frame(100.0, 100.0, 1.0),
+        ];
+        let links = [
+            link(a, b, WindowGridDirection::Above),
+            link(a, c, WindowGridDirection::Right),
+            link(c, d, WindowGridDirection::Below),
+        ];
+
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+            .expect("a T-shaped grid should have a consistent embedding");
+
+        assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
+        assert_eq!(arranged[1].1.origin, Point::new(100.0, 32.0));
+        assert_eq!(arranged[2].1.origin, Point::new(300.0, 100.0));
+        assert_eq!(arranged[3].1.origin, Point::new(300.0, 268.0));
+    }
+
+    #[test]
+    fn repeated_same_side_drops_extend_the_lane_without_overlapping() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let input = vec![
+            bounds(a, 100.0, 100.0, 300.0, 300.0),
+            bounds(b, 900.0, 0.0, 300.0, 200.0),
+            bounds(c, 1500.0, 0.0, 300.0, 150.0),
+        ];
+        let frames = [
+            frame(300.0, 300.0, 1.0),
+            frame(300.0, 200.0, 1.0),
+            frame(300.0, 150.0, 1.0),
+        ];
+        let links = [
+            link(a, b, WindowGridDirection::Below),
+            link(a, c, WindowGridDirection::Below),
+        ];
+
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+            .expect("same-side neighbors should form a vertical lane");
+
+        assert_eq!(arranged[1].1.origin.y, 368.0);
+        assert_eq!(arranged[2].1.origin.y, 536.0);
+    }
+
+    #[test]
+    fn rejects_conflicting_branches_that_would_overlap_unrelated_windows() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let input = vec![
+            bounds(a, 100.0, 100.0, 300.0, 300.0),
+            bounds(b, 900.0, 0.0, 300.0, 200.0),
+            bounds(c, 1500.0, 0.0, 300.0, 150.0),
+            bounds(d, 1800.0, 0.0, 300.0, 100.0),
+        ];
+        let frames = [
+            frame(300.0, 300.0, 1.0),
+            frame(300.0, 200.0, 1.0),
+            frame(300.0, 150.0, 1.0),
+            frame(300.0, 100.0, 1.0),
+        ];
+        let links = [
+            link(a, b, WindowGridDirection::Below),
+            link(a, c, WindowGridDirection::Below),
+            link(b, d, WindowGridDirection::Below),
+        ];
+
+        assert!(
+            arrange_window_grid_bounds(input, &frames, &links, a, 32.0).is_none(),
+            "a conflicting branch must not commit overlapping windows"
+        );
+    }
+
+    #[test]
+    fn arrangement_is_idempotent_for_the_same_grid_and_anchor() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let input = vec![
+            bounds(a, 100.0, 100.0, 300.0, 300.0),
+            bounds(b, 900.0, 0.0, 300.0, 200.0),
+            bounds(c, 1500.0, 0.0, 300.0, 150.0),
+        ];
+        let frames = [
+            frame(300.0, 300.0, 1.0),
+            frame(300.0, 200.0, 1.0),
+            frame(300.0, 150.0, 1.0),
+        ];
+        let links = [
+            link(a, b, WindowGridDirection::Below),
+            link(b, c, WindowGridDirection::Below),
+        ];
+        let first =
+            arrange_window_grid_bounds(input, &frames, &links, a, 32.0).unwrap();
+        let second =
+            arrange_window_grid_bounds(first.clone(), &frames, &links, a, 32.0).unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn moving_width_uses_the_target_logical_width_without_resizing_target() {
+        let [target, moving] = groups(2).try_into().expect("two group ids");
+        let target_bounds = Rect::new(Point::new(20.0, 30.0), Size::new(240.0, 300.0));
+        let moving_bounds = Rect::new(Point::new(800.0, 50.0), Size::new(420.0, 500.0));
+        let result = match_moving_window_width_to_target(
+            vec![(target, target_bounds), (moving, moving_bounds)],
+            target,
+            moving,
+        )
+        .expect("both windows must exist");
+
+        assert_eq!(result[0].1, target_bounds);
+        assert_eq!(result[1].1.size.width, 240.0);
+        assert_eq!(result[1].1.size.height, moving_bounds.size.height);
     }
 }
 
