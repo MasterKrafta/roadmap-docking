@@ -731,6 +731,197 @@ impl Layout {
         self.minimum_floating_size_with_cache(node_id, metrics, &mut HashMap::new())
     }
 
+    /// Computes the natural height of one Floating composition after a tab
+    /// activation, including Dock chrome but excluding the native window frame.
+    ///
+    /// The requested tab is used as the active tab for this calculation without
+    /// mutating Layout. Other FloatingGroups (including chained windows) are
+    /// deliberately not part of this subtree calculation.
+    pub fn floating_preferred_height_for_tab(
+        &self,
+        group_id: crate::FloatingGroupId,
+        tabs_group: NodeId,
+        panel: crate::PanelId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let floating = self
+            .floating_groups
+            .get(group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group: group_id })?;
+        let root = self
+            .dock_areas
+            .get(floating.area)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?;
+
+        if !self.floating_node_contains_node(root, tabs_group) {
+            return Err(CommandError::InvalidTarget {
+                reason: "tab group does not belong to the requested Floating composition",
+            });
+        }
+        let tabs = match self.nodes.get(tabs_group) {
+            Some(Node::Tabs(tabs)) => tabs,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "preferred Floating height requires a Tabs group",
+                });
+            }
+        };
+        let panel_node = tabs
+            .children
+            .iter()
+            .find(|child| {
+                matches!(
+                    self.nodes.get(**child),
+                    Some(Node::Panel(value)) if value.panel_id == panel
+                )
+            })
+            .copied()
+            .ok_or(CommandError::InvalidTarget {
+                reason: "panel is not a tab in the requested Floating group",
+            })?;
+
+        let content_height = self.preferred_floating_node_height(
+            root,
+            root,
+            Some((tabs_group, panel_node)),
+            metrics,
+        )?;
+        let composition_header = if matches!(self.nodes.get(root), Some(Node::Tabs(_))) {
+            metrics.column_header_height
+        } else {
+            0.0
+        };
+        let height = content_height + composition_header;
+        if !height.is_finite() || height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed preferred Floating height is invalid",
+            });
+        }
+        Ok(height)
+    }
+
+    fn floating_node_contains_node(&self, root: NodeId, target: NodeId) -> bool {
+        if root == target {
+            return true;
+        }
+        match self.nodes.get(root) {
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| self.floating_node_contains_node(*child, target)),
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| self.floating_node_contains_node(*child, target)),
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .any(|child| self.floating_node_contains_node(*child, target)),
+            Some(Node::Panel(_)) | None => false,
+        }
+    }
+
+    fn preferred_floating_node_height(
+        &self,
+        node_id: NodeId,
+        floating_root: NodeId,
+        active_override: Option<(NodeId, NodeId)>,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        let node = self
+            .nodes
+            .get(node_id)
+            .ok_or(CommandError::MissingNode { node: node_id })?;
+        let height = match node {
+            Node::Panel(panel) => self
+                .panel_instances
+                .get(panel.panel_id)
+                .ok_or(CommandError::MissingPanel {
+                    panel: panel.panel_id,
+                })?
+                .constraints
+                .preferred_size
+                .height,
+            Node::Tabs(tabs) if tabs.collapsed => metrics.effective_collapsed_group_height(),
+            Node::Tabs(tabs) => {
+                let active_child = active_override
+                    .filter(|(group, _)| *group == node_id)
+                    .map(|(_, panel_node)| panel_node)
+                    .or_else(|| tabs.active_child())
+                    .ok_or(CommandError::InvalidTarget {
+                        reason: "Floating Tabs group has no active panel",
+                    })?;
+                let content_height = self.preferred_floating_node_height(
+                    active_child,
+                    floating_root,
+                    active_override,
+                    metrics,
+                )?;
+                let is_column_group =
+                    node_id == floating_root || self.find_owner_column(node_id).is_some();
+                let chrome_height = if is_column_group {
+                    metrics.header_height.max(metrics.tab_strip_height)
+                } else {
+                    metrics.header_height + metrics.tab_strip_height
+                };
+                metrics.min_group_height.max(chrome_height + content_height)
+            }
+            Node::Column(column) if column.mode.is_rail() => {
+                let slot_count = self.column_display_order(node_id)?.len();
+                metrics.effective_collapsed_group_height() * slot_count as f32
+            }
+            Node::Column(column) => {
+                let mut height = metrics.column_header_height;
+                for group in &column.groups {
+                    height += self.preferred_floating_node_height(
+                        *group,
+                        floating_root,
+                        active_override,
+                        metrics,
+                    )?;
+                }
+                height += metrics.splitter_thickness
+                    * column.groups.len().saturating_sub(1) as f32;
+                height
+            }
+            Node::Split(split) => {
+                let mut height = match split.axis {
+                    Axis::X => 0.0_f32,
+                    Axis::Y => {
+                        metrics.splitter_thickness
+                            * split.children.len().saturating_sub(1) as f32
+                    }
+                };
+                for child in &split.children {
+                    let child_height = self.preferred_floating_node_height(
+                        *child,
+                        floating_root,
+                        active_override,
+                        metrics,
+                    )?;
+                    match split.axis {
+                        Axis::X => height = height.max(child_height),
+                        Axis::Y => height += child_height,
+                    }
+                }
+                height
+            }
+        };
+
+        if !height.is_finite() || height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed preferred Floating node height is invalid",
+            });
+        }
+        Ok(height)
+    }
+
     /// Computes the minimum client width for resizing either horizontal edge
     /// while keeping all non-edge Columns at their current effective widths.
     ///
@@ -856,6 +1047,7 @@ impl Layout {
             }
             Some(Node::Column(column)) if !column.mode.is_rail() => {
                 let mut content_minimum = Size::ZERO;
+                let mut group_minimums = Vec::with_capacity(column.groups.len());
                 for group in &column.groups {
                     let group_minimum = match self.nodes.get(*group) {
                         Some(Node::Tabs(tabs)) if tabs.collapsed => {
@@ -868,24 +1060,39 @@ impl Layout {
                             }
                             minimum
                         }
+                        Some(Node::Tabs(tabs)) => {
+                            // Only the visible tab constrains this Floating window.
+                            // Main keeps using minimum_node_size(), which considers
+                            // every tab so switching tabs never changes Main geometry.
+                            let active_child = tabs.active_child().ok_or(
+                                CommandError::InvalidTarget {
+                                    reason: "Floating Tabs group has no active panel",
+                                },
+                            )?;
+                            let active_minimum =
+                                self.minimum_node_size_with_cache(active_child, metrics, cache)?;
+                            let chrome_height =
+                                metrics.header_height.max(metrics.tab_strip_height);
+                            Size::new(
+                                active_minimum.width,
+                                metrics.min_group_height
+                                    .max(chrome_height + active_minimum.height),
+                            )
+                        }
                         Some(_) => self.minimum_node_size_with_cache(*group, metrics, cache)?,
                         None => return Err(CommandError::MissingNode { node: *group }),
                     };
+                    group_minimums.push(group_minimum);
                     content_minimum.width = content_minimum.width.max(group_minimum.width);
                     content_minimum.height = content_minimum.height.max(group_minimum.height);
                 }
 
                 let height = match column.groups.as_slice() {
-                    [group] if matches!(
-                        self.nodes.get(*group),
+                    [_group] if matches!(
+                        self.nodes.get(column.groups[0]),
                         Some(Node::Tabs(tabs)) if tabs.collapsed
-                    ) => content_minimum.height,
-                    [_] => metrics.column_header_height
-                        + self.minimum_node_size_with_cache(
-                            column.groups[0],
-                            metrics,
-                            cache,
-                        )?.height,
+                    ) => group_minimums[0].height,
+                    [_] => metrics.column_header_height + group_minimums[0].height,
                     groups => metrics.column_header_height
                         + metrics.effective_collapsed_group_height() * groups.len() as f32,
                 };
