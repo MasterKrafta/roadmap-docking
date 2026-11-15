@@ -717,6 +717,8 @@ pub struct FloatingWindowManager {
     native_resize: Option<NativeResizeSession>,
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
+    reconcile_scheduled: bool,
+    native_move_finishing: bool,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     window_chains: WindowChainRegistry,
@@ -736,6 +738,8 @@ impl FloatingWindowManager {
             native_resize: None,
             drag_host_manager: None,
             reconciling: false,
+            reconcile_scheduled: false,
+            native_move_finishing: false,
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowChainRegistry::default(),
@@ -1083,7 +1087,14 @@ impl FloatingWindowManager {
                 &controller,
                 |manager, _, event: &DockEvent, manager_cx| {
                     if matches!(event, DockEvent::LayoutChanged { .. }) {
-                        manager.reconcile(manager_cx);
+                        if manager.native_move_finishing {
+                            // Docking one Floating into another can invalidate the
+                            // host currently under the pointer. Defer host reassignment
+                            // until the current GPUI window update has unwound.
+                            manager.schedule_reconcile(manager_cx);
+                        } else {
+                            manager.reconcile(manager_cx);
+                        }
                     }
                 },
             ));
@@ -2075,6 +2086,7 @@ impl FloatingWindowManager {
         }
 
         self.native_move = None;
+        self.native_move_finishing = true;
         let result = match state.drop_target {
             Some(NativeMoveTarget::FloatingChain {
                 anchor,
@@ -2116,6 +2128,7 @@ impl FloatingWindowManager {
                 })
             }
         };
+        self.native_move_finishing = false;
 
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
@@ -2129,7 +2142,14 @@ impl FloatingWindowManager {
             self.reconcile(cx);
         }
 
-        self.redraw_visible_hosts(cx);
+        if matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. })) {
+            // The destination FloatingHost may still be unwinding its mouse/render
+            // update. Reconcile and redraw it from a later app update instead of
+            // calling WindowHandle::update re-entrantly here.
+            self.schedule_reconcile(cx);
+        } else {
+            self.redraw_visible_hosts(cx);
+        }
         cx.notify();
     }
 
@@ -2286,6 +2306,30 @@ impl FloatingWindowManager {
                     "could not commit the arranged native bounds for a Floating WindowChain"
                 ),
             }
+        })
+        .detach();
+    }
+
+    /// Runs host reconciliation after the active GPUI update has unwound.
+    ///
+    /// Floating-to-Floating Core drops can change which persistent window hosts
+    /// a composition. Updating that FloatingHost synchronously from the controller
+    /// LayoutChanged subscription can re-enter the same GPUI entity.
+    fn schedule_reconcile(&mut self, cx: &mut Context<Self>) {
+        if self.reconcile_scheduled {
+            return;
+        }
+        self.reconcile_scheduled = true;
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            app.background_executor()
+                .timer(Duration::from_millis(1))
+                .await;
+            let _ = manager.update(app, |manager, manager_cx| {
+                manager.reconcile_scheduled = false;
+                manager.reconcile(manager_cx);
+                manager.redraw_visible_hosts(manager_cx);
+            });
         })
         .detach();
     }
