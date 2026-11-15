@@ -593,6 +593,7 @@ impl FloatingWindowManager {
             .collect::<Vec<_>>();
 
         self.window_chains = next_chains;
+        self.pending_window_chain_alignment.insert(anchor);
         for member in members {
             if let Some(panel) = self.host_registry.panel_for_group(member)
                 && let Some(mut entry) = self.registry.windows.remove(&panel)
@@ -2110,6 +2111,7 @@ impl FloatingWindowManager {
         });
         if result.is_ok() {
             self.window_chains = next_chains;
+            self.pending_window_chain_alignment.insert(anchor);
             for member in members {
                 if let Some(panel) = self.host_registry.panel_for_group(member)
                     && let Some(mut entry) = self.registry.windows.remove(&panel)
