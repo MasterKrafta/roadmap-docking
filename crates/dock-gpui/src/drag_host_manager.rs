@@ -15,7 +15,7 @@ use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, N
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide, DragDropAction,
-    DragHandle, DragPayload, DragState, DropTarget, DropZone, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
+    DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
     VerticalOverflow,
 };
@@ -26,7 +26,7 @@ use crate::{
         collect_group_presentations, CollapseColumnButton, DockCompositionView,
         DockGroupView, GroupPresentation,
     },
-    floating_manager::DockingWindowAtPoint,
+    floating_manager::{floating_window_chain_insert_before, DockingWindowAtPoint},
     geometry::DockGeometry,
     DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
 };
@@ -45,23 +45,10 @@ fn floating_window_chain_target(
         return None;
     }
 
-    match (target, target_role) {
-        (
-            Some(DropTarget::GroupEdge {
-                zone: DropZone::Left,
-                ..
-            }),
-            Some(DockWindowRole::Floating { group }),
-        ) => Some((group, true)),
-        (
-            Some(DropTarget::GroupEdge {
-                zone: DropZone::Right,
-                ..
-            }),
-            Some(DockWindowRole::Floating { group }),
-        ) => Some((group, false)),
-        _ => None,
-    }
+    let (Some(target), Some(DockWindowRole::Floating { group })) = (target, target_role) else {
+        return None;
+    };
+    floating_window_chain_insert_before(target).map(|insert_before| (group, insert_before))
 }
 
 struct ActiveDragHost {
@@ -1150,12 +1137,12 @@ impl DragHostManager {
                     cx,
                 );
 
-                if promote_on_float {
+                if drag_handle == Some(DragHandle::DockAreaHeader) {
                     if let Err(error) = self.close(id, cx) {
                         tracing::warn!(
                             ?id,
                             %error,
-                            "could not close the DragHost after WindowChain insertion"
+                            "could not close the DockArea DragHost after WindowChain insertion"
                         );
                     }
                 } else if !self.begin_floating_handoff(id, target_group, cx) {
@@ -1235,7 +1222,7 @@ impl DragHostManager {
         }
     }
 
-    /// Restores the native frame before a tab DragHost becomes a persistent FloatingHost.
+    /// Restores the native frame before a content DragHost becomes a persistent FloatingHost.
     /// The same client rectangle stays on screen; only the outer frame changes.
     fn restore_active_window_frame(
         &mut self,
@@ -1271,7 +1258,7 @@ impl DragHostManager {
             .ok_or_else(|| "could not convert restored DragHost bounds to DockCore coordinates".into())
     }
 
-    /// Transfers the already-visible DockArea DragHost into the persistent
+    /// Transfers an already-visible Main-origin DragHost into the persistent
     /// Floating registry without opening a replacement native window.
     fn promote_active_drag_host_to_floating(
         &mut self,
@@ -1312,7 +1299,7 @@ impl DragHostManager {
             tracing::warn!(
                 ?id,
                 ?target_group,
-                "could not adopt the DockArea DragHost as its FloatingHost"
+                "could not adopt the Main-origin DragHost as its FloatingHost"
             );
             return false;
         }
