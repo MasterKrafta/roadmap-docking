@@ -1820,11 +1820,19 @@ impl Render for FloatingHost {
             self.column_scroll_handles.entry(column).or_default();
         }
 
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(window_id)
+        });
+        let mut group_presentations = snapshot.group_presentations.clone();
+        let transfer_presentation =
+            PanelTransferPresentation::new(&group_presentations, &transferred_panels);
+        transfer_presentation.apply_to_group_presentations(&mut group_presentations);
+
         // Every PanelRect in compute_floating_rects belongs to this group and
-        // is already expressed in local (0, 0) coordinates.
-        let panel_views = snapshot
-            .rects
-            .panels
+        // is already expressed in local (0, 0) coordinates. When the active tab
+        // is transported, reuse its content rectangle for the remaining active tab.
+        let panel_views = transfer_presentation
+            .panel_rects_with_active_replacements(&snapshot.rects.panels)
             .iter()
             .map(|panel_rect| {
                 let panel_rect = *panel_rect;
@@ -1843,11 +1851,6 @@ impl Render for FloatingHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(window_id)
         });
-        let transferred_panels = self.controller.update(cx, |controller, _| {
-            controller.transferred_panel_views_from(window_id)
-        });
-        let transfer_presentation =
-            PanelTransferPresentation::new(&snapshot.group_presentations, &transferred_panels);
         if !pending_transfers.is_empty()
             && pending_transfers.iter().all(|panel| {
                 panel_views
@@ -1921,20 +1924,19 @@ impl Render for FloatingHost {
             })
             .copied()
             .collect::<Vec<_>>();
-        let rendered_tab_headers = snapshot
-            .rects
-            .tab_headers
-            .iter()
-            .filter(|header| {
-                !transfer_presentation
-                    .transferred_panels
-                    .contains(&header.panel)
-                    && !transfer_presentation
-                        .groups_without_visible_tabs
-                        .contains(&header.group)
-            })
-            .copied()
-            .collect::<Vec<_>>();
+        let column_group_ids = snapshot
+            .column_groups
+            .values()
+            .flat_map(|groups| groups.iter().copied())
+            .collect::<HashSet<_>>();
+        let rendered_tab_headers = transfer_presentation.visible_tab_headers(
+            &snapshot.rects.tab_headers,
+            &snapshot.rects.tab_strips,
+            &snapshot.rects.tab_overflows,
+            &group_presentations,
+            &column_group_ids,
+            snapshot.metrics,
+        );
         let rendered_tab_overflows = snapshot
             .rects
             .tab_overflows
@@ -1959,7 +1961,7 @@ impl Render for FloatingHost {
         if self.open_context_menu.as_ref().is_some_and(|open| {
             !context_menu_target_exists(
                 open.target,
-                &snapshot.group_presentations,
+                &group_presentations,
                 &snapshot.column_ids,
                 Some(&snapshot.rects),
             )
@@ -2020,7 +2022,7 @@ impl Render for FloatingHost {
             &rendered_tab_strips,
             &rendered_tab_headers,
             &rendered_tab_overflows,
-            &snapshot.group_presentations,
+            &group_presentations,
             &snapshot.column_groups,
             &snapshot.column_modes,
             &snapshot.rail_display_orders,
@@ -2076,7 +2078,7 @@ impl Render for FloatingHost {
             let entries = build_context_menu_entries(
                 open.target,
                 &snapshot.rects,
-                &snapshot.group_presentations,
+                &group_presentations,
                 &snapshot.column_modes,
                 self.controller.clone(),
                 false,

@@ -448,6 +448,15 @@ impl Render for DockHost {
             })
             .unwrap_or_default();
 
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(window.window_handle().window_id())
+        });
+        let mut group_presentations = group_presentations;
+        let transfer_presentation =
+            PanelTransferPresentation::new(&group_presentations, &transferred_panels);
+        transfer_presentation.apply_to_group_presentations(&mut group_presentations);
+        let source_window_id = window.window_handle().window_id();
+
         // Main-column panels are mounted by DockColumnView. Floating panels are mounted
         // only by their matching FloatingHost native window.
         let main_active_panels = main_column_groups
@@ -465,16 +474,16 @@ impl Render for DockHost {
         let panel_views = rects
             .as_ref()
             .map(|rects| {
-                rects
-                    .panels
-                    .iter()
+                transfer_presentation
+                    .panel_rects_with_active_replacements(&rects.panels)
+                    .into_iter()
                     .filter(|panel_rect| {
                         main_active_panels.contains(&panel_rect.panel)
+                            || transfer_presentation.transferred_panels.contains(&panel_rect.panel)
                             || active_flyout.is_some_and(|flyout| flyout.panel == panel_rect.panel)
                     })
-                    .map(|panel_rect| {
-                        let panel = panel_rect.panel;
-                        let rect = *panel_rect;
+                    .map(|rect| {
+                        let panel = rect.panel;
                         self.controller.update(cx, |controller, panel_cx| {
                             (rect, controller.panel_view(panel, window, panel_cx))
                         })
@@ -482,8 +491,6 @@ impl Render for DockHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-
-        let source_window_id = window.window_handle().window_id();
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(source_window_id)
         });
@@ -493,11 +500,6 @@ impl Render for DockHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(source_window_id)
         });
-        let transferred_panels = self.controller.update(cx, |controller, _| {
-            controller.transferred_panel_views_from(source_window_id)
-        });
-        let transfer_presentation =
-            PanelTransferPresentation::new(&group_presentations, &transferred_panels);
         let main_groups = rects
             .as_ref()
             .map(|rects| {
@@ -520,15 +522,21 @@ impl Render for DockHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let main_column_group_ids = main_column_groups
+            .values()
+            .flat_map(|groups| groups.iter().copied())
+            .collect::<HashSet<_>>();
         let main_tab_headers = rects
             .as_ref()
             .map(|rects| {
-                rects
-                    .tab_headers
-                    .iter()
-                    .filter(|header| !transfer_presentation.transferred_panels.contains(&header.panel))
-                    .copied()
-                    .collect::<Vec<_>>()
+                transfer_presentation.visible_tab_headers(
+                    &rects.tab_headers,
+                    &rects.tab_strips,
+                    &rects.tab_overflows,
+                    &group_presentations,
+                    &main_column_group_ids,
+                    metrics,
+                )
             })
             .unwrap_or_default();
         if !pending_transfers.is_empty()
