@@ -25,6 +25,9 @@ impl Layout {
             DockCommand::DockFloating { group, target } => {
                 self.apply_dock_floating_command(group, target, metrics)
             }
+            DockCommand::DockFloatingColumnsToMain { groups, side, index } => {
+                self.apply_dock_floating_columns_to_main_command(groups, side, *index)
+            }
             DockCommand::DockMainArea { side, target } => {
                 self.apply_dock_main_area_command(side, target, metrics)
             }
@@ -330,6 +333,195 @@ impl Layout {
         for panel_node in panel_nodes {
             self.remember_panel_dock_location(panel_node);
         }
+        Ok(CommandApplication::persistent())
+    }
+
+    /// Moves a complete WindowChain back into one Main DockArea as ordered Columns.
+    ///
+    /// WindowChain membership remains a GPUI concern; this command receives only
+    /// the ordered FloatingGroup IDs and performs one atomic Core tree mutation.
+    pub(super) fn apply_dock_floating_columns_to_main_command(
+        &mut self,
+        groups: &[FloatingGroupId],
+        side: &DockSide,
+        index: usize,
+    ) -> Result<CommandApplication, CommandError> {
+        if groups.len() < 2 {
+            return Err(CommandError::InvalidValue {
+                field: "groups",
+                reason: "docking a Floating column chain requires at least two windows",
+            });
+        }
+
+        let mut seen_groups = HashSet::new();
+        let mut seen_columns = HashSet::new();
+        let mut source_columns = Vec::with_capacity(groups.len());
+        let mut source_widths = Vec::with_capacity(groups.len());
+        let mut source_panels = Vec::new();
+
+        for group_id in groups {
+            if !seen_groups.insert(*group_id) {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating column chain contains a duplicate window",
+                });
+            }
+            let floating = self
+                .floating_groups
+                .get(*group_id)
+                .copied()
+                .ok_or(CommandError::MissingFloatingGroup { group: *group_id })?;
+            let area = self
+                .dock_areas
+                .get(floating.area)
+                .ok_or(CommandError::InvalidTarget {
+                    reason: "Floating column chain references a missing DockArea",
+                })?;
+            let root = area.root;
+            let Some(Node::Column(_)) = self.nodes.get(root) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "every Floating window in a Main-bound chain must contain one root Column",
+                });
+            };
+            if !seen_columns.insert(root) {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating column chain contains the same Column more than once",
+                });
+            }
+            floating
+                .bounds
+                .validate_non_empty()
+                .map_err(|error| CommandError::InvalidValue {
+                    field: "bounds",
+                    reason: geometry_error_reason(error),
+                })?;
+            let width = floating.bounds.size.width;
+            if !width.is_finite() || width <= 0.0 {
+                return Err(CommandError::InvalidValue {
+                    field: "width",
+                    reason: "every Floating Column width must be finite and positive",
+                });
+            }
+
+            source_panels.extend(self.panel_ids_in_subtree(root));
+            source_columns.push(root);
+            source_widths.push(width);
+        }
+
+        self.validate_panel_ids_allowed_for_area(&source_panels, AllowedArea::MAIN_DOCK)?;
+
+        let main_area = self.main_area(*side).copied();
+        let main_columns = self.main_columns(*side)?;
+        if index > main_columns.len() {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "Main Column insertion index is outside the target DockArea",
+            });
+        }
+        if main_area.is_none() && index != 0 {
+            return Err(CommandError::InvalidValue {
+                field: "index",
+                reason: "the first Columns on an empty Main DockArea must use index zero",
+            });
+        }
+        if main_columns.iter().any(|column| seen_columns.contains(column)) {
+            return Err(CommandError::InvalidTarget {
+                reason: "a Floating source Column is already attached to the target Main DockArea",
+            });
+        }
+
+        let main_width = main_columns
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.width),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "Main horizontal composition must contain only Columns",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .sum::<f32>();
+        let source_width = source_widths.iter().sum::<f32>();
+        let combined_width = main_width + source_width;
+        if !source_width.is_finite()
+            || source_width <= 0.0
+            || !main_width.is_finite()
+            || (main_area.is_some() && main_width <= 0.0)
+            || !combined_width.is_finite()
+            || combined_width <= 0.0
+        {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "combined Main and Floating Column widths must be finite and positive",
+            });
+        }
+
+        let source_ratios =
+            normalized_ratios(source_widths.iter().copied().map(Some).collect());
+        let (main_root, children, ratios) = if let Some(area) = main_area {
+            let main_root = area.root;
+            let main_ratios = match self.nodes.get(main_root) {
+                Some(Node::Column(_)) => vec![1.0],
+                Some(Node::Split(split)) if split.axis == Axis::X => {
+                    normalized_ratios(split.ratios.iter().copied().map(Some).collect())
+                }
+                Some(_) => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Main DockArea root must be a Column or Split(X) of Columns",
+                    });
+                }
+                None => {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "Main DockArea root is missing",
+                    });
+                }
+            };
+            let main_weight = main_width / combined_width;
+            let source_weight = source_width / combined_width;
+            let mut children = main_columns;
+            let mut ratios = main_ratios
+                .into_iter()
+                .map(|ratio| ratio * main_weight)
+                .collect::<Vec<_>>();
+            children.splice(index..index, source_columns.iter().copied());
+            ratios.splice(
+                index..index,
+                source_ratios.into_iter().map(|ratio| ratio * source_weight),
+            );
+            (
+                Some(main_root),
+                children,
+                normalized_ratios(ratios.into_iter().map(Some).collect()),
+            )
+        } else {
+            (None, source_columns.clone(), source_ratios)
+        };
+
+        // Detaching each Floating root also removes its old FloatingGroup and
+        // DockArea; the Column nodes and all descendants remain intact.
+        for column in &source_columns {
+            self.remember_subtree_dock_locations(*column);
+            self.detach_node(*column)?;
+        }
+
+        let new_root = self.nodes.insert(Node::Split(crate::Split {
+            axis: Axis::X,
+            children,
+            ratios,
+        }));
+        if let Some(main_root) = main_root {
+            self.set_area_root(main_root, new_root)?;
+            if matches!(self.nodes.get(main_root), Some(Node::Split(_))) {
+                self.nodes.remove(main_root);
+            }
+        } else {
+            let area_id = self.dock_areas.insert(crate::DockArea::main(*side, new_root));
+            self.main_areas[side_index(*side)] = Some(area_id);
+        }
+
+        for column in source_columns {
+            self.remember_subtree_dock_locations(column);
+        }
+
         Ok(CommandApplication::persistent())
     }
 

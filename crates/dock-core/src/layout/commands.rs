@@ -115,6 +115,7 @@ impl Layout {
             | DockCommand::ResizeFloatingBoundsFromEdge { .. }
             | DockCommand::RaiseFloating { .. }
             | DockCommand::DockFloating { .. }
+            | DockCommand::DockFloatingColumnsToMain { .. }
             | DockCommand::DockMainArea { .. }
             | DockCommand::CloseFloatingGroup { .. } => {
                 self.apply_floating_command(command, metrics)
@@ -217,6 +218,20 @@ impl Layout {
             DockCommand::MoveColumnToMainColumn { column, .. }
             | DockCommand::MoveColumnToTarget { column, .. } => {
                 affected.push(*column);
+            }
+            DockCommand::DockFloatingColumnsToMain { groups, side, .. } => {
+                for layout in [self, other] {
+                    if let Some(area) = layout.main_area(*side) {
+                        affected.push(area.root);
+                    }
+                    for group in groups {
+                        if let Some(floating) = layout.floating_group(*group)
+                            && let Some(area) = layout.dock_area(floating.area)
+                        {
+                            affected.push(area.root);
+                        }
+                    }
+                }
             }
             DockCommand::DockMainArea { side, target } => {
                 for layout in [self, other] {

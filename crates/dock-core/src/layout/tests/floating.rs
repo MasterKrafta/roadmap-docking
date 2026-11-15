@@ -2515,6 +2515,141 @@ fn floating_single_column_edge_resize_keeps_column_filling_the_window() {
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+
+#[test]
+fn floating_column_chain_docks_back_to_one_main_composition_in_one_undo_step() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, main_panel) = builder.panel(
+        PanelKey::new("dock-chain-main-existing").unwrap(),
+        descriptors()[0].1,
+    );
+    let main_group = builder.tabs(vec![main_panel], 0, false);
+    let main_column = builder.column(
+        260.0,
+        crate::ColumnMode::Expanded,
+        vec![main_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, main_column);
+
+    let widths = [240.0, 340.0, 280.0];
+    let mut source_columns = Vec::new();
+    let mut source_groups = Vec::new();
+    let mut floating_groups = Vec::new();
+    for (index, width) in widths.into_iter().enumerate() {
+        let (_, panel) = builder.panel(
+            PanelKey::new(format!("dock-chain-source-{index}")).unwrap(),
+            descriptors()[0].1,
+        );
+        let group = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        let floating = builder.floating_group(
+            column,
+            Rect::new(
+                Point::new(620.0 + widths[..index].iter().sum::<f32>(), 120.0),
+                Size::new(width, 560.0),
+            ),
+            index as i32 + 1,
+        );
+        source_columns.push(column);
+        source_groups.push(group);
+        floating_groups.push(floating);
+    }
+
+    let mut layout = builder.build();
+    let original_main_root = layout.main_area(DockSide::Left).unwrap().root;
+    let mut history = crate::UndoRedoHistory::new();
+
+    history
+        .apply(
+            &mut layout,
+            DockCommand::DockFloatingColumnsToMain {
+                groups: floating_groups.clone(),
+                side: DockSide::Left,
+                index: 1,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let expected_columns = vec![
+        main_column,
+        source_columns[0],
+        source_columns[1],
+        source_columns[2],
+    ];
+    assert_eq!(layout.main_columns(DockSide::Left).unwrap(), expected_columns);
+    let Some(Node::Split(split)) = layout.node(layout.main_area(DockSide::Left).unwrap().root) else {
+        panic!("the restored Main DockArea must be a horizontal composition");
+    };
+    assert_eq!(split.axis, Axis::X);
+    assert_eq!(split.children, expected_columns);
+    let total_width = 260.0 + widths.iter().sum::<f32>();
+    for (ratio, width) in split
+        .ratios
+        .iter()
+        .zip([260.0, widths[0], widths[1], widths[2]])
+    {
+        assert!((*ratio - width / total_width).abs() < 0.0001);
+    }
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    assert_eq!(history.undo_len(), 1);
+
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert_eq!(
+        layout.main_area(DockSide::Left).unwrap().root,
+        original_main_root
+    );
+    assert_eq!(layout.main_columns(DockSide::Left).unwrap(), vec![main_column]);
+    assert_eq!(layout.floating_groups().count(), floating_groups.len());
+    for (column, group) in source_columns.iter().zip(source_groups.iter()) {
+        let restored = layout
+            .floating_groups()
+            .find_map(|(_, floating)| {
+                (layout.dock_area(floating.area).unwrap().root == *column)
+                    .then_some(floating)
+            })
+            .expect("Undo must restore each original Floating Column");
+        let Some(Node::Column(column_data)) = layout.node(*column) else {
+            panic!("Undo must restore the original Column node");
+        };
+        assert_eq!(restored.bounds.size.width, column_data.width);
+        assert_eq!(column_data.groups, vec![*group]);
+    }
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    history
+        .apply(
+            &mut layout,
+            DockCommand::DockFloatingColumnsToMain {
+                groups: floating_groups.clone(),
+                side: DockSide::Right,
+                index: 0,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        layout.main_columns(DockSide::Right).unwrap(),
+        source_columns
+    );
+    assert!(layout.main_area(DockSide::Left).is_some());
+    assert_eq!(layout.floating_groups().count(), 0);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+    assert!(history.undo(&mut layout, &metrics).unwrap());
+    assert!(layout.main_area(DockSide::Right).is_none());
+    assert_eq!(layout.floating_groups().count(), floating_groups.len());
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
 #[test]
 fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomically() {
     let metrics = DockMetrics::default();

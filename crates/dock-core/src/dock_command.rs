@@ -193,6 +193,15 @@ pub enum DockCommand {
         group: FloatingGroupId,
         target: DropTarget,
     },
+    /// Dock an ordered set of independent Floating Column roots into one Main DockArea.
+    ///
+    /// The GPUI window manager supplies the WindowChain order. Core moves every
+    /// FloatingGroup in one transaction and preserves each Column subtree.
+    DockFloatingColumnsToMain {
+        groups: Vec<FloatingGroupId>,
+        side: DockSide,
+        index: usize,
+    },
     /// Move a complete Main DockArea composition into an existing Floating composition.
     ///
     /// The source is transferred using the same target-specific docking rules as
@@ -399,6 +408,11 @@ mod tests {
                 side: DockSide::Left,
                 target,
             },
+            DockCommand::DockFloatingColumnsToMain {
+                groups: vec![FloatingGroupId::null(), FloatingGroupId::null()],
+                side: DockSide::Right,
+                index: 1,
+            },
             DockCommand::CloseFloatingGroup {
                 group: FloatingGroupId::null(),
             },
@@ -429,7 +443,7 @@ mod tests {
                 mode: ChromeMode::AllHidden,
             },
         ];
-        assert_eq!(commands.len(), 41);
+        assert_eq!(commands.len(), 42);
     }
 
     #[cfg(feature = "serde")]

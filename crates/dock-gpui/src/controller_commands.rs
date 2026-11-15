@@ -431,6 +431,72 @@ impl DockController {
         self.finish_native_window_move_commands(std::iter::once(command), cx)
     }
 
+    /// Returns every Column in a moved Floating WindowChain to one Main DockArea.
+    ///
+    /// The Core command is applied inside the native-move history transaction,
+    /// so the entire chain is restored by one Undo.
+    pub(crate) fn finish_floating_window_chain_dock_in(
+        &mut self,
+        groups: &[FloatingGroupId],
+        side: dock_core::DockSide,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if groups.len() < 2 {
+            return Err(CommandError::InvalidValue {
+                field: "window_chain",
+                reason: "docking a complete WindowChain requires at least two windows",
+            });
+        }
+
+        self.finish_native_window_move_commands(
+            std::iter::once(DockCommand::DockFloatingColumnsToMain {
+                groups: groups.to_vec(),
+                side,
+                index,
+            }),
+            cx,
+        )
+    }
+
+    /// Applies native-frame alignment corrections without adding a second Undo step.
+    ///
+    /// The preceding user operation owns the history checkpoint; correcting the
+    /// visible DWM seam is adapter geometry and preserves the current history stack.
+    pub(crate) fn apply_window_chain_position_corrections_in(
+        &mut self,
+        corrections: &[(FloatingGroupId, Point)],
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if corrections.is_empty() {
+            return Ok(());
+        }
+        if self.has_active_pointer_interaction() || self.native_window_move_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "window_chain_bounds",
+                reason: "cannot align a WindowChain during an active pointer interaction",
+            });
+        }
+
+        let before_panels = self.panel_keys();
+        let previous_version = self.layout.version();
+        let mut candidate = self.layout.clone();
+        for (group, origin) in corrections {
+            candidate.apply(
+                DockCommand::MoveFloating {
+                    group: *group,
+                    origin: *origin,
+                },
+                &self.metrics,
+            )?;
+        }
+        self.layout = candidate;
+        self.finish_success(before_panels, previous_version, std::iter::empty());
+        self.flush_events(cx);
+        cx.notify();
+        Ok(())
+    }
+
     /// Commits position changes for every member of one merged chain as one Undo.
     pub(crate) fn finish_floating_window_chain_move_in(
         &mut self,

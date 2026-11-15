@@ -478,6 +478,23 @@ fn arrange_contiguous_window_chain_bounds(
     Some(bounds)
 }
 
+fn floating_chain_drop_target_is_supported(
+    target: DropTarget,
+    target_is_main: bool,
+) -> bool {
+    match (target_is_main, target) {
+        (true, DropTarget::MainColumn { .. }) => true,
+        (
+            false,
+            DropTarget::GroupEdge {
+                zone: dock_core::DropZone::Left | dock_core::DropZone::Right,
+                ..
+            },
+        ) => true,
+        _ => false,
+    }
+}
+
 pub(crate) fn floating_window_chain_insert_before(target: DropTarget) -> Option<bool> {
     match target {
         DropTarget::GroupEdge {
@@ -712,6 +729,7 @@ pub struct FloatingWindowManager {
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     window_chains: WindowChainRegistry,
+    pending_window_chain_alignment: HashSet<FloatingGroupId>,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
 }
@@ -732,6 +750,7 @@ impl FloatingWindowManager {
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowChainRegistry::default(),
+            pending_window_chain_alignment: HashSet::new(),
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
         }
@@ -812,6 +831,7 @@ impl FloatingWindowManager {
             }
         }
         self.window_chains = next;
+        self.pending_window_chain_alignment.insert(groups[0]);
         true
     }
 
@@ -1911,6 +1931,7 @@ impl FloatingWindowManager {
                 return;
             }
         };
+        let moving_chain = self.native_move_windows.len() > 1;
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
                 state.drop_target = None;
@@ -1929,6 +1950,9 @@ impl FloatingWindowManager {
                         return None;
                     }
                 };
+                let target = target.filter(|target| {
+                    !moving_chain || floating_chain_drop_target_is_supported(*target, true)
+                });
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 controller_cx.notify();
@@ -1962,7 +1986,9 @@ impl FloatingWindowManager {
                     // Keep every legal target from the Floating resolver. Left/Right
                     // are interpreted as native WindowChain insertion on release;
                     // all other zones remain ordinary Core docking destinations.
-                    Ok(target) => target,
+                    Ok(target) => target.filter(|target| {
+                        !moving_chain || floating_chain_drop_target_is_supported(*target, false)
+                    }),
                     Err(error) => {
                         tracing::debug!(
                             ?target_group,
@@ -2174,6 +2200,35 @@ impl FloatingWindowManager {
                 insert_before,
                 cx,
             ),
+            Some(NativeMoveTarget::MainDock {
+                target: DropTarget::MainColumn { side, index },
+                ..
+            }) if moving_windows.len() > 1 => {
+                let ordered_groups = moving_windows
+                    .iter()
+                    .map(|moving| moving.group)
+                    .collect::<Vec<_>>();
+                match self.controller.update(cx, |controller, controller_cx| {
+                    controller.finish_floating_window_chain_dock_in(
+                        &ordered_groups,
+                        side,
+                        index,
+                        controller_cx,
+                    )
+                }) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        tracing::warn!(
+                            ?state.group,
+                            %error,
+                            "could not access the controller to dock the Floating WindowChain into Main"
+                        );
+                        Err(dock_core::CommandError::InvalidTarget {
+                            reason: "could not access the controller to dock the Floating WindowChain into Main",
+                        })
+                    }
+                }
+            }
             _ if moving_windows.len() > 1 => {
                 // A chain header can move the chain, but cannot detach one
                 // member by dropping it into Main or onto empty desktop space.
@@ -2218,10 +2273,16 @@ impl FloatingWindowManager {
             self.schedule_reconcile(cx);
         }
 
-        if matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. })) {
-            // The destination FloatingHost may still be unwinding its mouse/render
-            // update. Reconcile and redraw it from a later app update instead of
-            // calling WindowHandle::update re-entrantly here.
+        if matches!(
+            state.drop_target,
+            Some(NativeMoveTarget::FloatingDock { .. })
+                | Some(NativeMoveTarget::MainDock {
+                    target: DropTarget::MainColumn { .. },
+                    ..
+                })
+        ) {
+            // Docking changes which native windows own visible compositions.
+            // Reconcile after the active native-move update unwinds.
             self.schedule_reconcile(cx);
         } else {
             self.redraw_visible_hosts(cx);
@@ -2503,6 +2564,17 @@ impl FloatingWindowManager {
         let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
         let (removed_chain_members, chains_to_compact) =
             self.window_chains.retain_groups(&live_groups);
+        let stale_alignment_anchors = self
+            .pending_window_chain_alignment
+            .iter()
+            .filter(|anchor| {
+                !live_groups.contains(anchor) || !self.window_chains.is_chained(**anchor)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        for anchor in stale_alignment_anchors {
+            self.pending_window_chain_alignment.remove(&anchor);
+        }
         if removed_chain_members > 0 {
             tracing::debug!(
                 removed_chain_members,
@@ -2782,6 +2854,7 @@ impl FloatingWindowManager {
         self.host_registry.floating_groups = active_hosts.clone();
 
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
+        self.align_pending_window_chains(&groups, cx);
 
         for (panel, entry) in &mut self.registry.windows {
             if entry.host_group.is_none()
@@ -2845,6 +2918,113 @@ impl FloatingWindowManager {
             });
             if applied {
                 self.reconcile(cx);
+            }
+        }
+    }
+
+    /// Aligns chains created by FloatMainAreaColumns once every native HWND is ready.
+    ///
+    /// Frame corrections move only window origins; client sizes and Column widths
+    /// remain unchanged. They are adapter geometry and do not create another Undo.
+    fn align_pending_window_chains(
+        &mut self,
+        groups: &[FloatingGroupSnapshot],
+        cx: &mut Context<Self>,
+    ) {
+        let anchors = self
+            .pending_window_chain_alignment
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        for anchor in anchors {
+            if !self.window_chains.is_chained(anchor) {
+                self.pending_window_chain_alignment.remove(&anchor);
+                continue;
+            }
+            let members = self.window_chains.members_for(anchor);
+            if members.len() < 2 {
+                self.pending_window_chain_alignment.remove(&anchor);
+                continue;
+            }
+            let all_members_live = members.iter().all(|member| {
+                groups.iter().any(|snapshot| snapshot.id == *member)
+                    && self.host_registry.floating_groups.contains_key(member)
+            });
+            if !all_members_live {
+                continue;
+            }
+
+            let member_bounds = match self.controller.update(cx, |controller, _| {
+                members
+                    .iter()
+                    .map(|member| {
+                        controller
+                            .layout()
+                            .floating_group(*member)
+                            .map(|floating| (*member, floating.bounds))
+                    })
+                    .collect::<Option<Vec<_>>>()
+            }) {
+                Ok(Some(bounds)) => bounds,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::debug!(
+                        ?anchor,
+                        %error,
+                        "could not read Floating bounds for initial WindowChain alignment"
+                    );
+                    continue;
+                }
+            };
+
+            let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
+            let Some(aligned_bounds) = arrange_contiguous_window_chain_bounds(
+                member_bounds.clone(),
+                &frame_geometries,
+                anchor,
+            ) else {
+                continue;
+            };
+            let corrections = aligned_bounds
+                .iter()
+                .filter_map(|(group, aligned)| {
+                    let original = member_bounds
+                        .iter()
+                        .find(|(candidate, _)| candidate == group)
+                        .map(|(_, bounds)| *bounds)?;
+                    (original.origin != aligned.origin).then_some((*group, aligned.origin))
+                })
+                .collect::<Vec<_>>();
+
+            if corrections.is_empty() {
+                self.pending_window_chain_alignment.remove(&anchor);
+                continue;
+            }
+
+            match self.controller.update(cx, |controller, controller_cx| {
+                controller.apply_window_chain_position_corrections_in(
+                    &corrections,
+                    controller_cx,
+                )
+            }) {
+                Ok(Ok(())) => {
+                    self.pending_window_chain_alignment.remove(&anchor);
+                }
+                Ok(Err(error)) => {
+                    tracing::debug!(
+                        ?anchor,
+                        %error,
+                        "could not commit initial native-frame alignment for the Floating WindowChain"
+                    );
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        ?anchor,
+                        %error,
+                        "could not access the controller to align the Floating WindowChain"
+                    );
+                }
             }
         }
     }
@@ -4597,6 +4777,41 @@ mod native_z_order_tests {
             floating_groups_in_native_z_order(&groups, &WindowChainRegistry::default()),
             vec![b, c, a, d]
         );
+    }
+}
+
+#[cfg(test)]
+mod floating_chain_drop_target_tests {
+    use super::floating_chain_drop_target_is_supported;
+    use dock_core::{DockSide, DropTarget, DropZone, NodeId};
+
+    #[test]
+    fn complete_window_chains_only_accept_main_column_insertions_on_main() {
+        let target = DropTarget::MainColumn {
+            side: DockSide::Left,
+            index: 1,
+        };
+        assert!(floating_chain_drop_target_is_supported(target, true));
+        assert!(!floating_chain_drop_target_is_supported(target, false));
+
+        let top = DropTarget::GroupEdge {
+            group: NodeId::null(),
+            zone: DropZone::Top,
+        };
+        assert!(!floating_chain_drop_target_is_supported(top, true));
+
+        let left = DropTarget::GroupEdge {
+            group: NodeId::null(),
+            zone: DropZone::Left,
+        };
+        assert!(!floating_chain_drop_target_is_supported(left, true));
+        assert!(floating_chain_drop_target_is_supported(left, false));
+
+        let right = DropTarget::GroupEdge {
+            group: NodeId::null(),
+            zone: DropZone::Right,
+        };
+        assert!(floating_chain_drop_target_is_supported(right, false));
     }
 }
 
