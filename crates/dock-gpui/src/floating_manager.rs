@@ -25,6 +25,7 @@ use crate::{
     window_chain::{WindowGridDirection, WindowGridRegistry},
     window_chain_geometry::{
         NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
+        arrange_window_grid_bounds as arrange_grid_geometry_bounds,
         match_moving_window_width_to_target,
         floating_groups_in_native_z_order as grid_floating_groups_in_native_z_order,
         native_resize_right_edge_delta, shift_window_chain_after_resize,
@@ -549,22 +550,20 @@ impl FloatingWindowManager {
             });
         };
 
-        let bounds = match direction {
+        let member_bounds = match direction {
             WindowGridDirection::Above | WindowGridDirection::Below => {
                 match_moving_window_width_to_target(member_bounds, anchor, groups[0])
             }
-            WindowGridDirection::Left | WindowGridDirection::Right => {
-                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
-                arrange_contiguous_window_chain_bounds(
-                    member_bounds,
-                    &frame_geometries,
-                    anchor,
-                )
-            }
+            WindowGridDirection::Left | WindowGridDirection::Right => Some(member_bounds),
         }
         .ok_or(dock_core::CommandError::InvalidTarget {
-            reason: "could not calculate the bounds for the new WindowGrid connection",
+            reason: "could not normalize the new Floating window bounds",
         })?;
+        let bounds = self
+            .arrange_window_grid_bounds(member_bounds, anchor, cx)
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "could not calculate native bounds for the new WindowGrid connection",
+            })?;
 
         let current_bounds = self.controller.update(cx, |controller, _| {
             bounds
@@ -772,57 +771,65 @@ impl FloatingWindowManager {
         self.registry.windows.get(&panel)
     }
 
-    /// Returns the outer HWND width and the inset to each visible frame edge.
-    /// GetWindowRect includes invisible resize borders; DWM's extended frame
-    /// bounds provide the visible edges used for a true visual edge-to-edge join.
+    /// Reads each HWND's actual outer frame, DWM-visible horizontal frame,
+    /// client rectangle and monitor scale. Core bounds supply the fallback only
+    /// while a persistent native host has not been created yet.
     fn frame_geometries_for_bounds(
         &self,
         bounds: &[(FloatingGroupId, Rect)],
-    ) -> Vec<NativeFrameGeometry> {
+    ) -> Option<Vec<NativeFrameGeometry>> {
         bounds
             .iter()
             .map(|(group, bounds)| {
                 let Some(entry) = self.panel_window_for_group(*group) else {
-                    return NativeFrameGeometry::without_frame(bounds.size.width)
-                        .unwrap_or(NativeFrameGeometry {
-                            outer_width: bounds.size.width.max(1.0),
-                            visible_left_inset: 0.0,
-                            visible_right_inset: 0.0,
-                        });
+                    return NativeFrameGeometry::without_frame_size(bounds.size, 1.0);
                 };
                 let Some(native_window) = entry.native_window else {
-                    let scale = entry.native_scale_factor.unwrap_or(1.0);
-                    return NativeFrameGeometry::without_frame(bounds.size.width * scale)
-                        .unwrap_or(NativeFrameGeometry {
-                            outer_width: bounds.size.width,
-                            visible_left_inset: 0.0,
-                            visible_right_inset: 0.0,
-                        });
+                    let scale = entry
+                        .native_scale_factor
+                        .filter(|scale| scale.is_finite() && *scale > 0.0)
+                        .unwrap_or(1.0);
+                    return NativeFrameGeometry::without_frame_size(bounds.size, scale);
                 };
 
-                let outer = self.native_ops.window_rect(native_window).ok();
-                let visible = self.native_ops.visible_frame_rect(native_window).ok();
-                if let (Some(outer), Some(visible)) = (outer, visible)
-                    && let Some(geometry) = NativeFrameGeometry::from_rects(outer, visible)
-                {
-                    return geometry;
-                }
-
+                let outer = self.native_ops.window_rect(native_window).ok()?;
+                let visible = self
+                    .native_ops
+                    .visible_frame_rect(native_window)
+                    .unwrap_or(outer);
+                let client_origin = self.native_ops.client_origin(native_window).ok()?;
+                let client_size = self.native_ops.client_size(native_window).ok()?;
                 let scale = self
                     .native_ops
                     .scale_factor(native_window)
                     .ok()
                     .or(entry.native_scale_factor)
-                    .filter(|scale| scale.is_finite() && *scale > 0.0)
-                    .unwrap_or(1.0);
-                NativeFrameGeometry::without_frame(bounds.size.width * scale)
-                    .unwrap_or(NativeFrameGeometry {
-                        outer_width: bounds.size.width,
-                        visible_left_inset: 0.0,
-                        visible_right_inset: 0.0,
-                    })
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)?;
+                NativeFrameGeometry::from_native_rects(
+                    outer,
+                    visible,
+                    client_origin,
+                    client_size,
+                    scale,
+                )
             })
             .collect()
+    }
+
+    /// Computes a complete grid from native frame measurements and the current
+    /// CompositionHeader metric. The target anchor never moves during a Drop.
+    fn arrange_window_grid_bounds(
+        &self,
+        bounds: Vec<(FloatingGroupId, Rect)>,
+        anchor: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<(FloatingGroupId, Rect)>> {
+        let links = self.window_chains.links_for(anchor)?.to_vec();
+        let frames = self.frame_geometries_for_bounds(&bounds)?;
+        let header_height = self.controller.update(cx, |controller, _| {
+            controller.metrics().column_header_height
+        });
+        arrange_grid_geometry_bounds(bounds, &frames, &links, anchor, header_height)
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -2083,22 +2090,20 @@ impl FloatingWindowManager {
             moving_bounds.origin = moving_native_origin;
         }
 
-        let bounds = match direction {
+        let member_bounds = match direction {
             WindowGridDirection::Above | WindowGridDirection::Below => {
                 match_moving_window_width_to_target(member_bounds, anchor, moving)
             }
-            WindowGridDirection::Left | WindowGridDirection::Right => {
-                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
-                arrange_contiguous_window_chain_bounds(
-                    member_bounds,
-                    &frame_geometries,
-                    anchor,
-                )
-            }
+            WindowGridDirection::Left | WindowGridDirection::Right => Some(member_bounds),
         }
         .ok_or(dock_core::CommandError::InvalidTarget {
-            reason: "could not calculate the bounds for the Floating WindowGrid connection",
+            reason: "could not normalize the Floating window bounds",
         })?;
+        let bounds = self
+            .arrange_window_grid_bounds(member_bounds, anchor, cx)
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "could not calculate native bounds for the Floating WindowGrid connection",
+            })?;
 
         let result = self.controller.update(cx, |controller, controller_cx| {
             controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
@@ -2328,7 +2333,9 @@ impl FloatingWindowManager {
                 let Some(member_bounds) = member_bounds else {
                     continue;
                 };
-                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
+                let Some(frame_geometries) = self.frame_geometries_for_bounds(&member_bounds) else {
+                    continue;
+                };
                 if let Some(anchor) = members.first().copied()
                     && let Some(bounds) = arrange_contiguous_window_chain_bounds(
                         member_bounds,
@@ -2760,16 +2767,12 @@ impl FloatingWindowManager {
                 continue;
             };
 
-            let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
-            let Some(aligned_bounds) = arrange_contiguous_window_chain_bounds(
-                member_bounds.clone(),
-                &frame_geometries,
-                anchor,
-            ) else {
-                self.pending_window_chain_alignment.remove(&anchor);
+            let Some(aligned_bounds) =
+                self.arrange_window_grid_bounds(member_bounds.clone(), anchor, cx)
+            else {
                 tracing::debug!(
                     ?anchor,
-                    "could not calculate native-frame alignment for the Floating WindowChain"
+                    "native frame measurements are not ready for Floating WindowGrid alignment"
                 );
                 continue;
             };
