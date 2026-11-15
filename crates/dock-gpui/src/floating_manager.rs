@@ -478,7 +478,7 @@ fn arrange_contiguous_window_chain_bounds(
     Some(bounds)
 }
 
-fn floating_window_chain_insert_before(target: DropTarget) -> Option<bool> {
+pub(crate) fn floating_window_chain_insert_before(target: DropTarget) -> Option<bool> {
     match target {
         DropTarget::GroupEdge {
             zone: dock_core::DropZone::Left,
