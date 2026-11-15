@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use dock_core::{FloatingGroupId, Point, Rect};
+use dock_core::{FloatingGroupId, Rect};
 use platform::PhysicalRect;
 
 use crate::window_chain::WindowGridRegistry;
