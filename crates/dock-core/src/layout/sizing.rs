@@ -1201,36 +1201,6 @@ impl Layout {
                     metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 minimum
             }
-            Some(Node::Column(_)) => self.minimum_floating_node_size_with_cache(
-                node_id,
-                node_id,
-                metrics,
-                cache,
-            )?,
-            Some(_) => self.minimum_floating_node_size_with_cache(
-                            *group,
-                            node_id,
-                            metrics,
-                            cache,
-                        )?,
-                        None => return Err(CommandError::MissingNode { node: *group }),
-                    };
-                    group_minimums.push(group_minimum);
-                    content_minimum.width = content_minimum.width.max(group_minimum.width);
-                    content_minimum.height = content_minimum.height.max(group_minimum.height);
-                }
-
-                let height = match column.groups.as_slice() {
-                    [_group] if matches!(
-                        self.nodes.get(column.groups[0]),
-                        Some(Node::Tabs(tabs)) if tabs.collapsed
-                    ) => group_minimums[0].height,
-                    [_] => metrics.column_header_height + group_minimums[0].height,
-                    groups => metrics.column_header_height
-                        + metrics.effective_collapsed_group_height() * groups.len() as f32,
-                };
-                Size::new(content_minimum.width, height)
-            }
             Some(_) => self.minimum_floating_node_size_with_cache(
                 node_id,
                 node_id,
