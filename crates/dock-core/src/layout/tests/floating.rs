@@ -2937,7 +2937,7 @@ fn floating_preferred_height_sums_vertical_groups_in_its_own_window() {
 }
 
 #[test]
-fn floating_preferred_heights_are_independent_between_chained_window_candidates() {
+fn floating_preferred_heights_are_independent_between_windows() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let (short_panel, short_node) = builder.panel(
