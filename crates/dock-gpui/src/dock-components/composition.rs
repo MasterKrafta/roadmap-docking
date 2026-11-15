@@ -440,8 +440,11 @@ impl DockCompositionView {
             .iter()
             .find(|overflow| overflow.owner == column.column)
             .copied();
-        let active_panels =
-            active_panels_for_groups(column_group_ids.iter().copied(), group_presentations, dragged_group);
+        let active_panels = active_panels_for_groups(
+            column_group_ids.iter().copied(),
+            group_presentations,
+            dragged_group,
+        );
         let column_panels = panels
             .iter()
             .filter(|(panel, _)| active_panels.contains(&panel.panel))
