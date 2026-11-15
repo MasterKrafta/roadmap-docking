@@ -810,7 +810,47 @@ impl Layout {
                 }
                 Size::new(width, height)
             }
-            Node::Column(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
+            Node::Column(column) if column.mode.is_rail() => {
+                self.minimum_node_size_with_cache(node_id, metrics, cache)?
+            }
+            Node::Column(column) => {
+                let mut content_minimum = Size::ZERO;
+                let mut group_minimums = Vec::with_capacity(column.groups.len());
+                for group in &column.groups {
+                    let group_minimum = match self.nodes.get(*group) {
+                        Some(Node::Tabs(tabs)) if tabs.collapsed => {
+                            let mut minimum = Size::ZERO;
+                            for child in &tabs.children {
+                                let child_size =
+                                    self.minimum_node_size_with_cache(*child, metrics, cache)?;
+                                minimum.width = minimum.width.max(child_size.width);
+                                minimum.height = minimum.height.max(child_size.height);
+                            }
+                            minimum
+                        }
+                        Some(_) => self.minimum_floating_node_size_with_cache(
+                            *group,
+                            floating_root,
+                            metrics,
+                            cache,
+                        )?,
+                        None => return Err(CommandError::MissingNode { node: *group }),
+                    };
+                    group_minimums.push(group_minimum);
+                    content_minimum.width = content_minimum.width.max(group_minimum.width);
+                }
+
+                let height = match column.groups.as_slice() {
+                    [group] if matches!(
+                        self.nodes.get(*group),
+                        Some(Node::Tabs(tabs)) if tabs.collapsed
+                    ) => group_minimums[0].height,
+                    [_] => metrics.column_header_height + group_minimums[0].height,
+                    groups => metrics.column_header_height
+                        + metrics.effective_collapsed_group_height() * groups.len() as f32,
+                };
+                Size::new(content_minimum.width, height)
+            }
         };
 
         if !size.is_finite() {
@@ -1148,35 +1188,26 @@ impl Layout {
                 for child in &split.children {
                     minimum.width += self.minimum_column_width(*child, metrics)?;
                     minimum.height = minimum.height.max(
-                        self.minimum_node_size_with_cache(*child, metrics, cache)?.height,
+                        self.minimum_floating_node_size_with_cache(
+                            *child,
+                            node_id,
+                            metrics,
+                            cache,
+                        )?
+                        .height,
                     );
                 }
                 minimum.width +=
                     metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
                 minimum
             }
-            Some(Node::Column(column)) if !column.mode.is_rail() => {
-                let mut content_minimum = Size::ZERO;
-                let mut group_minimums = Vec::with_capacity(column.groups.len());
-                for group in &column.groups {
-                    let group_minimum = match self.nodes.get(*group) {
-                        Some(Node::Tabs(tabs)) if tabs.collapsed => {
-                            let mut minimum = Size::ZERO;
-                            for child in &tabs.children {
-                                let child_size =
-                                    self.minimum_node_size_with_cache(*child, metrics, cache)?;
-                                minimum.width = minimum.width.max(child_size.width);
-                                minimum.height = minimum.height.max(child_size.height);
-                            }
-                            minimum
-                        }
-                        Some(Node::Tabs(_)) => self.minimum_floating_node_size_with_cache(
-                            *group,
-                            node_id,
-                            metrics,
-                            cache,
-                        )?,
-                        Some(_) => self.minimum_floating_node_size_with_cache(
+            Some(Node::Column(_)) => self.minimum_floating_node_size_with_cache(
+                node_id,
+                node_id,
+                metrics,
+                cache,
+            )?,
+            Some(_) => self.minimum_floating_node_size_with_cache(
                             *group,
                             node_id,
                             metrics,
