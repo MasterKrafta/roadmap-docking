@@ -14,7 +14,7 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, ComputeRectsError, DockMetrics, DockSide,
+    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide,
     DragDropAction,
     DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
@@ -868,36 +868,11 @@ impl DragHostManager {
                             .prepare_floating_window_drop_resolver(window_id, group, source)
                             .and_then(|resolver| resolver.resolve(point)),
                         (Some(_), Some(DockingWindowAtPoint::ForeignWindow)) => Ok(None),
-                        (Some(source), None) => {
-                            // The pointer is expressed in the original source host's
-                            // local coordinates. Resolve FreeArea against that same
-                            // host; Main geometry is not interchangeable with a
-                            // Floating window's local coordinate space.
-                            let resolver = match source_host {
-                                DragSourceHost::Main => {
-                                    controller.prepare_drop_resolver(source)
-                                }
-                                DragSourceHost::Floating { group } => source_window_id
-                                    .ok_or(ComputeRectsError::InvalidLayoutState)
-                                    .and_then(|window_id| {
-                                        controller.prepare_floating_window_drop_resolver(
-                                            window_id,
-                                            group,
-                                            source,
-                                        )
-                                    }),
-                            };
-                            resolver.map(|resolver| {
-                                resolver
-                                    .zones()
-                                    .iter()
-                                    .any(|zone| {
-                                        zone.target == DropTarget::FreeArea
-                                            && zone.rect.contains(source_point).unwrap_or(false)
-                                    })
-                                    .then_some(DropTarget::FreeArea)
-                            })
-                        },
+                        // No managed Dock window is under the cursor. This is the
+                        // desktop/free-space destination for both Main and Floating
+                        // sources. A Floating snapshot has no Canvas/FreeArea zone,
+                        // so asking its resolver here would silently cancel the tear-off.
+                        (Some(_), None) => Ok(Some(DropTarget::FreeArea)),
                         (None, _) => Ok(None),
                     }
                 };
@@ -1135,20 +1110,22 @@ impl DragHostManager {
             tracing::debug!(?id, ?panel, "DragHost release was cancelled; source view will be restored");
         }
 
-        // A side-chain request must produce a new Core FloatingGroup. Do not
-        // resolve the still-source-owned Panel back to its original group when
-        // the command was skipped or rejected (for example, missing bounds).
-        if finished && chain_join.is_some() && created_groups.is_empty() {
+        // FreeArea and WindowChain side drops must create a new Core FloatingGroup.
+        // Never resolve the still-source-owned Panel back to its original group if
+        // the request was skipped, rejected, or produced no detached composition.
+        let requires_new_floating_group =
+            target == Some(DropTarget::FreeArea) || chain_join.is_some();
+        if finished && requires_new_floating_group && created_groups.is_empty() {
             tracing::warn!(
                 ?id,
                 ?target,
                 ?drag_handle,
                 has_free_area_bounds = free_area_bounds.is_some(),
-                "WindowChain content drop did not create a FloatingGroup; retaining the source layout"
+                "Floating tear-off did not create a new FloatingGroup; retaining the source layout"
             );
             self.flush_controller_events(cx);
             if let Err(error) = self.close(id, cx) {
-                tracing::warn!(?id, %error, "could not close DragHost after rejected WindowChain drop");
+                tracing::warn!(?id, %error, "could not close DragHost after rejected Floating tear-off");
             }
             return;
         }
@@ -1156,7 +1133,9 @@ impl DragHostManager {
         let floating_target = if finished {
             panel.and_then(|panel| {
                 self.controller.update(cx, |controller, _| {
-                    floating_group_for_panel(controller.layout(), panel)
+                    let group = floating_group_for_panel(controller.layout(), panel)?;
+                    (!requires_new_floating_group || created_groups.contains(&group))
+                        .then_some(group)
                 })
             })
         } else {
