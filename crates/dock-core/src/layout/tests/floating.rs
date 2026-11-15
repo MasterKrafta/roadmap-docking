@@ -2626,11 +2626,23 @@ fn floating_column_chain_docks_back_to_one_main_composition_in_one_undo_step() {
     }
     assert_eq!(layout.validate(&metrics), Ok(()));
 
+    let restored_floating_groups = source_columns
+        .iter()
+        .map(|column| {
+            layout
+                .floating_groups()
+                .find_map(|(id, floating)| {
+                    (layout.dock_area(floating.area).unwrap().root == *column).then_some(id)
+                })
+                .expect("Undo must restore each FloatingGroup identity")
+        })
+        .collect::<Vec<_>>();
+
     history
         .apply(
             &mut layout,
             DockCommand::DockFloatingColumnsToMain {
-                groups: floating_groups.clone(),
+                groups: restored_floating_groups,
                 side: DockSide::Right,
                 index: 0,
             },

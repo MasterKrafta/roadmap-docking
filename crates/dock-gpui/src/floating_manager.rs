@@ -1934,6 +1934,18 @@ impl FloatingWindowManager {
             }
         };
         let moving_chain = self.native_move_windows.len() > 1;
+        let moving_chain_can_dock_to_main = moving_chain
+            && self.controller.update(cx, |controller, _| {
+                self.native_move_windows.iter().all(|moving| {
+                    controller
+                        .layout()
+                        .floating_group(moving.group)
+                        .and_then(|floating| controller.layout().dock_area(floating.area))
+                        .is_some_and(|area| {
+                            matches!(controller.layout().node(area.root), Some(Node::Column(_)))
+                        })
+                })
+            }).unwrap_or(false);
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
                 state.drop_target = None;
@@ -1953,7 +1965,9 @@ impl FloatingWindowManager {
                     }
                 };
                 let target = target.filter(|target| {
-                    !moving_chain || floating_chain_drop_target_is_supported(*target, true)
+                    !moving_chain
+                        || (moving_chain_can_dock_to_main
+                            && floating_chain_drop_target_is_supported(*target, true))
                 });
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
