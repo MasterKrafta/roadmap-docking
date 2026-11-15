@@ -27,8 +27,9 @@ use crate::{
         collect_group_presentations, CollapseColumnButton, DockCompositionView,
         DockGroupView, GroupPresentation,
     },
-    floating_manager::{floating_window_chain_insert_before, DockingWindowAtPoint},
+    floating_manager::{floating_window_chain_direction, DockingWindowAtPoint},
     geometry::DockGeometry,
+    window_chain::WindowGridDirection,
     DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
 };
 
@@ -56,7 +57,7 @@ fn floating_window_chain_target(
     handle: Option<DragHandle>,
     target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
-) -> Option<(FloatingGroupId, bool)> {
+) -> Option<(FloatingGroupId, WindowGridDirection)> {
     if !matches!(
         handle,
         Some(DragHandle::PanelTab)
@@ -69,7 +70,7 @@ fn floating_window_chain_target(
     let (Some(target), Some(DockWindowRole::Floating { group })) = (target, target_role) else {
         return None;
     };
-    floating_window_chain_insert_before(target).map(|insert_before| (group, insert_before))
+    floating_window_chain_direction(target).map(|direction| (group, direction))
 }
 
 struct ActiveDragHost {
@@ -1040,7 +1041,7 @@ impl DragHostManager {
 
             let mut created_groups = Vec::new();
             if let Some(mut request) = request {
-                if let Some((anchor, insert_before)) = chain_join {
+                if let Some((anchor, direction)) = chain_join {
                     // Content side drops create an independent Core FloatingGroup.
                     // The native HWND is linked to the target only after that group
                     // exists; the DragHost bounds are the requested floating bounds.
@@ -1050,8 +1051,8 @@ impl DragHostManager {
                         tracing::warn!(
                             ?id,
                             ?anchor,
-                            insert_before,
-                            "WindowChain side drop has no valid DragHost bounds"
+                            direction,
+                            "WindowGrid side drop has no valid DragHost bounds"
                         );
                     }
                 } else if request.target == Some(DropTarget::FreeArea) {
@@ -1129,7 +1130,7 @@ impl DragHostManager {
             tracing::debug!(?id, ?panel, "DragHost release was cancelled; source view will be restored");
         }
 
-        // FreeArea and WindowChain side drops must create a new Core FloatingGroup.
+        // FreeArea and WindowGrid side drops must create a new Core FloatingGroup.
         // Never resolve the still-source-owned Panel back to its original group if
         // the request was skipped, rejected, or produced no detached composition.
         let requires_new_floating_group =
@@ -1166,19 +1167,19 @@ impl DragHostManager {
                 && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
                 && self.adopt_active_drag_host_to_floating(id, target_group, cx)
             {
-                if let Some((anchor, insert_before)) = chain_join {
+                if let Some((anchor, direction)) = chain_join {
                     self.join_created_groups_to_chain(
                         id,
                         anchor,
                         &created_groups,
-                        insert_before,
+                        direction,
                         cx,
                     );
                 }
                 return;
             }
 
-            if let Some((anchor, insert_before)) = chain_join {
+            if let Some((anchor, direction)) = chain_join {
                 // Resolve the new Core FloatingGroup before linking its HWND.
                 // The DragHost is adopted above when possible; this handoff is
                 // the fallback when an existing persistent host must be retained.
@@ -1187,7 +1188,7 @@ impl DragHostManager {
                     id,
                     anchor,
                     &created_groups,
-                    insert_before,
+                    direction,
                     cx,
                 );
 
@@ -1196,14 +1197,14 @@ impl DragHostManager {
                         tracing::warn!(
                             ?id,
                             %error,
-                            "could not close the DockArea DragHost after WindowChain insertion"
+                            "could not close the DockArea DragHost after WindowGrid insertion"
                         );
                     }
                 } else if !self.begin_floating_handoff(id, target_group, foreground_at_release, cx) {
                     tracing::warn!(
                         ?id,
                         ?target_group,
-                        "could not prepare the DragHost-to-FloatingHost handoff after WindowChain insertion"
+                        "could not prepare the DragHost-to-FloatingHost handoff after WindowGrid insertion"
                     );
                     if let Err(error) = self.close(id, cx) {
                         tracing::warn!(?id, %error, "could not close DragHost after handoff setup failed");
@@ -1242,21 +1243,21 @@ impl DragHostManager {
         id: DragHostId,
         anchor: FloatingGroupId,
         groups: &[FloatingGroupId],
-        insert_before: bool,
+        direction: bool,
         cx: &mut Context<Self>,
     ) {
         if groups.is_empty() {
             tracing::warn!(
                 ?id,
                 ?anchor,
-                "Core did not return FloatingGroups for a WindowChain side drop"
+                "Core did not return FloatingGroups for a WindowGrid side drop"
             );
             return;
         }
 
         let joined = self.floating_manager.as_ref().map(|manager| {
             manager.update(cx, |manager, manager_cx| {
-                manager.join_window_chain_at(anchor, groups, insert_before, manager_cx)
+                manager.join_window_chain_at(anchor, groups, direction, manager_cx)
             })
         });
 
@@ -1266,12 +1267,12 @@ impl DragHostManager {
                 ?id,
                 ?anchor,
                 %error,
-                "could not join the newly floated content windows to the target WindowChain"
+                "could not join the newly floated content windows to the target WindowGrid"
             ),
             None => tracing::warn!(
                 ?id,
                 ?anchor,
-                "FloatingWindowManager was unavailable for the WindowChain side drop"
+                "FloatingWindowManager was unavailable for the WindowGrid side drop"
             ),
         }
     }
@@ -2409,39 +2410,35 @@ fn valid_scale(scale: f32) -> Option<f32> {
 #[cfg(test)]
 mod floating_window_chain_target_tests {
     use super::{dock_area_drag_uses_free_area, floating_window_chain_target, DockingWindowAtPoint};
-    use crate::DockWindowRole;
+    use crate::{DockWindowRole, window_chain::WindowGridDirection};
     use dock_core::{DragHandle, DropTarget, DropZone, FloatingGroupId, NodeId};
     use slotmap::Key;
 
     #[test]
-    fn tab_group_and_main_composition_side_drops_join_a_window_chain() {
+    fn tab_group_and_composition_side_drops_keep_all_four_directions() {
         let anchor = FloatingGroupId::null();
         let group = NodeId::null();
         let floating = Some(DockWindowRole::Floating { group: anchor });
-        let left = Some(DropTarget::GroupEdge {
-            group,
-            zone: DropZone::Left,
-        });
-        let right = Some(DropTarget::GroupEdge {
-            group,
-            zone: DropZone::Right,
-        });
+        let zones = [
+            (DropZone::Left, WindowGridDirection::Left),
+            (DropZone::Right, WindowGridDirection::Right),
+            (DropZone::Top, WindowGridDirection::Above),
+            (DropZone::Bottom, WindowGridDirection::Below),
+        ];
 
         for handle in [
             DragHandle::PanelTab,
             DragHandle::GroupGrip,
             DragHandle::DockAreaHeader,
         ] {
-            assert_eq!(
-                floating_window_chain_target(Some(handle), left, floating),
-                Some((anchor, true)),
-                "{handle:?} left drop should insert before the target window",
-            );
-            assert_eq!(
-                floating_window_chain_target(Some(handle), right, floating),
-                Some((anchor, false)),
-                "{handle:?} right drop should insert after the target window",
-            );
+            for (zone, direction) in zones {
+                let target = Some(DropTarget::GroupEdge { group, zone });
+                assert_eq!(
+                    floating_window_chain_target(Some(handle), target, floating),
+                    Some((anchor, direction)),
+                    "{handle:?} {zone:?} drop should preserve its WindowGrid direction",
+                );
+            }
         }
     }
 
@@ -2449,13 +2446,10 @@ mod floating_window_chain_target_tests {
     fn flyout_and_non_side_drops_keep_core_docking_semantics() {
         let anchor = FloatingGroupId::null();
         let group = NodeId::null();
+        let tabs = Some(DropTarget::GroupTabs { group, index: 0 });
         let left = Some(DropTarget::GroupEdge {
             group,
             zone: DropZone::Left,
-        });
-        let top = Some(DropTarget::GroupEdge {
-            group,
-            zone: DropZone::Top,
         });
         let floating = Some(DockWindowRole::Floating { group: anchor });
 
@@ -2464,7 +2458,7 @@ mod floating_window_chain_target_tests {
             None,
         );
         assert_eq!(
-            floating_window_chain_target(Some(DragHandle::PanelTab), top, floating),
+            floating_window_chain_target(Some(DragHandle::PanelTab), tabs, floating),
             None,
         );
         assert_eq!(
