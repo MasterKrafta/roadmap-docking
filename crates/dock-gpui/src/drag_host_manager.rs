@@ -867,9 +867,26 @@ impl DragHostManager {
                             .prepare_floating_window_drop_resolver(window_id, group, source)
                             .and_then(|resolver| resolver.resolve(point)),
                         (Some(_), Some(DockingWindowAtPoint::ForeignWindow)) => Ok(None),
-                        (Some(source), None) => controller
-                            .prepare_drop_resolver(source)
-                            .map(|resolver| {
+                        (Some(source), None) => {
+                            // The pointer is expressed in the original source host's
+                            // local coordinates. Resolve FreeArea against that same
+                            // host; Main geometry is not interchangeable with a
+                            // Floating window's local coordinate space.
+                            let resolver = match source_host {
+                                DragSourceHost::Main => {
+                                    controller.prepare_drop_resolver(source)
+                                }
+                                DragSourceHost::Floating { group } => source_window_id
+                                    .ok_or(ComputeRectsError::InvalidLayoutState)
+                                    .and_then(|window_id| {
+                                        controller.prepare_floating_window_drop_resolver(
+                                            window_id,
+                                            group,
+                                            source,
+                                        )
+                                    }),
+                            };
+                            resolver.map(|resolver| {
                                 resolver
                                     .zones()
                                     .iter()
@@ -878,7 +895,8 @@ impl DragHostManager {
                                             && zone.rect.contains(source_point).unwrap_or(false)
                                     })
                                     .then_some(DropTarget::FreeArea)
-                            }),
+                            })
+                        },
                         (None, _) => Ok(None),
                     }
                 };
