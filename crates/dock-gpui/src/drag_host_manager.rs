@@ -45,6 +45,13 @@ fn source_layout_rects(
     }
 }
 
+fn dock_area_drag_uses_free_area(target_window: Option<DockingWindowAtPoint>) -> bool {
+    matches!(
+        target_window,
+        None | Some(DockingWindowAtPoint::ForeignWindow)
+    )
+}
+
 fn floating_window_chain_target(
     handle: Option<DragHandle>,
     target: Option<DropTarget>,
@@ -853,16 +860,12 @@ impl DragHostManager {
             self.controller.update(cx, |controller, controller_cx| {
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
                 if matches!(payload, DragPayload::DockArea { .. })
-                    && (source.is_none() || target_window.is_none())
+                    && (source.is_none() || dock_area_drag_uses_free_area(target_window))
                 {
-                    // A multi-Column DockArea, or a single-Column DockArea released
-                    // on the desktop, detaches as one composition. A foreign
-                    // topmost window must still block the drop.
-                    if matches!(target_window, Some(DockingWindowAtPoint::ForeignWindow)) {
-                        Ok(None)
-                    } else {
-                        Ok(Some(DropTarget::FreeArea))
-                    }
+                    // A complete Main DockArea has no docking target outside this
+                    // application's Main/Floating hosts. Releasing over another
+                    // application's window is therefore a FreeArea tear-off too.
+                    Ok(Some(DropTarget::FreeArea))
                 } else {
                     match (source, target_window) {
                         (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => {
@@ -2402,7 +2405,7 @@ fn valid_scale(scale: f32) -> Option<f32> {
 
 #[cfg(test)]
 mod floating_window_chain_target_tests {
-    use super::floating_window_chain_target;
+    use super::{dock_area_drag_uses_free_area, floating_window_chain_target, DockingWindowAtPoint};
     use crate::DockWindowRole;
     use dock_core::{DragHandle, DropTarget, DropZone, FloatingGroupId, NodeId};
     use slotmap::Key;
@@ -2465,5 +2468,18 @@ mod floating_window_chain_target_tests {
             floating_window_chain_target(Some(DragHandle::GroupGrip), left, Some(DockWindowRole::Main)),
             None,
         );
+    }
+
+    #[test]
+    fn dock_area_header_treats_unmanaged_windows_as_free_area() {
+        use dock_core::Point;
+
+        assert!(dock_area_drag_uses_free_area(None));
+        assert!(dock_area_drag_uses_free_area(Some(
+            DockingWindowAtPoint::ForeignWindow
+        )));
+        assert!(!dock_area_drag_uses_free_area(Some(
+            DockingWindowAtPoint::Main { point: Point::ZERO }
+        )));
     }
 }
