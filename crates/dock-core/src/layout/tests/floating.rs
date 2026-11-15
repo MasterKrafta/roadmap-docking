@@ -2803,12 +2803,36 @@ fn floating_tab_sizing_uses_only_the_active_tab_constraints() {
         metrics.column_header_height
             + metrics.min_group_height.max(group_chrome + 60.0)
     );
+    let compact_preferred_height = layout
+        .floating_preferred_height_for_tab(floating, tabs_group, compact_panel, &metrics)
+        .unwrap();
     assert_eq!(
-        layout
-            .floating_preferred_height_for_tab(floating, tabs_group, compact_panel, &metrics)
-            .unwrap(),
+        compact_preferred_height,
         metrics.column_header_height
             + metrics.min_group_height.max(group_chrome + 100.0)
+    );
+
+    let compact_bounds = layout.floating_group(floating).unwrap().bounds;
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    compact_bounds.origin,
+                    Size::new(compact_bounds.size.width, compact_preferred_height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let compact_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert!(compact_rects.auto_collapsed_groups.is_empty());
+    assert!(compact_rects.vertical_overflow.is_empty());
+    assert!(
+        compact_rects
+            .panels
+            .iter()
+            .any(|panel| panel.panel == compact_panel)
     );
 
     // Main geometry deliberately keeps the maximum minimum across all tabs.
@@ -2832,12 +2856,35 @@ fn floating_tab_sizing_uses_only_the_active_tab_constraints() {
         metrics.column_header_height
             + metrics.min_group_height.max(group_chrome + 300.0)
     );
+    let tall_preferred_height = layout
+        .floating_preferred_height_for_tab(floating, tabs_group, tall_panel, &metrics)
+        .unwrap();
     assert_eq!(
-        layout
-            .floating_preferred_height_for_tab(floating, tabs_group, tall_panel, &metrics)
-            .unwrap(),
+        tall_preferred_height,
         metrics.column_header_height
             + metrics.min_group_height.max(group_chrome + 420.0)
+    );
+    let tall_bounds = layout.floating_group(floating).unwrap().bounds;
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBounds {
+                group: floating,
+                bounds: Rect::new(
+                    tall_bounds.origin,
+                    Size::new(tall_bounds.size.width, tall_preferred_height),
+                ),
+            },
+            &metrics,
+        )
+        .unwrap();
+    let tall_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert!(tall_rects.auto_collapsed_groups.is_empty());
+    assert!(tall_rects.vertical_overflow.is_empty());
+    assert!(
+        tall_rects
+            .panels
+            .iter()
+            .any(|panel| panel.panel == tall_panel)
     );
 }
 
