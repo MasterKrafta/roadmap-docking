@@ -15,7 +15,7 @@ use super::drop_overlay_geometry::{
     composition_edge_highlight_rect, floating_group_edge_guide_rect, floating_side_edge_guide_rect,
     group_edge_highlight_rect, group_edge_guide_rect, group_edge_visual_rect,
     main_dock_edge_guide_rect, main_group_edge_guide_rect, rail_insertion_rect,
-    same_group_panel_tab_insertion_rect, tab_strip_group_highlight_rect, target_group,
+    same_group_panel_tab_insertion_rect, tab_insertion_group_highlight_rect, target_group,
 };
 
 /// Visual feedback for the current dock destination.
@@ -78,13 +78,12 @@ impl DropOverlay {
                     // The tab row is the visible affordance; don't shade the entire composition.
                 }
                 DropZone::TabInsertion => {
-                    if let Some(strip_rect) =
-                        tab_strip_group_highlight_rect(target, groups, tab_strips)
+                    if let Some(group_rect) =
+                        tab_insertion_group_highlight_rect(target, groups, tab_strips)
                     {
-                        // Highlight the complete tab/control row. The Group
-                        // rectangle is wider than TabStripRect when controls
-                        // occupy the trailing part of the same header row.
-                        layer = layer.child(highlight_rect(strip_rect, theme, 0.12, true));
+                        // The hit zone remains limited to the tab row; only its
+                        // visual feedback expands to the complete target Group.
+                        layer = layer.child(highlight_rect(group_rect, theme, 0.12, true));
                     }
                 }
                 DropZone::Left | DropZone::Right => {
@@ -270,7 +269,7 @@ mod tests {
         floating_side_edge_guide_rect, group_edge_guide_rect, group_edge_highlight_rect,
         group_edge_visual_rect, main_dock_edge_guide_rect, main_group_edge_guide_rect,
         rail_insertion_rect,
-        same_group_panel_tab_insertion_rect, tab_strip_group_highlight_rect,
+        same_group_panel_tab_insertion_rect, tab_insertion_group_highlight_rect,
     };
 
     #[test]
@@ -389,20 +388,25 @@ mod tests {
     }
 
     #[test]
-    fn floating_group_tab_insertion_highlights_the_full_tab_control_row() {
+    fn tab_insertion_highlights_the_entire_target_group_for_panel_and_group_sources() {
         let group = NodeId::null();
         let group_rect = Rect::new(Point::new(20.0, 40.0), Size::new(320.0, 280.0));
-        // The visual strip ends before the two trailing Group controls.
+        // The visible strip is inset vertically and narrower than the Group.
         let strip_rect = Rect::new(Point::new(20.0, 68.0), Size::new(252.0, 24.0));
         let groups = [dock_core::GroupRect::new(group, group_rect)];
         let strips = [TabStripRect::new(group, strip_rect)];
-        let target = DropTarget::GroupTabs { group, index: 4 };
+        let targets = [
+            DropTarget::Tabs { group, index: 0 },
+            DropTarget::GroupTabs { group, index: 4 },
+        ];
 
-        assert_eq!(
-            tab_strip_group_highlight_rect(target, &groups, &strips),
-            Some(Rect::new(Point::new(20.0, 68.0), Size::new(320.0, 24.0))),
-            "the Floating append zone must highlight tabs and trailing controls"
-        );
+        for target in targets {
+            assert_eq!(
+                tab_insertion_group_highlight_rect(target, &groups, &strips),
+                Some(group_rect),
+                "every tab-strip insertion target must highlight the complete Group"
+            );
+        }
     }
 
     #[test]

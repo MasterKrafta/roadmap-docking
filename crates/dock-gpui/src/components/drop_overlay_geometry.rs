@@ -33,25 +33,18 @@ pub(super) fn composition_edge_highlight_rect(
     )
 }
 
-pub(super) fn tab_strip_group_highlight_rect(
+pub(super) fn tab_insertion_group_highlight_rect(
     target: DropTarget,
     groups: &[GroupRect],
     tab_strips: &[TabStripRect],
 ) -> Option<Rect> {
     let group = target_group(target)
         .and_then(|id| groups.iter().find(|group| group.group == id))?;
-    let strip = tab_strips
-        .iter()
-        .find(|strip| strip.group == group.group)?;
+    let has_tab_strip = tab_strips.iter().any(|strip| strip.group == group.group);
 
-    // Match the Core TabInsertion hit-area bounds: the visible strip can stop
-    // before trailing controls, but the drop target spans the complete row.
-    let left = group.rect.origin.x.min(strip.rect.origin.x);
-    let right = group.rect.checked_right().ok()?.max(strip.rect.checked_right().ok()?);
-    Some(Rect::new(
-        Point::new(left, strip.rect.origin.y),
-        dock_core::Size::new(right - left, strip.rect.size.height),
-    ))
+    // The TabInsertion hit zone is located on the tab row, but the visual
+    // feedback covers the complete Group so the user sees the actual target.
+    has_tab_strip.then_some(group.rect)
 }
 
 
