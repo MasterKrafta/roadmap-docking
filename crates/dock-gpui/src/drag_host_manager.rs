@@ -2295,6 +2295,13 @@ fn valid_scale(scale: f32) -> Option<f32> {
     (scale.is_finite() && scale > 0.0).then_some(scale)
 }
 
+#[cfg(test)]
+mod floating_window_chain_target_tests {
+    use super::floating_window_chain_target;
+    use crate::DockWindowRole;
+    use dock_core::{DragHandle, DropTarget, DropZone, FloatingGroupId, NodeId};
+    use slotmap::Key;
+
     #[test]
     fn tab_group_and_main_composition_side_drops_join_a_window_chain() {
         let anchor = FloatingGroupId::null();
@@ -2355,4 +2362,3 @@ fn valid_scale(scale: f32) -> Option<f32> {
         );
     }
 }
-
