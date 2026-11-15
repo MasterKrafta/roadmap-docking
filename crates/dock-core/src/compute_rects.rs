@@ -4,7 +4,10 @@ use std::collections::HashMap;
 mod sizing;
 #[cfg(any(test, feature = "serde"))]
 pub(crate) use sizing::clamp_floating_bounds;
-use sizing::{floating_window_rect_with_cache, minimum_node_size, preferred_width};
+use sizing::{
+    floating_window_rect_with_cache, layout_minimum_size, minimum_floating_node_size,
+    minimum_node_size, preferred_width,
+};
 
 #[path = "compute_rects/stack_allocation.rs"]
 mod stack_allocation;
@@ -183,7 +186,15 @@ impl Layout {
 
         if let Some(root) = left_root {
             let area = Rect::new(viewport.origin, Size::new(left_width, viewport.size.height));
-            layout_node(self, root, area, metrics, &mut minimum_sizes, &mut output)?;
+            layout_node(
+                self,
+                root,
+                area,
+                metrics,
+                None,
+                &mut minimum_sizes,
+                &mut output,
+            )?;
         }
         if let Some(root) = right_root {
             let area = Rect::new(
