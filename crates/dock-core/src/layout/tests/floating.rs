@@ -27,7 +27,7 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
         .apply(
             DockCommand::Float {
                 node: moving_panel_node,
-                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 280.0)),
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
             },
             &metrics,
         )
@@ -53,7 +53,7 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
     assert!(layout.panel_instance(moving_panel_id).is_some());
     assert_eq!(
         layout.floating_group(floating_id).unwrap().bounds.size,
-        Size::new(320.0, 220.0)
+        Size::new(320.0, 280.0)
     );
     assert!(matches!(
         layout.node(source_group),
@@ -709,7 +709,7 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
         .apply(
             DockCommand::Float {
                 node: composition,
-                bounds: Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 280.0)),
+                bounds: Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0)),
             },
             &metrics,
         )
@@ -728,7 +728,7 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
     ));
     assert_eq!(
         layout.floating_group(floating_id).unwrap().bounds,
-        Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0))
+        Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 280.0))
     );
     assert!(
         matches!(layout.node(left_column), Some(Node::Column(column)) if column.groups == vec![left_group])
