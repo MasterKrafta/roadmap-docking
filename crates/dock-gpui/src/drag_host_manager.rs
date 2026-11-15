@@ -64,6 +64,8 @@ struct ActiveDragHost {
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
     promote_on_float: bool,
+    /// This DragHost can become the persistent native host of a detached composition.
+    can_adopt_floating_host: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
     source_detach_subscription: Option<Subscription>,
@@ -367,11 +369,16 @@ impl DragHostManager {
             .floating_manager
             .as_ref()
             .map(|manager| manager.downgrade());
+        // PanelTab and GroupGrip drags can promote this temporary HWND into
+        // their detached Floating composition regardless of the source host.
+        // DockArea drags keep the existing promotion path as well.
+        let can_adopt_floating_host =
+            dock_area.is_some() || promote_on_float || reserve_composition_header;
         let surface_panel = panels.first().copied();
         let window = cx
             .open_window(options, move |_, app| {
                 app.new(|surface_cx| {
-                    let floating_host = if dock_area.is_some() || promote_on_float {
+                    let floating_host = if can_adopt_floating_host {
                         floating_manager.map(|manager| {
                             let controller = controller.clone();
                             surface_cx.new(move |_| {
@@ -578,6 +585,7 @@ impl DragHostManager {
             target_role: None,
             free_area_bounds: None,
             promote_on_float,
+            can_adopt_floating_host,
             pending_release_cursor: None,
             source_detach_subscription: None,
             handoff: None,
@@ -976,12 +984,13 @@ impl DragHostManager {
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
         let promote_on_float = active.promote_on_float;
+        let can_adopt_floating_host = active.can_adopt_floating_host;
         let drag_handle = self.controller.update(cx, |controller, _| {
             controller.drag().session().handle()
         });
         let chain_join =
             floating_window_chain_target(drag_handle, target, active.target_role);
-        let restored_free_area_bounds = if promote_on_float
+        let restored_free_area_bounds = if can_adopt_floating_host
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
@@ -995,7 +1004,7 @@ impl DragHostManager {
             None
         };
         let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
-        let can_promote_existing_window = restored_free_area_bounds.is_some();
+        let can_adopt_existing_window = restored_free_area_bounds.is_some();
 
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
@@ -1113,10 +1122,9 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            if promote_on_float
-                && can_promote_existing_window
+            if can_adopt_existing_window
                 && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
-                && self.promote_active_drag_host_to_floating(id, target_group, cx)
+                && self.adopt_active_drag_host_to_floating(id, target_group, cx)
             {
                 if let Some((anchor, insert_before)) = chain_join {
                     self.join_created_groups_to_chain(
@@ -1264,9 +1272,9 @@ impl DragHostManager {
             .ok_or_else(|| "could not convert restored DragHost bounds to DockCore coordinates".into())
     }
 
-    /// Transfers an already-visible Main-origin DragHost into the persistent
+    /// Transfers an already-visible content DragHost into the persistent
     /// Floating registry without opening a replacement native window.
-    fn promote_active_drag_host_to_floating(
+    fn adopt_active_drag_host_to_floating(
         &mut self,
         id: DragHostId,
         target_group: FloatingGroupId,
@@ -1275,7 +1283,7 @@ impl DragHostManager {
         let Some((panel, window, window_id, native_window)) = self
             .active
             .as_ref()
-            .filter(|active| active.id == id && active.promote_on_float)
+            .filter(|active| active.id == id && active.can_adopt_floating_host)
             .and_then(|active| {
                 Some((
                     active.panels.first().copied()?,
@@ -1305,7 +1313,7 @@ impl DragHostManager {
             tracing::warn!(
                 ?id,
                 ?target_group,
-                "could not adopt the Main-origin DragHost as its FloatingHost"
+                "could not adopt the content DragHost as its FloatingHost"
             );
             return false;
         }
