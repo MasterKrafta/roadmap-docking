@@ -577,7 +577,7 @@ impl FloatingWindowManager {
                 })
                 .collect::<Option<Vec<_>>>()
         }).ok_or(dock_core::CommandError::InvalidTarget {
-            reason: "WindowChain changed while preparing its native bounds",
+            reason: "WindowGrid changed while preparing its native bounds",
         })?;
         let commands = bounds
             .iter()
@@ -1674,18 +1674,18 @@ impl FloatingWindowManager {
                 return;
             };
 
-            // Resolve the target Floating's own side zones so the destination
-            // window paints the same affordance used to choose the WindowChain side.
+            // Resolve the target Floating's own edge zones so the destination
+            // window paints the same affordance used to choose the WindowGrid side.
             // The Core composition is not docked into the target; only HWND bounds
-            // and WindowChain membership are changed after release.
+            // and WindowGrid membership are changed after release.
             let resolved_target = self.controller.update(cx, |controller, controller_cx| {
                 let resolved = controller
                     .prepare_floating_window_drop_resolver(target_window_id, target_group, source)
                     .and_then(|resolver| resolver.resolve(point));
                 let target = match resolved {
-                    // Keep every legal target from the Floating resolver. Left/Right
-                    // are interpreted as native WindowChain insertion on release;
-                    // all other zones remain ordinary Core docking destinations.
+                    // Keep every legal target from the Floating resolver. The four
+                    // cardinal GroupEdge zones are interpreted as native WindowGrid
+                    // insertion on release; other zones retain Core docking semantics.
                     Ok(target) => target.filter(|target| {
                         !moving_chain || floating_chain_drop_target_is_supported(*target, false)
                     }),
