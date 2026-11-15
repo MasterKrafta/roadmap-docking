@@ -829,7 +829,6 @@ impl FloatingWindowManager {
                     client_size,
                     scale,
                 )?
-                .with_logical_client_size(bounds.size)?
                 .with_logical_client_size(bounds.size)
             })
             .collect()
