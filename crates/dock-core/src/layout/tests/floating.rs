@@ -27,7 +27,7 @@ fn c46_float_panel_keeps_panel_instance_and_id() {
         .apply(
             DockCommand::Float {
                 node: moving_panel_node,
-                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+                bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 280.0)),
             },
             &metrics,
         )
@@ -311,6 +311,13 @@ fn float_group_wraps_existing_tabs_in_floating_column() {
                 && column.width >= metrics.min_column_width
     ));
     assert!(matches!(layout.node(floating_tabs), Some(Node::Tabs(_))));
+    assert_eq!(
+        floating.bounds.size.height,
+        metrics.column_header_height
+            + metrics.min_group_height.max(
+                metrics.header_height.max(metrics.tab_strip_height) + 220.0
+            )
+    );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -702,7 +709,7 @@ fn c46_float_entire_horizontal_column_composition_preserves_columns_and_groups()
         .apply(
             DockCommand::Float {
                 node: composition,
-                bounds: Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 640.0)),
+                bounds: Rect::new(Point::new(120.0, 80.0), Size::new(620.0, 280.0)),
             },
             &metrics,
         )
@@ -2749,7 +2756,7 @@ fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomica
         );
         assert_eq!(
             floating.bounds,
-            Rect::new(Point::new(expected_x, origin.y), Size::new(width, height))
+            Rect::new(Point::new(expected_x, origin.y), Size::new(width, 280.0))
         );
         assert!(matches!(layout.node(column_id), Some(Node::Column(_))));
         expected_x += width;
