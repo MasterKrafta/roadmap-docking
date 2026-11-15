@@ -1170,26 +1170,18 @@ impl Layout {
                             }
                             minimum
                         }
-                        Some(Node::Tabs(tabs)) => {
-                            // Only the visible tab constrains this Floating window.
-                            // Main keeps using minimum_node_size(), which considers
-                            // every tab so switching tabs never changes Main geometry.
-                            let active_child = tabs.active_child().ok_or(
-                                CommandError::InvalidTarget {
-                                    reason: "Floating Tabs group has no active panel",
-                                },
-                            )?;
-                            let active_minimum =
-                                self.minimum_node_size_with_cache(active_child, metrics, cache)?;
-                            let chrome_height =
-                                metrics.header_height.max(metrics.tab_strip_height);
-                            Size::new(
-                                active_minimum.width,
-                                metrics.min_group_height
-                                    .max(chrome_height + active_minimum.height),
-                            )
-                        }
-                        Some(_) => self.minimum_node_size_with_cache(*group, metrics, cache)?,
+                        Some(Node::Tabs(_)) => self.minimum_floating_node_size_with_cache(
+                            *group,
+                            node_id,
+                            metrics,
+                            cache,
+                        )?,
+                        Some(_) => self.minimum_floating_node_size_with_cache(
+                            *group,
+                            node_id,
+                            metrics,
+                            cache,
+                        )?,
                         None => return Err(CommandError::MissingNode { node: *group }),
                     };
                     group_minimums.push(group_minimum);
@@ -1208,7 +1200,12 @@ impl Layout {
                 };
                 Size::new(content_minimum.width, height)
             }
-            Some(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
+            Some(_) => self.minimum_floating_node_size_with_cache(
+                node_id,
+                node_id,
+                metrics,
+                cache,
+            )?,
             None => return Err(CommandError::MissingNode { node: node_id }),
         };
 
