@@ -63,7 +63,6 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
-    promote_on_float: bool,
     /// This DragHost can become the persistent native host of a detached composition.
     can_adopt_floating_host: bool,
     /// Cursor position captured when the button is released before source detachment.
@@ -584,7 +583,6 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
-            promote_on_float,
             can_adopt_floating_host,
             pending_release_cursor: None,
             source_detach_subscription: None,
@@ -983,7 +981,6 @@ impl DragHostManager {
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
-        let promote_on_float = active.promote_on_float;
         let can_adopt_floating_host = active.can_adopt_floating_host;
         let drag_handle = self.controller.update(cx, |controller, _| {
             controller.drag().session().handle()
@@ -1059,7 +1056,7 @@ impl DragHostManager {
                     match action {
                         Ok(DragDropAction::NoOp) => {}
                         Ok(DragDropAction::Command(command)) => {
-                            let result = if promote_on_float {
+                            let result = if can_adopt_floating_host {
                                 // Delay LayoutChanged publication until the current
                                 // DragHost has been registered as the Floating host.
                                 controller.dispatch(command)
@@ -1198,7 +1195,7 @@ impl DragHostManager {
                 return;
             }
 
-            if promote_on_float {
+            if can_adopt_floating_host {
                 self.flush_controller_events(cx);
             }
 
@@ -1215,7 +1212,7 @@ impl DragHostManager {
             return;
         }
 
-        if promote_on_float {
+        if can_adopt_floating_host {
             self.flush_controller_events(cx);
         }
         if let Err(error) = self.close(id, cx) {
