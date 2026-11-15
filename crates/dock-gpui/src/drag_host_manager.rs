@@ -2264,14 +2264,8 @@ impl Render for DragHostSurface {
                         )
                         .remove(&group)?;
                         presentation.tabs.retain(|tab| tab.panel == panel);
-                        let tab = presentation.tabs.first_mut()?;
-                        tab.index = 0;
-                        presentation.active_panel = Some(panel);
-                        presentation.collapsed = false;
-                        presentation.model_collapsed = false;
-                        presentation.auto_collapsed = false;
-                        presentation.auto_expanded = false;
-                        let tab_width = controller
+                        presentation.tabs.first()?;
+                        let source_header = controller
                             .drag()
                             .host_session()
                             .and_then(|session| {
@@ -2285,10 +2279,14 @@ impl Render for DragHostSurface {
                                     .tab_headers
                                     .iter()
                                     .find(|header| header.group == group && header.panel == panel)
-                                    .map(|header| header.rect.size.width)
-                            })
-                            .unwrap_or(metrics.min_tab_width);
-                        Some((group, presentation, tab_width))
+                                    .copied()
+                            })?;
+                        presentation.active_panel = Some(panel);
+                        presentation.collapsed = false;
+                        presentation.model_collapsed = false;
+                        presentation.auto_collapsed = false;
+                        presentation.auto_expanded = false;
+                        Some((source_header, presentation))
                     })
                 } else {
                     None
@@ -2331,13 +2329,11 @@ impl Render for DragHostSurface {
                 );
             }
 
-            if let Some((group, presentation, tab_width)) = detached_group {
+            if let Some((source_header, presentation)) = detached_group {
                 let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
                 root = root.child(DockGroupView::render_detached_tab(
-                    group,
-                    panel,
+                    source_header,
                     self.drag_content_size,
-                    tab_width,
                     &presentation,
                     view,
                     metrics,
