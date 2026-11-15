@@ -2424,6 +2424,8 @@ mod floating_window_chain_target_tests {
             (DropZone::Right, WindowGridDirection::Right),
             (DropZone::Top, WindowGridDirection::Above),
             (DropZone::Bottom, WindowGridDirection::Below),
+            (DropZone::FloatingTop, WindowGridDirection::Above),
+            (DropZone::FloatingBottom, WindowGridDirection::Below),
         ];
 
         for handle in [
