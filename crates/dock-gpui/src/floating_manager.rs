@@ -1894,6 +1894,7 @@ impl FloatingWindowManager {
                 state.group,
                 anchor,
                 direction,
+                floating_bounds.origin,
                 cx,
             ),
             Some(NativeMoveTarget::MainDock {
@@ -2035,6 +2036,7 @@ impl FloatingWindowManager {
         moving: FloatingGroupId,
         anchor: FloatingGroupId,
         direction: WindowGridDirection,
+        moving_native_origin: Point,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
         let mut next_chains = self.window_chains.clone();
@@ -2050,7 +2052,7 @@ impl FloatingWindowManager {
         }
 
         let members = next_chains.members_for(anchor);
-        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
+        let Some(mut member_bounds) = self.controller.update(cx, |controller, _| {
             members
                 .iter()
                 .map(|member| {
@@ -2062,9 +2064,19 @@ impl FloatingWindowManager {
                 .collect::<Option<Vec<_>>>()
         }) else {
             return Err(dock_core::CommandError::InvalidTarget {
-                reason: "window chain contains a FloatingGroup that no longer exists",
+                reason: "window grid contains a FloatingGroup that no longer exists",
             });
         };
+        if matches!(direction, WindowGridDirection::Above | WindowGridDirection::Below)
+            && let Some((_, moving_bounds)) = member_bounds
+                .iter_mut()
+                .find(|(group, _)| *group == moving)
+        {
+            // Keep the OS release position until the next geometry stage computes
+            // the exact vertical seam. The width is normalized below.
+            moving_bounds.origin = moving_native_origin;
+        }
+
         let bounds = match direction {
             WindowGridDirection::Above | WindowGridDirection::Below => {
                 match_moving_window_width_to_target(member_bounds, anchor, moving)
