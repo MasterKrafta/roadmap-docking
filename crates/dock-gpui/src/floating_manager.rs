@@ -22,9 +22,10 @@ use platform::{
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
     components::FloatingHost, drag_host_manager::DragHostSurface, geometry::DockGeometry,
-    window_chain::WindowGridRegistry,
+    window_chain::{WindowGridDirection, WindowGridRegistry},
     window_chain_geometry::{
         NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
+        match_moving_window_width_to_target,
         floating_groups_in_native_z_order as grid_floating_groups_in_native_z_order,
         native_resize_right_edge_delta, shift_window_chain_after_resize,
     },
@@ -266,7 +267,7 @@ enum NativeMoveTarget {
     },
     FloatingChain {
         anchor: FloatingGroupId,
-        insert_before: bool,
+        direction: WindowGridDirection,
     },
 }
 
@@ -333,7 +334,10 @@ fn floating_chain_drop_target_is_supported(
         (
             false,
             DropTarget::GroupEdge {
-                zone: dock_core::DropZone::Left | dock_core::DropZone::Right,
+                zone: dock_core::DropZone::Left
+                    | dock_core::DropZone::Right
+                    | dock_core::DropZone::Top
+                    | dock_core::DropZone::Bottom,
                 ..
             },
         ) => true,
@@ -341,16 +345,26 @@ fn floating_chain_drop_target_is_supported(
     }
 }
 
-pub(crate) fn floating_window_chain_insert_before(target: DropTarget) -> Option<bool> {
+pub(crate) fn floating_window_chain_direction(
+    target: DropTarget,
+) -> Option<WindowGridDirection> {
     match target {
         DropTarget::GroupEdge {
             zone: dock_core::DropZone::Left,
             ..
-        } => Some(true),
+        } => Some(WindowGridDirection::Left),
         DropTarget::GroupEdge {
             zone: dock_core::DropZone::Right,
             ..
-        } => Some(false),
+        } => Some(WindowGridDirection::Right),
+        DropTarget::GroupEdge {
+            zone: dock_core::DropZone::Top,
+            ..
+        } => Some(WindowGridDirection::Above),
+        DropTarget::GroupEdge {
+            zone: dock_core::DropZone::Bottom,
+            ..
+        } => Some(WindowGridDirection::Below),
         _ => None,
     }
 }
@@ -360,10 +374,10 @@ fn floating_window_drop_destination(
     target: DropTarget,
     point: Point,
 ) -> NativeMoveTarget {
-    match floating_window_chain_insert_before(target) {
-        Some(insert_before) => NativeMoveTarget::FloatingChain {
+    match floating_window_chain_direction(target) {
+        Some(direction) => NativeMoveTarget::FloatingChain {
             anchor,
-            insert_before,
+            direction,
         },
         None => NativeMoveTarget::FloatingDock { target, point },
     }
@@ -492,22 +506,23 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Joins newly-created Floating windows to an existing native window chain.
+    /// Joins newly-created Floating windows to an existing WindowGrid.
     ///
     /// The source groups remain separate Core FloatingGroups and separate HWNDs.
-    /// Their final positions are calculated from each native frame so the visible
-    /// DWM edges touch the selected side of the anchor window.
+    /// Horizontal joins keep the established visible-frame alignment. Vertical
+    /// joins first normalize the attached window to the target's width; exact
+    /// vertical placement is handled by the following geometry stage.
     pub(crate) fn join_window_chain_at(
         &mut self,
         anchor: FloatingGroupId,
         groups: &[FloatingGroupId],
-        insert_before: bool,
+        direction: WindowGridDirection,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
         let mut next_chains = self.window_chains.clone();
-        if !next_chains.link_sequence_at(anchor, groups, insert_before) {
+        if !next_chains.link_sequence_to_side(anchor, groups, direction) {
             return Err(dock_core::CommandError::InvalidTarget {
-                reason: "could not insert the new Floating windows into the target WindowChain",
+                reason: "could not insert the new Floating windows into the target WindowGrid",
             });
         }
 
@@ -524,18 +539,26 @@ impl FloatingWindowManager {
                 .collect::<Option<Vec<_>>>()
         }) else {
             return Err(dock_core::CommandError::InvalidTarget {
-                reason: "WindowChain contains a FloatingGroup that no longer exists",
+                reason: "WindowGrid contains a FloatingGroup that no longer exists",
             });
         };
 
-        let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
-        let Some(bounds) =
-            arrange_contiguous_window_chain_bounds(member_bounds, &frame_geometries, anchor)
-        else {
-            return Err(dock_core::CommandError::InvalidTarget {
-                reason: "could not calculate native frame geometry for the new WindowChain",
-            });
-        };
+        let bounds = match direction {
+            WindowGridDirection::Above | WindowGridDirection::Below => {
+                match_moving_window_width_to_target(member_bounds, anchor, groups[0])
+            }
+            WindowGridDirection::Left | WindowGridDirection::Right => {
+                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
+                arrange_contiguous_window_chain_bounds(
+                    member_bounds,
+                    &frame_geometries,
+                    anchor,
+                )
+            }
+        }
+        .ok_or(dock_core::CommandError::InvalidTarget {
+            reason: "could not calculate the bounds for the new WindowGrid connection",
+        })?;
 
         let current_bounds = self.controller.update(cx, |controller, _| {
             bounds
@@ -1866,11 +1889,11 @@ impl FloatingWindowManager {
         let result = match state.drop_target {
             Some(NativeMoveTarget::FloatingChain {
                 anchor,
-                insert_before,
+                direction,
             }) => self.finish_floating_window_chain_move(
                 state.group,
                 anchor,
-                insert_before,
+                direction,
                 cx,
             ),
             Some(NativeMoveTarget::MainDock {
@@ -2005,21 +2028,17 @@ impl FloatingWindowManager {
     }
 
     /// Joins whole native Floating windows without changing their Core ownership.
-    /// The candidate chain becomes live only after all contiguous Core bounds have
+    /// The candidate grid becomes live only after the required Core bounds have
     /// committed as one history transaction.
     fn finish_floating_window_chain_move(
         &mut self,
         moving: FloatingGroupId,
         anchor: FloatingGroupId,
-        insert_before: bool,
+        direction: WindowGridDirection,
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
         let mut next_chains = self.window_chains.clone();
-        let linked = if insert_before {
-            next_chains.link_before(anchor, moving)
-        } else {
-            next_chains.link_after(anchor, moving)
-        };
+        let linked = next_chains.link_to_side(anchor, moving, direction);
         if !linked {
             // Dropping inside the same chain does not redefine membership. Until
             // chain-wide movement is enabled, restore the dragged member rather
@@ -2046,14 +2065,22 @@ impl FloatingWindowManager {
                 reason: "window chain contains a FloatingGroup that no longer exists",
             });
         };
-        let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
-        let Some(bounds) =
-            arrange_contiguous_window_chain_bounds(member_bounds, &frame_geometries, anchor)
-        else {
-            return Err(dock_core::CommandError::InvalidTarget {
-                reason: "could not calculate visible native frame geometry for the Floating window chain",
-            });
-        };
+        let bounds = match direction {
+            WindowGridDirection::Above | WindowGridDirection::Below => {
+                match_moving_window_width_to_target(member_bounds, anchor, moving)
+            }
+            WindowGridDirection::Left | WindowGridDirection::Right => {
+                let frame_geometries = self.frame_geometries_for_bounds(&member_bounds);
+                arrange_contiguous_window_chain_bounds(
+                    member_bounds,
+                    &frame_geometries,
+                    anchor,
+                )
+            }
+        }
+        .ok_or(dock_core::CommandError::InvalidTarget {
+            reason: "could not calculate the bounds for the Floating WindowGrid connection",
+        })?;
 
         let result = self.controller.update(cx, |controller, controller_cx| {
             controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
@@ -4158,7 +4185,7 @@ mod coordinate_tests {
 #[cfg(test)]
 mod floating_window_chain_drop_destination_tests {
     use super::{
-        floating_window_chain_insert_before, floating_window_drop_destination, NativeMoveTarget,
+        floating_window_chain_direction, floating_window_drop_destination, NativeMoveTarget,
     };
     use dock_core::{DropTarget, DropZone, FloatingGroupId, NodeId, Point};
     use slotmap::Key;
@@ -4171,9 +4198,9 @@ mod floating_window_chain_drop_destination_tests {
         let top = DropTarget::GroupEdge { group, zone: DropZone::Top };
         let center = DropTarget::GroupTabs { group, index: 0 };
 
-        assert_eq!(floating_window_chain_insert_before(left), Some(true));
-        assert_eq!(floating_window_chain_insert_before(right), Some(false));
-        assert_eq!(floating_window_chain_insert_before(top), None);
+        assert_eq!(floating_window_chain_direction(left), Some(true));
+        assert_eq!(floating_window_chain_direction(right), Some(false));
+        assert_eq!(floating_window_chain_direction(top), None);
 
         assert!(matches!(
             floating_window_drop_destination(FloatingGroupId::null(), left, Point::ZERO),
