@@ -1417,7 +1417,7 @@ impl DragHostManager {
         id: DragHostId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((target_group, foreground_at_release, panels, placeholder_rendered, source_released)) = self
+        let Some((target_group, panels, placeholder_rendered, source_released)) = self
             .active
             .as_ref()
             .filter(|active| active.id == id)
@@ -1425,7 +1425,6 @@ impl DragHostManager {
                 let handoff = active.handoff?;
                 Some((
                     handoff.target_group,
-                    handoff.foreground_at_release,
                     active.panels.clone(),
                     handoff.source_placeholder_rendered,
                     handoff.source_released,
@@ -1495,6 +1494,7 @@ impl DragHostManager {
 
         let id = active.id;
         let closing_drag_host = active.native_window;
+        let foreground_at_release = handoff.foreground_at_release;
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
