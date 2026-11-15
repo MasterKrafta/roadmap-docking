@@ -933,10 +933,37 @@ impl Layout {
                 reason: "panel is not a tab in the requested Floating group",
             })?;
 
+        self.preferred_floating_height_for_root(
+            root,
+            Some((tabs_group, panel_node)),
+            metrics,
+        )
+    }
+
+    /// Computes the natural height for a subtree about to become a Floating
+    /// composition. The caller supplies the node that will be the final root,
+    /// after profile-specific wrappers have been applied.
+    pub fn floating_preferred_height_for_node(
+        &self,
+        root: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
+        if !self.nodes.contains_key(root) {
+            return Err(CommandError::MissingNode { node: root });
+        }
+        self.preferred_floating_height_for_root(root, None, metrics)
+    }
+
+    fn preferred_floating_height_for_root(
+        &self,
+        root: NodeId,
+        active_override: Option<(NodeId, NodeId)>,
+        metrics: &DockMetrics,
+    ) -> Result<f32, CommandError> {
         let content_height = self.preferred_floating_node_height(
             root,
             root,
-            Some((tabs_group, panel_node)),
+            active_override,
             metrics,
         )?;
         let composition_header = if matches!(self.nodes.get(root), Some(Node::Tabs(_))) {
