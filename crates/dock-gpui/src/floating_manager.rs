@@ -2139,7 +2139,7 @@ impl FloatingWindowManager {
             if moving_windows.is_empty() {
                 self.mark_group_native_bounds_dirty(state.group);
             }
-            self.reconcile(cx);
+            self.schedule_reconcile(cx);
         }
 
         if matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. })) {
