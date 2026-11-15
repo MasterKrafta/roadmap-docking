@@ -917,8 +917,10 @@ impl FloatingWindowManager {
         self.drag_host_manager.as_ref()?.upgrade()
     }
 
-    /// Registers an already-open DragHost as the native host for a newly floated DockArea.
-    /// The HWND is transferred to the persistent registry instead of opening another window.
+    /// Registers an already-open content DragHost as a persistent Floating host.
+    /// If its PanelId currently keys the source composition's HWND, that HWND is
+    /// reassigned to the remaining source composition and DragHost takes its key.
+    /// This reuses both existing native surfaces instead of opening a third window.
     pub(crate) fn adopt_drag_host_window(
         &mut self,
         panel: PanelId,
@@ -928,27 +930,83 @@ impl FloatingWindowManager {
         native_window: NativeWindowId,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.registry.windows.contains_key(&panel) {
-            return false;
-        }
         let Some(bounds) = self.controller.update(cx, |controller, _| {
             controller.layout().floating_group(group).map(|floating| floating.bounds)
         }) else {
             return false;
         };
-        // The DragHost was created before the Floating composition header
-        // existed. Start reconciliation from its actual native bounds so the
-        // newly reserved header height moves the top edge upward and increases
-        // the client height instead of shifting the detached tab downward.
+
+        // A floating source may already use this PanelId as its composition-host
+        // registry key. Preserve that HWND for the source remainder, then let the
+        // temporary DragHost become the host for the detached destination.
+        let source_host_reassignment = if self.registry.windows.contains_key(&panel) {
+            let Some(source_group) = self
+                .registry
+                .windows
+                .get(&panel)
+                .and_then(|entry| entry.host_group)
+            else {
+                return false;
+            };
+            if source_group == group {
+                return false;
+            }
+
+            let source_panels = self.controller.update(cx, |controller, _| {
+                let floating = controller.layout().floating_group(source_group)?;
+                let area = controller.layout().dock_area(floating.area)?;
+                let mut panels = Vec::new();
+                let mut seen = HashSet::new();
+                collect_panel_order(controller.layout(), area.root, &mut panels, &mut seen);
+                Some(panels)
+            });
+            match source_panels {
+                Some(panels) => {
+                    let Some(replacement_panel) =
+                        panels.into_iter().find(|candidate| *candidate != panel)
+                    else {
+                        return false;
+                    };
+                    if self.registry.windows.contains_key(&replacement_panel) {
+                        return false;
+                    }
+                    Some((source_group, Some(replacement_panel)))
+                }
+                None => Some((source_group, None)),
+            }
+        } else {
+            None
+        };
+
+        // DragHost was created before the persistent Floating composition header
+        // existed. Use its actual native bounds when taking over the HWND.
         let current_native_bounds = self
             .core_bounds_from_native_window(native_window)
             .unwrap_or(bounds);
-
         let configured = window.update(cx, |surface, native, surface_cx| {
             surface.set_floating_group(Some(group), native, surface_cx)
         });
         if !matches!(configured, Ok(true)) {
             return false;
+        }
+
+        match source_host_reassignment {
+            Some((source_group, Some(replacement_panel))) => {
+                let Some(existing_entry) = self.registry.windows.remove(&panel) else {
+                    return false;
+                };
+                self.registry.windows.insert(replacement_panel, existing_entry);
+                self.host_registry
+                    .floating_groups
+                    .insert(source_group, replacement_panel);
+            }
+            Some((source_group, None)) => {
+                // The detached content was the source composition's last
+                // remaining content. Its old host is no longer needed.
+                self.release_panel_window(panel, cx);
+                self.host_registry.floating_groups.remove(&source_group);
+            }
+            None => {}
         }
 
         let scale = self.native_ops.scale_factor(native_window).ok();
@@ -964,15 +1022,12 @@ impl FloatingWindowManager {
                 native_left_resize_enabled: None,
                 native_top_resize_enabled: None,
                 native_scale_factor: scale,
-            native_bounds_dirty: false,
+                native_bounds_dirty: false,
                 resize_enabled: false,
                 host_group: Some(group),
                 visibility: PanelWindowVisibility::Visible,
             },
         );
-        // Preserve the adopted panel as the selected host during the first
-        // reconciliation; otherwise the normal first-panel selection may open
-        // a second native window for the same composition.
         self.host_registry.floating_groups.insert(group, panel);
         self.reconcile(cx);
 
