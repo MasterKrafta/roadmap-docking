@@ -2129,7 +2129,6 @@ impl FloatingWindowManager {
                 })
             }
         };
-        self.native_move_finishing = false;
 
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
@@ -2142,6 +2141,7 @@ impl FloatingWindowManager {
             }
             self.schedule_reconcile(cx);
         }
+        self.native_move_finishing = false;
 
         if matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. })) {
             // The destination FloatingHost may still be unwinding its mouse/render
