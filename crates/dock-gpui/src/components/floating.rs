@@ -19,8 +19,9 @@ use ui::Theme;
 
 use crate::{
     dock_components::{
-        collect_group_presentations, CompositionDragArea, DockCompositionView,
-        DockGroupView, DockTab, GroupDragArea, GroupPresentation, PanelTransferPresentation,
+        active_panels_for_groups, collect_group_presentations, CompositionDragArea,
+        DockCompositionView, DockGroupView, DockTab, GroupDragArea, GroupPresentation,
+        PanelTransferPresentation,
     },
     dock_host::{
         build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
@@ -93,14 +94,21 @@ impl FloatingWindowContent {
             column_group_ids.extend(ids.iter().copied());
         }
 
-        let column_active_panels = column_group_ids
-            .iter()
-            .filter_map(|group| {
-                group_presentations
-                    .get(group)
-                    .and_then(|presentation| presentation.active_panel)
+        let column_active_panels = active_panels_for_groups(
+            column_group_ids.iter().copied(),
+            group_presentations,
+            dragged_group,
+        );
+        let dragged_group_panels = dragged_group
+            .and_then(|group| group_presentations.get(&group))
+            .map(|presentation| {
+                presentation
+                    .tabs
+                    .iter()
+                    .map(|tab| tab.panel)
+                    .collect::<HashSet<_>>()
             })
-            .collect::<HashSet<PanelId>>();
+            .unwrap_or_default();
 
         let mut root = div()
             .id(format!("floating-window-{:?}", floating.group))
@@ -228,7 +236,9 @@ impl FloatingWindowContent {
         let loose_panels = panels
             .into_iter()
             .filter_map(|(panel, view)| {
-                if column_active_panels.contains(&panel.panel) {
+                if column_active_panels.contains(&panel.panel)
+                    || dragged_group_panels.contains(&panel.panel)
+                {
                     return None;
                 }
 
