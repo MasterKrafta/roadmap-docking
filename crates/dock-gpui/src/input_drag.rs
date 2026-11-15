@@ -300,6 +300,7 @@ pub(crate) fn begin_panel_drag_host(
 
 /// Starts DragHost for an active GroupGrip gesture, transferring the Group's
 /// active cached PanelView while preserving the complete tab-strip presentation.
+/// The temporary HWND can become the detached Floating host on release.
 pub(crate) fn begin_group_drag_host(
     controller: &Entity<DockController>,
     drag_host_manager: &Entity<DragHostManager>,
