@@ -22,7 +22,7 @@ use platform::{
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
     components::FloatingHost, drag_host_manager::DragHostSurface, geometry::DockGeometry,
-    window_chain::{WindowGridDirection, WindowGridRegistry},
+    window_chain::{WindowGridDirection, WindowGridLink, WindowGridRegistry},
     window_chain_geometry::{
         NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
         arrange_window_grid_bounds as arrange_grid_geometry_bounds,
@@ -559,8 +559,14 @@ impl FloatingWindowManager {
         .ok_or(dock_core::CommandError::InvalidTarget {
             reason: "could not normalize the new Floating window bounds",
         })?;
+        let links = next_chains
+            .links_for(anchor)
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "new WindowGrid has no adjacency links",
+            })?
+            .to_vec();
         let bounds = self
-            .arrange_window_grid_bounds(member_bounds, anchor, cx)
+            .arrange_window_grid_bounds(member_bounds, &links, anchor, cx)
             .ok_or(dock_core::CommandError::InvalidTarget {
                 reason: "could not calculate native bounds for the new WindowGrid connection",
             })?;
@@ -822,15 +828,15 @@ impl FloatingWindowManager {
     fn arrange_window_grid_bounds(
         &self,
         bounds: Vec<(FloatingGroupId, Rect)>,
+        links: &[WindowGridLink],
         anchor: FloatingGroupId,
         cx: &mut Context<Self>,
     ) -> Option<Vec<(FloatingGroupId, Rect)>> {
-        let links = self.window_chains.links_for(anchor)?.to_vec();
         let frames = self.frame_geometries_for_bounds(&bounds)?;
         let header_height = self.controller.update(cx, |controller, _| {
             controller.metrics().column_header_height
         });
-        arrange_grid_geometry_bounds(bounds, &frames, &links, anchor, header_height)
+        arrange_grid_geometry_bounds(bounds, &frames, links, anchor, header_height)
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
@@ -2100,8 +2106,14 @@ impl FloatingWindowManager {
         .ok_or(dock_core::CommandError::InvalidTarget {
             reason: "could not normalize the Floating window bounds",
         })?;
+        let links = next_chains
+            .links_for(anchor)
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "new Floating WindowGrid has no adjacency links",
+            })?
+            .to_vec();
         let bounds = self
-            .arrange_window_grid_bounds(member_bounds, anchor, cx)
+            .arrange_window_grid_bounds(member_bounds, &links, anchor, cx)
             .ok_or(dock_core::CommandError::InvalidTarget {
                 reason: "could not calculate native bounds for the Floating WindowGrid connection",
             })?;
@@ -2769,8 +2781,12 @@ impl FloatingWindowManager {
                 continue;
             };
 
+            let Some(links) = self.window_chains.links_for(anchor).map(<[WindowGridLink]>::to_vec) else {
+                self.pending_window_chain_alignment.remove(&anchor);
+                continue;
+            };
             let Some(aligned_bounds) =
-                self.arrange_window_grid_bounds(member_bounds.clone(), anchor, cx)
+                self.arrange_window_grid_bounds(member_bounds.clone(), &links, anchor, cx)
             else {
                 tracing::debug!(
                     ?anchor,
