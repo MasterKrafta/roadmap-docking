@@ -14,6 +14,7 @@ pub(super) fn allocate_stack_heights(
     available: f32,
     axis: Axis,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
 ) -> Result<StackAllocation, ComputeRectsError> {
     if ratios.len() != children.len() {
@@ -33,9 +34,19 @@ pub(super) fn allocate_stack_heights(
         #[cfg(test)]
         visit_probe::record_allocate_stack_child(*child);
         collapsed.push(matches!(layout.node(*child), Some(Node::Tabs(tabs)) if tabs.collapsed));
-        // Query the common contract for every child; collapsed nodes report
-        // their effective strip height from Layout::minimum_node_size too.
-        minimums.push(minimum_node_size(layout, *child, metrics, minimum_sizes)?.height);
+        // Main uses the all-tabs minimum; Floating uses only each group's
+        // active tab so inactive content cannot keep its native window tall.
+        let minimum = match floating_root {
+            Some(root) => minimum_floating_node_size(
+                layout,
+                *child,
+                root,
+                metrics,
+                minimum_sizes,
+            )?,
+            None => minimum_node_size(layout, *child, metrics, minimum_sizes)?,
+        };
+        minimums.push(minimum.height);
     }
 
     let gap_total = metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
