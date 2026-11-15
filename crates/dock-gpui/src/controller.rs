@@ -472,29 +472,59 @@ impl DockController {
             && self.drag.begin_panel_view_transfer(panel)
     }
 
-    pub(crate) fn can_begin_group_view_transfer(&self, group: NodeId, panel: PanelId) -> bool {
-        let active_panel = match self.layout.node(group) {
-            Some(Node::Tabs(tabs)) => tabs.active_child().and_then(|child| {
-                match self.layout.node(child) {
-                    Some(Node::Panel(value)) => Some(value.panel_id),
-                    _ => None,
-                }
-            }),
-            _ => None,
+    /// Returns the Group's PanelIds with its active tab first for DragHost presentation.
+    pub(crate) fn group_panel_ids(&self, group: NodeId) -> Option<Vec<PanelId>> {
+        let Node::Tabs(tabs) = self.layout.node(group)? else {
+            return None;
         };
-        active_panel == Some(panel)
-            && self.panel_views.get(panel).is_some()
-            && self.drag
-                .host_session()
-                .is_some_and(|session| session.can_begin_group_view_transfer(group, panel))
+        let active_child = tabs.active_child()?;
+        let active_panel = match self.layout.node(active_child)? {
+            Node::Panel(panel) => panel.panel_id,
+            _ => return None,
+        };
+        let mut panels = tabs
+            .children
+            .iter()
+            .map(|child| match self.layout.node(*child)? {
+                Node::Panel(panel) => Some(panel.panel_id),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let active_index = panels.iter().position(|panel| *panel == active_panel)?;
+        panels.swap(0, active_index);
+        Some(panels)
     }
 
-    pub(crate) fn begin_group_view_transfer(&mut self, group: NodeId, panel: PanelId) -> bool {
-        self.can_begin_group_view_transfer(group, panel)
-            && self.drag
+    pub(crate) fn can_begin_group_view_transfer(
+        &self,
+        group: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        let Some(group_panels) = self.group_panel_ids(group) else {
+            return false;
+        };
+        !group_panels.is_empty()
+            && panels.first() == group_panels.first()
+            && panels.len() == group_panels.len()
+            && group_panels.iter().all(|panel| panels.contains(panel))
+            && panels.iter().all(|panel| self.panel_views.get(*panel).is_some())
+            && self
+                .drag
+                .host_session()
+                .is_some_and(|session| session.can_begin_group_view_transfer(group, panels))
+    }
+
+    pub(crate) fn begin_group_view_transfer(
+        &mut self,
+        group: NodeId,
+        panels: &[PanelId],
+    ) -> bool {
+        self.can_begin_group_view_transfer(group, panels)
+            && self
+                .drag
                 .host_session
                 .as_mut()
-                .is_some_and(|session| session.begin_group_view_transfer(group, panel))
+                .is_some_and(|session| session.begin_group_view_transfer(group, panels))
     }
 
     pub(crate) fn active_dock_area_panel_ids(&self, side: DockSide) -> Option<Vec<PanelId>> {
