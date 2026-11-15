@@ -2086,7 +2086,8 @@ impl FloatingWindowManager {
         }
 
         self.native_move = None;
-        self.native_move_finishing = true;
+        self.native_move_finishing =
+            matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. }));
         let result = match state.drop_target {
             Some(NativeMoveTarget::FloatingChain {
                 anchor,
