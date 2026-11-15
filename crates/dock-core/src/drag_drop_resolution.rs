@@ -2188,3 +2188,194 @@ fn floating_multi_group_composition_can_stack_into_another_floating_column() {
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
+
+#[test]
+fn panel_and_group_drags_can_stack_into_a_floating_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_panel_node) =
+        builder.panel(key("floating-vertical-source-panel"), constraints());
+    let (remaining_panel, remaining_panel_node) =
+        builder.panel(key("floating-vertical-source-remaining"), constraints());
+    let source_group = builder.tabs(
+        vec![source_panel_node, remaining_panel_node],
+        0,
+        false,
+    );
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_top_panel) =
+        builder.panel(key("floating-vertical-target-top"), constraints());
+    let target_top = builder.tabs(vec![target_top_panel], 0, false);
+    let (_, target_bottom_panel) =
+        builder.panel(key("floating-vertical-target-bottom"), constraints());
+    let target_bottom = builder.tabs(vec![target_bottom_panel], 0, false);
+    let target_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![target_top, target_bottom],
+        vec![0.5, 0.5],
+    );
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(620.0, 140.0), Size::new(420.0, 720.0)),
+        1,
+    );
+    let layout = builder.build();
+
+    let rects = layout
+        .compute_floating_rects(target_floating, &metrics)
+        .unwrap();
+    let sources = [
+        (
+            DropSource::Panel { panel: source_panel },
+            DragPayload::Panel { panel: source_panel },
+            DragHandle::PanelTab,
+        ),
+        (
+            DropSource::Group { group: source_group },
+            DragPayload::Group { group: source_group },
+            DragHandle::GroupGrip,
+        ),
+    ];
+    let placements = [
+        (
+            DropZone::FloatingTop,
+            DropTarget::GroupEdge {
+                group: target_top,
+                zone: DropZone::Top,
+            },
+            0usize,
+        ),
+        (
+            DropZone::Bottom,
+            DropTarget::GroupEdge {
+                group: target_top,
+                zone: DropZone::Bottom,
+            },
+            1usize,
+        ),
+        (
+            DropZone::FloatingBottom,
+            DropTarget::GroupEdge {
+                group: target_bottom,
+                zone: DropZone::Bottom,
+            },
+            2usize,
+        ),
+    ];
+
+    for (source, payload, handle) in sources {
+        let resolver = layout
+            .prepare_drop_resolver(source, &rects, &metrics)
+            .unwrap();
+
+        for (zone_kind, target, insertion_index) in placements {
+            let zone = resolver
+                .zones()
+                .iter()
+                .find(|zone| zone.zone == zone_kind && zone.target == target)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{handle:?} must expose {zone_kind:?} for target {target:?}"
+                    )
+                });
+            let point = Point::new(
+                zone.rect.origin.x + zone.rect.size.width * 0.5,
+                zone.rect.origin.y + zone.rect.size.height * 0.5,
+            );
+            let resolved = resolver
+                .resolve_zone(point)
+                .unwrap()
+                .expect("the Floating stack drop zone must resolve");
+            assert_eq!(resolved.zone, zone_kind);
+            assert_eq!(resolved.target, target);
+
+            let request = DragDropRequest {
+                payload,
+                handle,
+                origin: Point::ZERO,
+                point,
+                target: Some(target),
+                floating_bounds: None,
+            };
+            let expected = match payload {
+                DragPayload::Panel { panel } => {
+                    DragDropAction::Command(DockCommand::MovePanel { panel, target })
+                }
+                DragPayload::Group { group } => {
+                    let DropTarget::GroupEdge {
+                        group: target_group,
+                        zone,
+                    } = target
+                    else {
+                        unreachable!("the test uses only GroupEdge targets")
+                    };
+                    DragDropAction::Command(DockCommand::SplitGroup {
+                        group,
+                        target_group,
+                        zone,
+                        ratio: 0.5,
+                    })
+                }
+                _ => unreachable!("the test covers PanelTab and GroupGrip only"),
+            };
+
+            let mut updated = layout.clone();
+            let action = updated.resolve_drag_drop(&request, &metrics).unwrap();
+            assert_eq!(action, expected);
+
+            let DragDropAction::Command(command) = action else {
+                panic!("vertical Floating stack drops must produce a docking command");
+            };
+            updated.apply(command, &metrics).unwrap();
+
+            let Some(Node::Column(column)) = updated.node(target_column) else {
+                panic!("the Floating destination must remain a Column");
+            };
+            match payload {
+                DragPayload::Panel { .. } => {
+                    assert_eq!(column.groups.len(), 3);
+                    let inserted_group = column.groups[insertion_index];
+                    assert!(matches!(
+                        updated.node(inserted_group),
+                        Some(Node::Tabs(tabs)) if tabs.children.len() == 1
+                            && matches!(
+                                updated.node(tabs.children[0]),
+                                Some(Node::Panel(panel)) if panel.panel_id == source_panel
+                            )
+                    ));
+                    assert!(matches!(
+                        updated.node(source_group),
+                        Some(Node::Tabs(tabs))
+                            if tabs.children == vec![remaining_panel_node]
+                    ));
+                }
+                DragPayload::Group { .. } => {
+                    let expected_groups = match insertion_index {
+                        0 => vec![source_group, target_top, target_bottom],
+                        1 => vec![target_top, source_group, target_bottom],
+                        2 => vec![target_top, target_bottom, source_group],
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(column.groups, expected_groups);
+                    assert!(matches!(
+                        updated.node(source_group),
+                        Some(Node::Tabs(tabs))
+                            if tabs.children == vec![source_panel_node, remaining_panel_node]
+                    ));
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(updated.validate(&metrics), Ok(()));
+        }
+    }
+}
+
