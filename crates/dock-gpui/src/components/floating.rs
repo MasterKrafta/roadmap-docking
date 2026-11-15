@@ -1920,6 +1920,7 @@ impl Render for FloatingHost {
                 !transfer_presentation
                     .groups_without_visible_tabs
                     .contains(&group.group)
+                    || dragged_group == Some(group.group)
             })
             .copied()
             .collect::<Vec<_>>();
@@ -1931,6 +1932,7 @@ impl Render for FloatingHost {
                 !transfer_presentation
                     .groups_without_visible_tabs
                     .contains(&strip.group)
+                    || dragged_group == Some(strip.group)
             })
             .copied()
             .collect::<Vec<_>>();
