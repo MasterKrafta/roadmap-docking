@@ -2781,7 +2781,7 @@ impl FloatingWindowManager {
                 continue;
             };
 
-            let Some(links) = self.window_chains.links_for(anchor).map(<[WindowGridLink]>::to_vec) else {
+            let Some(links) = self.window_chains.links_for(anchor).map(|links| links.to_vec()) else {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             };
