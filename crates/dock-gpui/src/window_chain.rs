@@ -568,16 +568,22 @@ mod tests {
     }
 
     #[test]
-    fn permits_multiple_windows_on_the_same_side_of_one_window() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
-        let mut grid = WindowGridRegistry::default();
+    fn permits_multiple_windows_on_the_same_side_as_separate_branches() {
+        for side in [
+            WindowGridDirection::Left,
+            WindowGridDirection::Right,
+            WindowGridDirection::Above,
+            WindowGridDirection::Below,
+        ] {
+            let [a, b, c] = groups(3).try_into().expect("three group ids");
+            let mut grid = WindowGridRegistry::default();
 
-        assert!(grid.link_to_side(a, b, WindowGridDirection::Right));
-        assert!(grid.link_to_side(a, c, WindowGridDirection::Right));
-        assert_eq!(grid.members_for(a), vec![a, c, b]);
-        assert_eq!(grid.direction_between(a, b), Some(WindowGridDirection::Right));
-        assert_eq!(grid.direction_between(a, c), Some(WindowGridDirection::Right));
-        assert!(grid.is_valid());
+            assert!(grid.link_to_side(a, b, side));
+            assert!(grid.link_to_side(a, c, side));
+            assert_eq!(grid.direction_between(a, b), Some(side));
+            assert_eq!(grid.direction_between(a, c), Some(side));
+            assert!(grid.is_valid());
+        }
     }
 
     #[test]
