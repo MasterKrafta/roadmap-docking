@@ -25,10 +25,6 @@ impl WindowGridDirection {
             Self::Below => Self::Above,
         }
     }
-
-    fn is_horizontal(self) -> bool {
-        matches!(self, Self::Left | Self::Right)
-    }
 }
 
 /// One directed description of an undirected physical adjacency.
@@ -693,7 +689,7 @@ mod tests {
         let live = HashSet::from([a, c, d]);
         let (removed, compact) = grid.retain_groups(&live);
         assert_eq!(removed, 1);
-        assert!(compact.is_empty());
+        assert_eq!(compact, vec![vec![c, d]]);
         assert_eq!(grid.members_for(c), vec![c, d]);
         assert_eq!(grid.direction_between(c, d), Some(WindowGridDirection::Right));
         assert!(!grid.is_chained(a));
