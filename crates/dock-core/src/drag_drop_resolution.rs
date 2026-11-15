@@ -244,17 +244,16 @@ fn panel_tab_can_split_from_its_own_multi_tab_floating_group() {
             panic!("the Floating composition must retain its Column root");
         };
         assert_eq!(updated_column.groups.len(), 2);
-        let expected_groups = if zone == DropZone::Top {
-            vec![updated_column.groups[0], group]
-        } else {
-            vec![group, updated_column.groups[1]]
-        };
-        assert_eq!(updated_column.groups, expected_groups);
-
-        let detached_group = if zone == DropZone::Top {
-            updated_column.groups[0]
-        } else {
-            updated_column.groups[1]
+        let detached_group = match zone {
+            DropZone::Top => {
+                assert_eq!(updated_column.groups[1], group);
+                updated_column.groups[0]
+            }
+            DropZone::Bottom => {
+                assert_eq!(updated_column.groups[0], group);
+                updated_column.groups[1]
+            }
+            _ => unreachable!("only vertical GroupEdge zones are tested"),
         };
         assert!(matches!(
             updated.node(detached_group),
