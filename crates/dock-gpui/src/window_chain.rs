@@ -277,9 +277,11 @@ impl WindowGridRegistry {
 
     /// Joins the moving component on the requested side of the anchor.
     ///
-    /// Existing internal links and member order are retained. Joining members
-    /// already in one component is rejected because it would create a cycle or
-    /// an ambiguous second route through the same component.
+    /// Existing internal links and member order are retained. Multiple neighbours
+    /// on one side are represented as separate branches; a new window is not
+    /// silently inserted between existing neighbours. Joining members already
+    /// in one component is rejected because it would create a cycle or an
+    /// ambiguous second route through the same component.
     #[allow(dead_code)] // Consumed by the four-direction Drop stage.
     pub(crate) fn link_to_side(
         &mut self,
@@ -381,25 +383,6 @@ impl WindowGridRegistry {
 
         *self = next;
         true
-    }
-
-    /// Backwards-compatible horizontal insertion used by the existing
-    /// Main DockArea tear-off path.
-    pub(crate) fn link_sequence_at(
-        &mut self,
-        anchor: FloatingGroupId,
-        moving: &[FloatingGroupId],
-        insert_before: bool,
-    ) -> bool {
-        self.link_sequence_to_side(
-            anchor,
-            moving,
-            if insert_before {
-                WindowGridDirection::Left
-            } else {
-                WindowGridDirection::Right
-            },
-        )
     }
 
     pub(crate) fn remove_member(&mut self, group: FloatingGroupId) -> bool {
