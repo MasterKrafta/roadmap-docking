@@ -6,6 +6,7 @@ pub(super) fn layout_split(
     split: &crate::Split,
     rect: Rect,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
@@ -13,6 +14,7 @@ pub(super) fn layout_split(
         SplitLayoutContext {
             layout,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
         },
@@ -29,6 +31,7 @@ fn layout_split_for_floating(
     split: &crate::Split,
     rect: Rect,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
@@ -36,6 +39,7 @@ fn layout_split_for_floating(
         SplitLayoutContext {
             layout,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
         },
@@ -76,6 +80,7 @@ pub(super) fn layout_floating_root(
             tabs,
             group_area,
             metrics,
+            Some(id),
             minimum_sizes,
             output,
             false,
@@ -99,17 +104,19 @@ pub(super) fn layout_floating_root(
             split,
             rect,
             metrics,
+            Some(id),
             minimum_sizes,
             output,
         );
     }
 
-    layout_node(layout, id, rect, metrics, minimum_sizes, output)
+    layout_node(layout, id, rect, metrics, Some(id), minimum_sizes, output)
 }
 
 struct SplitLayoutContext<'a> {
     layout: &'a Layout,
     metrics: &'a DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &'a mut HashMap<NodeId, Size>,
     output: &'a mut LayoutRects,
 }
@@ -124,6 +131,7 @@ fn layout_split_inner(
     let SplitLayoutContext {
         layout,
         metrics,
+        floating_root,
         minimum_sizes,
         output,
     } = context;
@@ -165,8 +173,13 @@ fn layout_split_inner(
                         .children
                         .iter()
                         .map(|child| {
-                            let minimum =
-                                minimum_node_size(layout, *child, metrics, minimum_sizes)?.width;
+                            let minimum = layout_minimum_size(
+                                layout,
+                                *child,
+                                metrics,
+                                minimum_sizes,
+                                floating_root,
+                            )?.width;
                             Ok(minimum.max(metrics.min_column_width))
                         })
                         .collect::<Result<Vec<f32>, ComputeRectsError>>()?
@@ -223,7 +236,15 @@ fn layout_split_inner(
                     Point::new(x, rect.origin.y),
                     Size::new(widths[index], rect.size.height),
                 );
-                layout_node(layout, *child, child_rect, metrics, minimum_sizes, output)?;
+                layout_node(
+                    layout,
+                    *child,
+                    child_rect,
+                    metrics,
+                    floating_root,
+                    minimum_sizes,
+                    output,
+                )?;
                 x += widths[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::X, x, rect, metrics, output)?;
@@ -240,6 +261,7 @@ fn layout_split_inner(
                 rect.size.height,
                 Axis::Y,
                 metrics,
+                floating_root,
                 minimum_sizes,
             )?;
             if allocation.overflows {
