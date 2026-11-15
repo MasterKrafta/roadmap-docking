@@ -718,7 +718,6 @@ pub struct FloatingWindowManager {
     drag_host_manager: Option<WeakEntity<DragHostManager>>,
     reconciling: bool,
     reconcile_scheduled: bool,
-    native_move_finishing: bool,
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     window_chains: WindowChainRegistry,
@@ -739,7 +738,6 @@ impl FloatingWindowManager {
             drag_host_manager: None,
             reconciling: false,
             reconcile_scheduled: false,
-            native_move_finishing: false,
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowChainRegistry::default(),
@@ -1087,14 +1085,10 @@ impl FloatingWindowManager {
                 &controller,
                 |manager, _, event: &DockEvent, manager_cx| {
                     if matches!(event, DockEvent::LayoutChanged { .. }) {
-                        if manager.native_move_finishing {
-                            // Docking one Floating into another can invalidate the
-                            // host currently under the pointer. Defer host reassignment
-                            // until the current GPUI window update has unwound.
-                            manager.schedule_reconcile(manager_cx);
-                        } else {
-                            manager.reconcile(manager_cx);
-                        }
+                        // LayoutChanged can be emitted from inside a FloatingHost
+                        // update. Reconcile calls WindowHandle::update on registered
+                        // hosts, so always defer it until the active host update unwinds.
+                        manager.schedule_reconcile(manager_cx);
                     }
                 },
             ));
@@ -2086,8 +2080,6 @@ impl FloatingWindowManager {
         }
 
         self.native_move = None;
-        self.native_move_finishing =
-            matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. }));
         let result = match state.drop_target {
             Some(NativeMoveTarget::FloatingChain {
                 anchor,
@@ -2141,7 +2133,6 @@ impl FloatingWindowManager {
             }
             self.schedule_reconcile(cx);
         }
-        self.native_move_finishing = false;
 
         if matches!(state.drop_target, Some(NativeMoveTarget::FloatingDock { .. })) {
             // The destination FloatingHost may still be unwinding its mouse/render
