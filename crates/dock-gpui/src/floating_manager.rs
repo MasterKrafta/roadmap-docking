@@ -4161,6 +4161,7 @@ mod floating_window_chain_drop_destination_tests {
         floating_window_chain_insert_before, floating_window_drop_destination, NativeMoveTarget,
     };
     use dock_core::{DropTarget, DropZone, FloatingGroupId, NodeId, Point};
+    use slotmap::Key;
 
     #[test]
     fn floating_window_chain_side_matches_the_resolved_drop_zone() {
