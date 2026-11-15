@@ -492,17 +492,31 @@ fn arrange_contiguous_window_chain_bounds(
     Some(bounds)
 }
 
-fn floating_window_chain_insert_before(target: Option<DropTarget>) -> Option<bool> {
+fn floating_window_chain_insert_before(target: DropTarget) -> Option<bool> {
     match target {
-        Some(DropTarget::GroupEdge {
+        DropTarget::GroupEdge {
             zone: dock_core::DropZone::Left,
             ..
-        }) => Some(true),
-        Some(DropTarget::GroupEdge {
+        } => Some(true),
+        DropTarget::GroupEdge {
             zone: dock_core::DropZone::Right,
             ..
-        }) => Some(false),
+        } => Some(false),
         _ => None,
+    }
+}
+
+fn floating_window_drop_destination(
+    anchor: FloatingGroupId,
+    target: DropTarget,
+    point: Point,
+) -> NativeMoveTarget {
+    match floating_window_chain_insert_before(target) {
+        Some(insert_before) => NativeMoveTarget::FloatingChain {
+            anchor,
+            insert_before,
+        },
+        None => NativeMoveTarget::FloatingDock { target, point },
     }
 }
 
@@ -1882,16 +1896,9 @@ impl FloatingWindowManager {
                 target
             });
 
-            match resolved_target {
-                Some(target) => match floating_window_chain_insert_before(Some(target)) {
-                    Some(insert_before) => Some(NativeMoveTarget::FloatingChain {
-                        anchor: target_group,
-                        insert_before,
-                    }),
-                    None => Some(NativeMoveTarget::FloatingDock { target, point }),
-                },
-                None => None,
-            }
+            resolved_target.map(|target| {
+                floating_window_drop_destination(target_group, target, point)
+            })
         };
         state.drop_target = resolved;
     }
@@ -4092,7 +4099,7 @@ mod window_chain_registry_tests {
 mod contiguous_window_chain_bounds_tests {
     use super::{
         NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
-        floating_window_chain_insert_before,
+        floating_window_chain_insert_before, floating_window_drop_destination, NativeMoveTarget,
     };
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
@@ -4233,27 +4240,40 @@ mod contiguous_window_chain_bounds_tests {
         use dock_core::{DropTarget, DropZone, NodeId};
 
         let group = NodeId::null();
-        assert_eq!(
-            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
-                group,
-                zone: DropZone::Left,
-            })),
-            Some(true),
-        );
-        assert_eq!(
-            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
-                group,
-                zone: DropZone::Right,
-            })),
-            Some(false),
-        );
-        assert_eq!(
-            floating_window_chain_insert_before(Some(DropTarget::GroupEdge {
-                group,
-                zone: DropZone::Top,
-            })),
-            None,
-        );
+        let left = DropTarget::GroupEdge {
+            group,
+            zone: DropZone::Left,
+        };
+        let right = DropTarget::GroupEdge {
+            group,
+            zone: DropZone::Right,
+        };
+        let top = DropTarget::GroupEdge {
+            group,
+            zone: DropZone::Top,
+        };
+        let center = DropTarget::GroupTabs { group, index: 0 };
+
+        assert_eq!(floating_window_chain_insert_before(left), Some(true));
+        assert_eq!(floating_window_chain_insert_before(right), Some(false));
+        assert_eq!(floating_window_chain_insert_before(top), None);
+
+        assert!(matches!(
+            floating_window_drop_destination(FloatingGroupId::null(), left, Point::ZERO),
+            NativeMoveTarget::FloatingChain { insert_before: true, .. }
+        ));
+        assert!(matches!(
+            floating_window_drop_destination(FloatingGroupId::null(), right, Point::ZERO),
+            NativeMoveTarget::FloatingChain { insert_before: false, .. }
+        ));
+        assert!(matches!(
+            floating_window_drop_destination(FloatingGroupId::null(), top, Point::ZERO),
+            NativeMoveTarget::FloatingDock { target, .. } if target == top
+        ));
+        assert!(matches!(
+            floating_window_drop_destination(FloatingGroupId::null(), center, Point::ZERO),
+            NativeMoveTarget::FloatingDock { target, .. } if target == center
+        ));
     }
 }
 
