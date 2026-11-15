@@ -315,13 +315,33 @@ impl WindowGridRegistry {
             return false;
         };
 
-        let insertion_index = if matches!(
-            side,
-            WindowGridDirection::Left | WindowGridDirection::Above
-        ) {
-            anchor_index
-        } else {
-            anchor_index + 1
+        // Repeated drops on an occupied side extend that side outward in a
+        // deterministic lane instead of placing several HWNDs at the same
+        // coordinates. Left/Above lanes are ordered from farthest to nearest;
+        // Right/Below lanes are ordered from nearest to farthest.
+        let side_member_indices = anchor_grid
+            .members
+            .iter()
+            .enumerate()
+            .filter_map(|(index, member)| {
+                (anchor_grid.direction_between(anchor, *member) == Some(side))
+                    .then_some(index)
+            })
+            .collect::<Vec<_>>();
+
+        let insertion_index = match side {
+            WindowGridDirection::Left | WindowGridDirection::Above => {
+                side_member_indices
+                    .into_iter()
+                    .min()
+                    .unwrap_or(anchor_index)
+            }
+            WindowGridDirection::Right | WindowGridDirection::Below => {
+                side_member_indices
+                    .into_iter()
+                    .max()
+                    .map_or(anchor_index + 1, |index| index + 1)
+            }
         };
 
         let mut members = anchor_grid.members;
