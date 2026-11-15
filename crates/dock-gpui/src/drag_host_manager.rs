@@ -1831,6 +1831,8 @@ impl Render for DragHostSurface {
             return root;
         }
 
+        let reserve_composition_header = self.reserve_composition_header;
+
         if let Some(side) = self.dock_area
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let (root, panels) = {
@@ -2200,7 +2202,7 @@ impl Render for DragHostSurface {
                     .and_then(|instance| controller.registry().get(&instance.key))
                     .map(|descriptor| descriptor.title().to_string())
                     .unwrap_or_else(|| format!("Panel {panel:?}"));
-                let detached_group = if self.reserve_composition_header {
+                let detached_group = if reserve_composition_header {
                     let group = controller.layout().nodes().find_map(|(id, node)| {
                         let Node::Tabs(tabs) = node else {
                             return None;
