@@ -4185,42 +4185,48 @@ mod coordinate_tests {
 #[cfg(test)]
 mod floating_window_chain_drop_destination_tests {
     use super::{
-        floating_window_chain_direction, floating_window_drop_destination, NativeMoveTarget,
+        floating_chain_drop_target_is_supported, floating_window_chain_direction,
+        floating_window_drop_destination, NativeMoveTarget,
     };
+    use crate::window_chain::WindowGridDirection;
     use dock_core::{DropTarget, DropZone, FloatingGroupId, NodeId, Point};
     use slotmap::Key;
 
     #[test]
-    fn floating_window_chain_side_matches_the_resolved_drop_zone() {
+    fn floating_window_drop_maps_all_four_zones_to_grid_directions() {
         let group = NodeId::null();
         let left = DropTarget::GroupEdge { group, zone: DropZone::Left };
         let right = DropTarget::GroupEdge { group, zone: DropZone::Right };
         let top = DropTarget::GroupEdge { group, zone: DropZone::Top };
+        let bottom = DropTarget::GroupEdge { group, zone: DropZone::Bottom };
         let center = DropTarget::GroupTabs { group, index: 0 };
 
-        assert_eq!(floating_window_chain_direction(left), Some(true));
-        assert_eq!(floating_window_chain_direction(right), Some(false));
-        assert_eq!(floating_window_chain_direction(top), None);
+        for (target, direction) in [
+            (left, WindowGridDirection::Left),
+            (right, WindowGridDirection::Right),
+            (top, WindowGridDirection::Above),
+            (bottom, WindowGridDirection::Below),
+        ] {
+            assert_eq!(floating_window_chain_direction(target), Some(direction));
+            assert!(floating_chain_drop_target_is_supported(target, false));
+            assert!(!floating_chain_drop_target_is_supported(target, true));
+            assert!(matches!(
+                floating_window_drop_destination(FloatingGroupId::null(), target, Point::ZERO),
+                NativeMoveTarget::FloatingChain {
+                    direction: actual,
+                    ..
+                } if actual == direction
+            ));
+        }
 
-        assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), left, Point::ZERO),
-            NativeMoveTarget::FloatingChain { insert_before: true, .. }
-        ));
-        assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), right, Point::ZERO),
-            NativeMoveTarget::FloatingChain { insert_before: false, .. }
-        ));
-        assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), top, Point::ZERO),
-            NativeMoveTarget::FloatingDock { target, .. } if target == top
-        ));
+        assert_eq!(floating_window_chain_direction(center), None);
+        assert!(!floating_chain_drop_target_is_supported(center, false));
         assert!(matches!(
             floating_window_drop_destination(FloatingGroupId::null(), center, Point::ZERO),
             NativeMoveTarget::FloatingDock { target, .. } if target == center
         ));
     }
 }
-
 #[cfg(test)]
 mod floating_chain_drop_target_tests {
     use super::floating_chain_drop_target_is_supported;
