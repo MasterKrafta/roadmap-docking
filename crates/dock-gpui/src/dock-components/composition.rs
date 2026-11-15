@@ -5,11 +5,11 @@ mod group;
 #[path = "tab.rs"]
 mod tab;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use dock_core::{
     Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelId, PanelRect, Point, Rect,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect,
     SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
