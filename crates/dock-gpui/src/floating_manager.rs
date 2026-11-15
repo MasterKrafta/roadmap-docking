@@ -2952,8 +2952,11 @@ impl FloatingWindowManager {
         let controller = self.controller.clone();
 
         cx.spawn(async move |_, app| {
+            // Let ShowWindow/SetWindowPos reach DWM before sampling extended
+            // frame bounds. A 1 ms delay can still read the previous invisible
+            // resize-frame geometry and leave a visible seam between the windows.
             app.background_executor()
-                .timer(Duration::from_millis(1))
+                .timer(Duration::from_millis(32))
                 .await;
 
             let pending = manager.update(app, |manager, manager_cx| {
