@@ -5,6 +5,7 @@ pub(super) fn layout_node(
     id: NodeId,
     rect: Rect,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
@@ -20,7 +21,8 @@ pub(super) fn layout_node(
         || matches!(node, Node::Split(split) if split.axis == Axis::Y);
     let mut content_rect = rect;
     if !manages_vertical_stack {
-        let minimum = minimum_node_size(layout, id, metrics, minimum_sizes)?;
+        let minimum =
+            layout_minimum_size(layout, id, metrics, minimum_sizes, floating_root)?;
         if content_rect.size.height < minimum.height {
             push_vertical_overflow(id, rect, minimum.height, output)?;
             content_rect.size.height = minimum.height;
@@ -37,6 +39,7 @@ pub(super) fn layout_node(
             column,
             content_rect,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
         ),
@@ -46,6 +49,7 @@ pub(super) fn layout_node(
             tabs,
             content_rect,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
             false,
@@ -82,6 +86,7 @@ pub(super) fn layout_node(
             split,
             content_rect,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
         ),
@@ -94,6 +99,7 @@ pub(super) fn layout_column(
     column: &Column,
     rect: Rect,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
 ) -> Result<(), ComputeRectsError> {
@@ -188,6 +194,7 @@ pub(super) fn layout_column(
         content_rect.size.height,
         Axis::Y,
         metrics,
+        floating_root,
         minimum_sizes,
     )?;
 
@@ -221,8 +228,14 @@ pub(super) fn layout_column(
                 .iter()
                 .position(|candidate| *candidate == group)
                 .ok_or(ComputeRectsError::InvalidLayoutState)?;
-            let preferred_minimum =
-                minimum_node_size(layout, group, metrics, minimum_sizes)?.height;
+            let preferred_minimum = layout_minimum_size(
+                layout,
+                group,
+                metrics,
+                minimum_sizes,
+                floating_root,
+            )?
+            .height;
             let expanded_height =
                 content_rect.size.height - collapsed_height * (column.groups.len() - 1) as f32;
             if expanded_height >= preferred_minimum {
@@ -256,6 +269,7 @@ pub(super) fn layout_column(
                 tabs,
                 group_rect,
                 metrics,
+                floating_root,
                 minimum_sizes,
                 output,
                 auto_collapsed.contains(group_id),
@@ -267,6 +281,7 @@ pub(super) fn layout_column(
                 *group_id,
                 group_rect,
                 metrics,
+                floating_root,
                 minimum_sizes,
                 output,
             )?;
@@ -290,13 +305,15 @@ pub(super) fn layout_tabs(
     tabs: &Tabs,
     rect: Rect,
     metrics: &DockMetrics,
+    floating_root: Option<NodeId>,
     minimum_sizes: &mut HashMap<NodeId, Size>,
     output: &mut LayoutRects,
     force_collapsed: bool,
     column_group: bool,
 ) -> Result<(), ComputeRectsError> {
     let collapsed = tabs.collapsed || force_collapsed;
-    let mut minimum_size = minimum_node_size(layout, id, metrics, minimum_sizes)?;
+    let mut minimum_size =
+        layout_minimum_size(layout, id, metrics, minimum_sizes, floating_root)?;
     // A forced compact strip follows the height allocated by its Column. This
     // keeps every Group visible even when the viewport is below the preferred
     // compact-strip minimum; normal/manual collapsed Groups keep the shared floor.
@@ -492,6 +509,7 @@ pub(super) fn layout_tabs(
             active_child,
             content_rect,
             metrics,
+            floating_root,
             minimum_sizes,
             output,
         )?;
