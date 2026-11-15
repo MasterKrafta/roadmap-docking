@@ -146,6 +146,15 @@ impl Layout {
         target: DropTarget,
         metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
+        let target_column = match target {
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Top | DropZone::Bottom,
+            } => self.find_owner_column(group),
+            _ => None,
+        };
+        let (_, target_snapshot) =
+            self.floating_column_sizing_snapshots(None, target_column, metrics)?;
         let panel_id = self
             .panel_instances
             .insert(PanelInstance::new(key.clone(), constraints));
@@ -160,6 +169,9 @@ impl Layout {
             {
                 tabs.collapsed = false;
             }
+        }
+        if let Some(snapshot) = target_snapshot {
+            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
         }
         self.remember_panel_dock_location(panel_node);
         Ok(CommandApplication {
@@ -489,11 +501,30 @@ impl Layout {
             return Ok(application);
         }
         let inverse = self.panel_transfer_inverse(*panel, panel_node);
+        let (source_snapshot, target_snapshot) = match *target {
+            DropTarget::GroupEdge {
+                group,
+                zone: DropZone::Top | DropZone::Bottom,
+            } => {
+                let source_column = self
+                    .tab_parent_index(panel_node)
+                    .and_then(|(source_group, _)| self.find_owner_column(source_group));
+                let target_column = self.find_owner_column(group);
+                self.floating_column_sizing_snapshots(source_column, target_column, metrics)?
+            }
+            _ => (None, None),
+        };
         if let DropTarget::RailSlot { column, index } = *target {
             return self
                 .move_panel_to_rail_slot(*panel, panel_node, column, index, metrics, inverse);
         }
         self.move_panel_to_drop_target(panel_node, *target, metrics)?;
+        if let Some(snapshot) = source_snapshot {
+            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
+        }
+        if let Some(snapshot) = target_snapshot {
+            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
+        }
         Ok(CommandApplication {
             actual_value: None,
             inverse,

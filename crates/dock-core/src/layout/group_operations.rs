@@ -129,25 +129,8 @@ impl Layout {
 
                 let source_column = self.find_owner_column(*group);
                 let target_column = self.find_owner_column(*target_group);
-                let target_snapshot = if let Some(column) = target_column {
-                    self.floating_column_sizing_snapshot(column, metrics)?
-                } else {
-                    None
-                };
-                let mut source_snapshot = if let Some(column) = source_column {
-                    self.floating_column_sizing_snapshot(column, metrics)?
-                } else {
-                    None
-                };
-                if source_snapshot
-                    .as_ref()
-                    .zip(target_snapshot.as_ref())
-                    .is_some_and(|(source, target)| {
-                        source.floating_group == target.floating_group
-                    })
-                {
-                    source_snapshot = None;
-                }
+                let (source_snapshot, target_snapshot) =
+                    self.floating_column_sizing_snapshots(source_column, target_column, metrics)?;
                 let source_index = source_column.and_then(|column| match self.nodes.get(column) {
                     Some(Node::Column(column_data)) if column_data.groups.len() > 1 => column_data
                         .groups
@@ -597,21 +580,8 @@ impl Layout {
             return Ok(application);
         }
         let source_column_id = self.find_owner_column(*group);
-        let target_snapshot = self.floating_column_sizing_snapshot(*column, metrics)?;
-        let mut source_snapshot = if let Some(source_column) = source_column_id {
-            self.floating_column_sizing_snapshot(source_column, metrics)?
-        } else {
-            None
-        };
-        if source_snapshot
-            .as_ref()
-            .zip(target_snapshot.as_ref())
-            .is_some_and(|(source, target)| {
-                source.floating_group == target.floating_group
-            })
-        {
-            source_snapshot = None;
-        }
+        let (source_snapshot, target_snapshot) =
+            self.floating_column_sizing_snapshots(source_column_id, Some(*column), metrics)?;
 
         let source_column = source_parent.and_then(|parent| match self.nodes.get(parent) {
             Some(Node::Column(column)) if column.groups.len() > 1 => column

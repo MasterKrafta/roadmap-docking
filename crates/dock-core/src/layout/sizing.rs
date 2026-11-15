@@ -1014,6 +1014,42 @@ impl Layout {
         }))
     }
 
+    /// Captures source and target Floating columns, avoiding duplicate snapshots
+    /// when a transfer happens inside the same native Floating window.
+    pub(super) fn floating_column_sizing_snapshots(
+        &self,
+        source_column: Option<NodeId>,
+        target_column: Option<NodeId>,
+        metrics: &DockMetrics,
+    ) -> Result<
+        (
+            Option<FloatingColumnSizingSnapshot>,
+            Option<FloatingColumnSizingSnapshot>,
+        ),
+        CommandError,
+    > {
+        let target_snapshot = if let Some(column) = target_column {
+            self.floating_column_sizing_snapshot(column, metrics)?
+        } else {
+            None
+        };
+        let mut source_snapshot = if let Some(column) = source_column {
+            self.floating_column_sizing_snapshot(column, metrics)?
+        } else {
+            None
+        };
+        if source_snapshot
+            .as_ref()
+            .zip(target_snapshot.as_ref())
+            .is_some_and(|(source, target)| {
+                source.floating_group == target.floating_group
+            })
+        {
+            source_snapshot = None;
+        }
+        Ok((source_snapshot, target_snapshot))
+    }
+
     /// Restores existing Group heights and gives newly inserted Groups their
     /// preferred height, growing the owning Floating window when necessary.
     pub(super) fn apply_floating_column_sizing_snapshot(

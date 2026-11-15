@@ -3103,6 +3103,121 @@ fn adding_groups_to_a_floating_column_grows_the_window_without_shrinking_existin
 }
 
 #[test]
+fn moving_a_panel_to_a_floating_group_edge_grows_the_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, existing_panel_node) = builder.panel(
+        PanelKey::new("floating-panel-edge-existing").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(220.0, 180.0),
+            None,
+            false,
+        ),
+    );
+    let existing_group = builder.tabs(vec![existing_panel_node], 0, false);
+    let floating_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![existing_group],
+        vec![1.0],
+    );
+    let floating = builder.floating_group(
+        floating_column,
+        Rect::new(Point::new(80.0, 90.0), Size::new(360.0, 460.0)),
+        1,
+    );
+
+    let incoming_constraints = PanelConstraints::new(
+        Size::new(120.0, 80.0),
+        Size::new(220.0, 120.0),
+        None,
+        false,
+    );
+    let (incoming_panel, incoming_panel_node) = builder.panel(
+        PanelKey::new("floating-panel-edge-incoming").unwrap(),
+        incoming_constraints.clone(),
+    );
+    let (_, source_sibling_node) = builder.panel(
+        PanelKey::new("floating-panel-edge-source-sibling").unwrap(),
+        incoming_constraints,
+    );
+    let source_group = builder.tabs(
+        vec![incoming_panel_node, source_sibling_node],
+        0,
+        false,
+    );
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let mut layout = builder.build();
+    let before = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let existing_height = before
+        .groups
+        .iter()
+        .find(|group| group.group == existing_group)
+        .unwrap()
+        .rect
+        .size
+        .height;
+    let initial_height = layout.floating_group(floating).unwrap().bounds.size.height;
+    let incoming_height = metrics
+        .min_group_height
+        .max(metrics.header_height.max(metrics.tab_strip_height) + 120.0);
+
+    layout
+        .apply(
+            DockCommand::MovePanel {
+                panel: incoming_panel,
+                target: DropTarget::GroupEdge {
+                    group: existing_group,
+                    zone: DropZone::Bottom,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let after = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let expected_window_height =
+        initial_height + incoming_height + metrics.splitter_thickness;
+    assert!(
+        (layout.floating_group(floating).unwrap().bounds.size.height - expected_window_height)
+            .abs()
+            < 1.0e-3
+    );
+
+    let existing_after = after
+        .groups
+        .iter()
+        .find(|group| group.group == existing_group)
+        .unwrap()
+        .rect
+        .size
+        .height;
+    assert!((existing_after - existing_height).abs() < 1.0e-3);
+
+    let inserted_group = layout.find_parent(incoming_panel_node).unwrap();
+    assert!(matches!(layout.node(inserted_group), Some(Node::Tabs(tabs)) if tabs.children == vec![incoming_panel_node]));
+    let inserted_height = after
+        .groups
+        .iter()
+        .find(|group| group.group == inserted_group)
+        .unwrap()
+        .rect
+        .size
+        .height;
+    assert!((inserted_height - incoming_height).abs() < 1.0e-3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_preferred_heights_are_independent_between_windows() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
