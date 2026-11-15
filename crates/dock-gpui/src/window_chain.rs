@@ -227,12 +227,9 @@ impl WindowGrid {
                 return false;
             }
 
-            let edge = if link.from < link.to {
-                (link.from, link.to)
-            } else {
-                (link.to, link.from)
-            };
-            if !edges.insert(edge) {
+            if edges.contains(&(link.to, link.from))
+                || !edges.insert((link.from, link.to))
+            {
                 return false;
             }
         }
@@ -433,12 +430,13 @@ impl WindowGridRegistry {
                 .collect::<Vec<_>>();
             removed += stale_members.len();
 
-            for stale in stale_members {
-                grid.remove_member(stale);
+            let had_stale_members = !stale_members.is_empty();
+            for stale in &stale_members {
+                grid.remove_member(*stale);
             }
 
             for component in grid.connected_components() {
-                if !stale_members.is_empty() && component.is_ordered_horizontal_chain() {
+                if had_stale_members && component.is_ordered_horizontal_chain() {
                     chains_to_compact.push(component.members.clone());
                 }
                 self.store_grid(component);
@@ -470,7 +468,6 @@ impl WindowGridRegistry {
         self.grids.get(grid_id)?.direction_between(from, to)
     }
 
-    #[cfg(test)]
     fn is_valid(&self) -> bool {
         let mut indexed_members = HashSet::new();
 
