@@ -273,7 +273,15 @@ fn layout_split_inner(
                     Point::new(rect.origin.x, y),
                     Size::new(rect.size.width, allocation.sizes[index]),
                 );
-                layout_node(layout, *child, child_rect, metrics, minimum_sizes, output)?;
+                layout_node(
+                    layout,
+                    *child,
+                    child_rect,
+                    metrics,
+                    floating_root,
+                    minimum_sizes,
+                    output,
+                )?;
                 y += allocation.sizes[index];
                 if index + 1 < split.children.len() {
                     push_splitter(id, index, Axis::Y, y, rect, metrics, output)?;
