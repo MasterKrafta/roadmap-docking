@@ -346,16 +346,16 @@ impl WindowGridRegistry {
         true
     }
 
-    /// Inserts an ordered sequence before/after an existing member.
+    /// Joins an ordered horizontal row of newly-created windows to one side
+    /// of an anchor. The row's internal left-to-right order is preserved.
     ///
-    /// The operation is transactional: a failed edge leaves the old registry
-    /// untouched. Sequence links remain horizontal for compatibility with the
-    /// existing Main DockArea tear-off flow.
-    pub(crate) fn link_sequence_at(
+    /// The complete operation is transactional so a failed link leaves both
+    /// the source sequence and destination grid unchanged.
+    pub(crate) fn link_sequence_to_side(
         &mut self,
         anchor: FloatingGroupId,
         moving: &[FloatingGroupId],
-        insert_before: bool,
+        side: WindowGridDirection,
     ) -> bool {
         if moving.is_empty() {
             return false;
@@ -375,17 +375,31 @@ impl WindowGridRegistry {
             }
         }
 
-        let linked = if insert_before {
-            next.link_before(anchor, moving[0])
-        } else {
-            next.link_after(anchor, moving[0])
-        };
-        if !linked || !next.is_valid() {
+        if !next.link_to_side(anchor, moving[0], side) || !next.is_valid() {
             return false;
         }
 
         *self = next;
         true
+    }
+
+    /// Backwards-compatible horizontal insertion used by the existing
+    /// Main DockArea tear-off path.
+    pub(crate) fn link_sequence_at(
+        &mut self,
+        anchor: FloatingGroupId,
+        moving: &[FloatingGroupId],
+        insert_before: bool,
+    ) -> bool {
+        self.link_sequence_to_side(
+            anchor,
+            moving,
+            if insert_before {
+                WindowGridDirection::Left
+            } else {
+                WindowGridDirection::Right
+            },
+        )
     }
 
     pub(crate) fn remove_member(&mut self, group: FloatingGroupId) -> bool {
@@ -598,6 +612,37 @@ mod tests {
         assert_eq!(grid.members_for(a), before.members_for(a));
         assert_eq!(grid.links_for(a), before.links_for(a));
         assert!(grid.is_valid());
+    }
+
+    #[test]
+    fn sequence_join_preserves_horizontal_order_for_each_target_side() {
+        let [anchor, a, b, c] = groups(4).try_into().expect("four group ids");
+
+        for side in [
+            WindowGridDirection::Left,
+            WindowGridDirection::Right,
+            WindowGridDirection::Above,
+            WindowGridDirection::Below,
+        ] {
+            let mut grid = WindowGridRegistry::default();
+            assert!(grid.link_sequence_to_side(anchor, &[a, b, c], side));
+            assert_eq!(grid.direction_between(a, b), Some(WindowGridDirection::Right));
+            assert_eq!(grid.direction_between(b, c), Some(WindowGridDirection::Right));
+            assert_eq!(grid.direction_between(anchor, a), Some(side));
+            assert!(grid.is_valid());
+        }
+    }
+
+    #[test]
+    fn a_sequence_cannot_be_joined_to_its_own_grid() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let mut grid = WindowGridRegistry::default();
+        assert!(grid.link_after(a, b));
+        let before = grid.clone();
+
+        assert!(!grid.link_sequence_to_side(a, &[b, c], WindowGridDirection::Below));
+        assert_eq!(grid.members_for(a), before.members_for(a));
+        assert_eq!(grid.links_for(a), before.links_for(a));
     }
 
     #[test]
