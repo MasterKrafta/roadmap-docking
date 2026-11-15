@@ -1165,9 +1165,9 @@ impl DragHostManager {
             }
 
             if let Some((anchor, insert_before)) = chain_join {
-                // Resolve the new Core FloatingGroup into its persistent host
-                // before linking its HWND. Floating-origin content cannot reuse
-                // the source HWND, so it keeps the regular DragHost handoff.
+                // Resolve the new Core FloatingGroup before linking its HWND.
+                // The DragHost is adopted above when possible; this handoff is
+                // the fallback when an existing persistent host must be retained.
                 self.flush_controller_events(cx);
                 self.join_created_groups_to_chain(
                     id,
