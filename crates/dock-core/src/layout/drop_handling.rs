@@ -399,6 +399,31 @@ impl Layout {
         Ok(DragDropAction::Command(command))
     }
 
+    /// A PanelTab may split away from its own Group only when another tab
+    /// remains in that Group. The resulting Panel becomes a sibling Group above
+    /// or below the source; all other self-edge drops remain no-ops.
+    pub(super) fn can_split_panel_from_own_group_edge(
+        &self,
+        panel_node: NodeId,
+        target: DropTarget,
+    ) -> bool {
+        let DropTarget::GroupEdge {
+            group: target_group,
+            zone: DropZone::Top | DropZone::Bottom,
+        } = target
+        else {
+            return false;
+        };
+        self.tab_parent_index(panel_node)
+            .is_some_and(|(source_group, _)| {
+                source_group == target_group
+                    && matches!(
+                        self.node(source_group),
+                        Some(Node::Tabs(tabs)) if tabs.children.len() > 1
+                    )
+            })
+    }
+
     /// Returns an action for panel drops that leave the dock in the same position.
     ///
     /// Flyout drags still produce their close-on-release command, while ordinary drags
@@ -503,6 +528,7 @@ impl Layout {
         ) = (self.tab_parent_index(panel_node), target)
             && source_group == target_group
             && zone != DropZone::FloatingColumnInsertion
+            && !self.can_split_panel_from_own_group_edge(panel_node, target)
         {
             return Some(if request.handle == DragHandle::FlyoutPanel {
                 DragDropAction::Command(DockCommand::MovePanelFromFlyout { panel, target })
