@@ -3014,10 +3014,15 @@ impl FloatingWindowManager {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             }
-            if !members
-                .iter()
-                .all(|member| self.host_registry.floating_groups.contains_key(member))
-            {
+            if !members.iter().all(|member| {
+                self.panel_window_for_group(*member).is_some_and(|entry| {
+                    entry.visibility == PanelWindowVisibility::Visible
+                        && entry.native_window.is_some()
+                })
+            }) {
+                // A transferred Main DockArea can temporarily keep its new
+                // Floating hosts hidden while DragHost still owns the PanelViews.
+                // Wait for the post-handoff reconcile so DWM reports final frames.
                 continue;
             }
 
