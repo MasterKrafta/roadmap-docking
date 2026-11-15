@@ -26,7 +26,7 @@ impl Layout {
                 self.apply_dock_floating_command(group, target, metrics)
             }
             DockCommand::DockFloatingColumnsToMain { groups, side, index } => {
-                self.apply_dock_floating_columns_to_main_command(groups, side, *index)
+                self.apply_dock_floating_columns_to_main_command(groups, side, *index, metrics)
             }
             DockCommand::DockMainArea { side, target } => {
                 self.apply_dock_main_area_command(side, target, metrics)
@@ -345,7 +345,14 @@ impl Layout {
         groups: &[FloatingGroupId],
         side: &DockSide,
         index: usize,
+        metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
+        if self.profile != crate::Profile::Photoshop {
+            return Err(CommandError::UnsupportedForProfile {
+                profile: self.profile,
+                reason: "docking a complete Floating WindowChain into Main is available only in the Photoshop profile",
+            });
+        }
         if groups.len() < 2 {
             return Err(CommandError::InvalidValue {
                 field: "groups",
@@ -432,7 +439,7 @@ impl Layout {
         let main_width = main_columns
             .iter()
             .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(column.width),
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
                 _ => Err(CommandError::InvalidTarget {
                     reason: "Main horizontal composition must contain only Columns",
                 }),

@@ -730,6 +730,7 @@ pub struct FloatingWindowManager {
     host_registry: CompositionHostRegistry,
     window_chains: WindowChainRegistry,
     pending_window_chain_alignment: HashSet<FloatingGroupId>,
+    window_chain_alignment_scheduled: bool,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
 }
@@ -751,6 +752,7 @@ impl FloatingWindowManager {
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowChainRegistry::default(),
             pending_window_chain_alignment: HashSet::new(),
+            window_chain_alignment_scheduled: false,
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
         }
@@ -2568,7 +2570,7 @@ impl FloatingWindowManager {
             .pending_window_chain_alignment
             .iter()
             .filter(|anchor| {
-                !live_groups.contains(anchor) || !self.window_chains.is_chained(**anchor)
+                !live_groups.contains(*anchor) || !self.window_chains.is_chained(**anchor)
             })
             .copied()
             .collect::<Vec<_>>();
@@ -2854,7 +2856,7 @@ impl FloatingWindowManager {
         self.host_registry.floating_groups = active_hosts.clone();
 
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
-        self.align_pending_window_chains(&groups, cx);
+        self.schedule_pending_window_chain_alignment(cx);
 
         for (panel, entry) in &mut self.registry.windows {
             if entry.host_group.is_none()
@@ -2922,20 +2924,80 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Aligns chains created by FloatMainAreaColumns once every native HWND is ready.
+    /// Defers initial WindowChain frame alignment until the current reconcile update ends.
     ///
-    /// Frame corrections move only window origins; client sizes and Column widths
-    /// remain unchanged. They are adapter geometry and do not create another Undo.
-    fn align_pending_window_chains(
+    /// Reading native frame geometry and then applying the correction in a separate
+    /// controller update avoids re-entering this FloatingWindowManager through its
+    /// LayoutChanged subscription.
+    fn schedule_pending_window_chain_alignment(&mut self, cx: &mut Context<Self>) {
+        if self.window_chain_alignment_scheduled
+            || self.pending_window_chain_alignment.is_empty()
+        {
+            return;
+        }
+        self.window_chain_alignment_scheduled = true;
+        let manager = cx.entity().downgrade();
+        let controller = self.controller.clone();
+
+        cx.spawn(async move |_, app| {
+            app.background_executor()
+                .timer(Duration::from_millis(1))
+                .await;
+
+            let pending = manager.update(app, |manager, manager_cx| {
+                manager.window_chain_alignment_scheduled = false;
+                manager.collect_pending_window_chain_corrections(manager_cx)
+            });
+            let Ok(pending) = pending else {
+                return;
+            };
+
+            for (anchor, corrections) in pending {
+                match controller.update(app, |controller, controller_cx| {
+                    controller.apply_window_chain_position_corrections_in(
+                        &corrections,
+                        controller_cx,
+                    )
+                }) {
+                    Ok(Ok(())) => {
+                        let _ = manager.update(app, |manager, _| {
+                            manager.pending_window_chain_alignment.remove(&anchor);
+                        });
+                    }
+                    Ok(Err(error)) => {
+                        tracing::debug!(
+                            ?anchor,
+                            %error,
+                            "could not commit initial native-frame alignment for the Floating WindowChain"
+                        );
+                    }
+                    Err(error) => {
+                        tracing::debug!(
+                            ?anchor,
+                            %error,
+                            "could not access the controller to align the Floating WindowChain"
+                        );
+                    }
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Calculates seam corrections while the native windows and their frames are available.
+    ///
+    /// This stage only reads the controller. The resulting positions are applied later,
+    /// after this manager update has unwound.
+    fn collect_pending_window_chain_corrections(
         &mut self,
-        groups: &[FloatingGroupSnapshot],
         cx: &mut Context<Self>,
-    ) {
+    ) -> Vec<(FloatingGroupId, Vec<(FloatingGroupId, Point)>)> {
         let anchors = self
             .pending_window_chain_alignment
             .iter()
             .copied()
             .collect::<Vec<_>>();
+        let mut pending = Vec::new();
 
         for anchor in anchors {
             if !self.window_chains.is_chained(anchor) {
@@ -2947,11 +3009,10 @@ impl FloatingWindowManager {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             }
-            let all_members_live = members.iter().all(|member| {
-                groups.iter().any(|snapshot| snapshot.id == *member)
-                    && self.host_registry.floating_groups.contains_key(member)
-            });
-            if !all_members_live {
+            if !members
+                .iter()
+                .all(|member| self.host_registry.floating_groups.contains_key(member))
+            {
                 continue;
             }
 
@@ -2984,6 +3045,11 @@ impl FloatingWindowManager {
                 &frame_geometries,
                 anchor,
             ) else {
+                self.pending_window_chain_alignment.remove(&anchor);
+                tracing::debug!(
+                    ?anchor,
+                    "could not calculate native-frame alignment for the Floating WindowChain"
+                );
                 continue;
             };
             let corrections = aligned_bounds
@@ -2999,34 +3065,12 @@ impl FloatingWindowManager {
 
             if corrections.is_empty() {
                 self.pending_window_chain_alignment.remove(&anchor);
-                continue;
-            }
-
-            match self.controller.update(cx, |controller, controller_cx| {
-                controller.apply_window_chain_position_corrections_in(
-                    &corrections,
-                    controller_cx,
-                )
-            }) {
-                Ok(Ok(())) => {
-                    self.pending_window_chain_alignment.remove(&anchor);
-                }
-                Ok(Err(error)) => {
-                    tracing::debug!(
-                        ?anchor,
-                        %error,
-                        "could not commit initial native-frame alignment for the Floating WindowChain"
-                    );
-                }
-                Err(error) => {
-                    tracing::debug!(
-                        ?anchor,
-                        %error,
-                        "could not access the controller to align the Floating WindowChain"
-                    );
-                }
+            } else {
+                pending.push((anchor, corrections));
             }
         }
+
+        pending
     }
 
     /// Applies Core's floating z-order to native windows and stores each chain's
@@ -4784,6 +4828,7 @@ mod native_z_order_tests {
 mod floating_chain_drop_target_tests {
     use super::floating_chain_drop_target_is_supported;
     use dock_core::{DockSide, DropTarget, DropZone, NodeId};
+    use slotmap::Key;
 
     #[test]
     fn complete_window_chains_only_accept_main_column_insertions_on_main() {
