@@ -105,20 +105,6 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Refreshes GPUI's internal viewport after the native HWND was resized directly.
-    fn refresh_gpui_bounds(
-        &self,
-        cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Floating(window) => window
-                .update(cx, |_, window, app| window.bounds_changed(app))
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => window
-                .update(cx, |_, window, app| window.bounds_changed(app))
-                .map_err(|error| error.to_string()),
-        }
-    }
 }
 
 struct PanelWindowEntry {
@@ -2704,7 +2690,7 @@ impl FloatingWindowManager {
                 }
             }
 
-            self.sync_window_bounds(&mut entry, group, cx);
+            self.sync_window_bounds(&mut entry, group);
             if let Some(areas) = monitor_work_areas.as_deref()
                 && let Some(corrected_bounds) =
                     self.restore_native_window_to_monitor(&mut entry, areas)
@@ -3563,7 +3549,6 @@ impl FloatingWindowManager {
         &self,
         entry: &mut PanelWindowEntry,
         group: &FloatingGroupSnapshot,
-        cx: &mut Context<Self>,
     ) {
         let Some(native_window) = entry.native_window else {
             entry.native_scale_factor = None;
@@ -3633,16 +3618,9 @@ impl FloatingWindowManager {
             return;
         }
 
-        // The HWND has been resized through the native API rather than
-        // Window::resize. Refresh GPUI's cached viewport immediately so an
-        // adopted DragHost does not keep rendering at its pre-promotion height.
-        if let Err(error) = entry.window.refresh_gpui_bounds(cx) {
-            tracing::warn!(
-                ?group.id,
-                %error,
-                "could not refresh GPUI bounds after native floating-window resize"
-            );
-        }
+        // SetWindowPos emits WM_SIZE/WM_MOVE on Windows. GPUI's platform
+        // callbacks already refresh the cached viewport and notify bounds
+        // observers; calling bounds_changed() here would re-enter FloatingHost.
 
         // Moving to another monitor can synchronously update the HWND DPI.
         // Correct the client size after the atomic bounds update if necessary.
