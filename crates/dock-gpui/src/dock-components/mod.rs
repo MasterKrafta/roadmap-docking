@@ -3,7 +3,8 @@ mod group_presentation;
 
 pub(crate) use composition::{DockCompositionView, DockGroupView};
 pub(crate) use group_presentation::{
-    collect_group_presentations, GroupPresentation, PanelTransferPresentation,
+    active_panels_for_groups, collect_group_presentations, GroupPresentation,
+    PanelTransferPresentation,
   };
 
 pub use composition::{
