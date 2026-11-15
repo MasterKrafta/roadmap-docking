@@ -3027,3 +3027,61 @@ fn floating_preferred_heights_are_independent_between_windows() {
             .is_err()
     );
 }
+
+#[test]
+fn floating_group_creation_uses_the_active_tabs_preferred_height() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (compact_panel, compact_node) = builder.panel(
+        PanelKey::new("floating-create-compact").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 60.0),
+            Size::new(220.0, 100.0),
+            None,
+            false,
+        ),
+    );
+    let (_tall_panel, tall_node) = builder.panel(
+        PanelKey::new("floating-create-tall").unwrap(),
+        PanelConstraints::new(
+            Size::new(140.0, 300.0),
+            Size::new(280.0, 420.0),
+            None,
+            false,
+        ),
+    );
+    let tabs_group = builder.tabs(vec![compact_node, tall_node], 0, false);
+    let source_group = builder.tabs(vec![compact_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![tabs_group, source_group],
+        vec![0.7, 0.3],
+    );
+    builder.main_area(DockSide::Right, source_column);
+
+    let mut layout = builder.build();
+    layout
+        .apply(
+            DockCommand::Float {
+                node: tabs_group,
+                bounds: Rect::new(Point::new(140.0, 90.0), Size::new(420.0, 760.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let (_, floating) = layout.floating_groups().next().unwrap();
+    let expected_height = metrics.column_header_height
+        + metrics.min_group_height.max(
+            metrics.header_height.max(metrics.tab_strip_height) + 100.0,
+        );
+    assert_eq!(floating.bounds.size.height, expected_height);
+    assert!(floating.bounds.size.height < 760.0);
+    let rects = layout
+        .compute_floating_rects(layout.floating_groups().next().unwrap().0, &metrics)
+        .unwrap();
+    assert!(rects.auto_collapsed_groups.is_empty());
+    assert!(rects.vertical_overflow.is_empty());
+    assert!(rects.panels.iter().any(|panel| panel.panel == compact_panel));
+}
