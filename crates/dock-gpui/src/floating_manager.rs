@@ -2192,6 +2192,8 @@ impl FloatingWindowManager {
         }
 
         let moving_windows = std::mem::take(&mut self.native_move_windows);
+        let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
+        let mut docked_chain_into_main = false;
         let mut floating_bounds = self.controller.update(cx, |controller, _| {
             controller
                 .layout()
@@ -2232,7 +2234,10 @@ impl FloatingWindowManager {
                         controller_cx,
                     )
                 }) {
-                    Ok(()) => Ok(()),
+                    Ok(()) => {
+                        docked_chain_into_main = true;
+                        Ok(())
+                    }
                     Err(error) => {
                         tracing::warn!(
                             ?state.group,
@@ -2298,6 +2303,18 @@ impl FloatingWindowManager {
             // Docking changes which native windows own visible compositions.
             // Reconcile after the active native-move update unwinds.
             self.schedule_reconcile(cx);
+
+            if docked_chain_into_main {
+                let moving_native_windows = moving_windows
+                    .iter()
+                    .map(|moving| moving.native_window)
+                    .collect();
+                self.schedule_main_activation_after_window_chain_dock(
+                    moving_native_windows,
+                    foreground_at_release,
+                    cx,
+                );
+            }
         } else {
             self.redraw_visible_hosts(cx);
         }
@@ -3268,6 +3285,63 @@ impl FloatingWindowManager {
         }
     }
 
+    /// Restores Main as the foreground window after a native Floating WindowChain
+    /// has been docked into it. Reconciliation first hides the former Floating hosts.
+    ///
+    /// Only reclaim focus while it still belongs to the just-docked chain; a window
+    /// activated by the user after release must remain in the foreground.
+    fn schedule_main_activation_after_window_chain_dock(
+        &self,
+        moving_windows: Vec<NativeWindowId>,
+        foreground_at_release: Option<NativeWindowId>,
+        cx: &mut Context<Self>,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            // schedule_reconcile uses a 1 ms deferred update. Leave enough time
+            // for the removed Floating hosts to be hidden before raising Main.
+            app.background_executor()
+                .timer(Duration::from_millis(32))
+                .await;
+
+            let _ = manager.update(app, |manager, _| {
+                let Some(main_window) = manager.main_native_window else {
+                    return;
+                };
+                let foreground = match manager.native_ops.foreground_window() {
+                    Ok(foreground) => foreground,
+                    Err(error) => {
+                        tracing::debug!(
+                            %error,
+                            "could not inspect foreground window after Floating chain docking"
+                        );
+                        return;
+                    }
+                };
+
+                if foreground == Some(main_window) {
+                    return;
+                }
+                if !chain_drop_allows_main_activation(
+                    foreground,
+                    main_window,
+                    foreground_at_release,
+                    &moving_windows,
+                ) {
+                    return;
+                }
+
+                if let Err(error) = manager.native_ops.activate(main_window) {
+                    tracing::warn!(
+                        %error,
+                        "could not activate Main after Floating WindowChain docking"
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Activates the persistent destination after its temporary DragHost has closed.
     ///
     /// Closing the owned DragHost can restore Main or the window that was
@@ -3979,6 +4053,18 @@ impl FloatingWindowManager {
 }
 
 
+fn chain_drop_allows_main_activation(
+    foreground: Option<NativeWindowId>,
+    main_window: NativeWindowId,
+    foreground_at_release: Option<NativeWindowId>,
+    moving_windows: &[NativeWindowId],
+) -> bool {
+    foreground.is_none()
+        || foreground == Some(main_window)
+        || foreground == foreground_at_release
+        || foreground.is_some_and(|window| moving_windows.contains(&window))
+}
+
 fn handoff_foreground_allows_activation(
     foreground: Option<NativeWindowId>,
     target_window: NativeWindowId,
@@ -4112,7 +4198,10 @@ impl Drop for FloatingWindowManager {
 
 #[cfg(test)]
 mod focus_tests {
-    use super::{handoff_foreground_allows_activation, is_managed_foreground_window};
+    use super::{
+        chain_drop_allows_main_activation, handoff_foreground_allows_activation,
+        is_managed_foreground_window,
+    };
     use platform::NativeWindowId;
 
     fn window(raw: isize) -> NativeWindowId {
@@ -4157,6 +4246,53 @@ mod focus_tests {
             Some(main),
             [Some(floating)],
             Some(drag_host),
+        ));
+    }
+
+    #[test]
+    fn chain_drop_can_activate_main_when_a_member_window_remains_foreground() {
+        let main = window(1);
+        let release_window = window(2);
+        let other_chain_window = window(3);
+
+        assert!(chain_drop_allows_main_activation(
+            Some(release_window),
+            main,
+            Some(release_window),
+            &[release_window, other_chain_window],
+        ));
+        assert!(chain_drop_allows_main_activation(
+            Some(other_chain_window),
+            main,
+            Some(release_window),
+            &[release_window, other_chain_window],
+        ));
+    }
+
+    #[test]
+    fn chain_drop_does_not_steal_focus_from_a_new_external_window() {
+        let main = window(1);
+        let release_window = window(2);
+        let chain_window = window(3);
+        let external = window(4);
+
+        assert!(!chain_drop_allows_main_activation(
+            Some(external),
+            main,
+            Some(release_window),
+            &[release_window, chain_window],
+        ));
+    }
+
+    #[test]
+    fn chain_drop_can_activate_main_when_no_foreground_window_is_reported() {
+        let main = window(1);
+
+        assert!(chain_drop_allows_main_activation(
+            None,
+            main,
+            None,
+            &[],
         ));
     }
 
