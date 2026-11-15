@@ -337,7 +337,9 @@ fn floating_chain_drop_target_is_supported(
                 zone: dock_core::DropZone::Left
                     | dock_core::DropZone::Right
                     | dock_core::DropZone::Top
-                    | dock_core::DropZone::Bottom,
+                    | dock_core::DropZone::Bottom
+                    | dock_core::DropZone::FloatingTop
+                    | dock_core::DropZone::FloatingBottom,
                 ..
             },
         ) => true,
@@ -362,9 +364,13 @@ pub(crate) fn floating_window_chain_direction(
             ..
         } => Some(WindowGridDirection::Above),
         DropTarget::GroupEdge {
-            zone: dock_core::DropZone::Bottom,
+            zone: dock_core::DropZone::Bottom | dock_core::DropZone::FloatingBottom,
             ..
         } => Some(WindowGridDirection::Below),
+        DropTarget::GroupEdge {
+            zone: dock_core::DropZone::FloatingTop,
+            ..
+        } => Some(WindowGridDirection::Above),
         _ => None,
     }
 }
@@ -4211,6 +4217,8 @@ mod floating_window_chain_drop_destination_tests {
         let right = DropTarget::GroupEdge { group, zone: DropZone::Right };
         let top = DropTarget::GroupEdge { group, zone: DropZone::Top };
         let bottom = DropTarget::GroupEdge { group, zone: DropZone::Bottom };
+        let floating_top = DropTarget::GroupEdge { group, zone: DropZone::FloatingTop };
+        let floating_bottom = DropTarget::GroupEdge { group, zone: DropZone::FloatingBottom };
         let center = DropTarget::GroupTabs { group, index: 0 };
 
         for (target, direction) in [
@@ -4218,6 +4226,8 @@ mod floating_window_chain_drop_destination_tests {
             (right, WindowGridDirection::Right),
             (top, WindowGridDirection::Above),
             (bottom, WindowGridDirection::Below),
+            (floating_top, WindowGridDirection::Above),
+            (floating_bottom, WindowGridDirection::Below),
         ] {
             assert_eq!(floating_window_chain_direction(target), Some(direction));
             assert!(floating_chain_drop_target_is_supported(target, false));
