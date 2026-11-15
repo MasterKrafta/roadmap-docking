@@ -128,9 +128,6 @@ impl Layout {
                 }
 
                 let source_column = self.find_owner_column(*group);
-                let target_column = self.find_owner_column(*target_group);
-                let (source_snapshot, target_snapshot) =
-                    self.floating_column_sizing_snapshots(source_column, target_column, metrics)?;
                 let source_index = source_column.and_then(|column| match self.nodes.get(column) {
                     Some(Node::Column(column_data)) if column_data.groups.len() > 1 => column_data
                         .groups
@@ -143,12 +140,6 @@ impl Layout {
                 self.detach_node(*group)?;
                 self.insert_group_edge(*group, *target_group, *zone, Some(*ratio), metrics)?;
                 self.remember_subtree_dock_locations(*group);
-                if let Some(snapshot) = source_snapshot {
-                    self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
-                }
-                if let Some(snapshot) = target_snapshot {
-                    self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
-                }
                 let inverse = source_index.and_then(|(column, original_index)| {
                     let restore_index = if self.find_owner_column(*group) == Some(column) {
                         match self.nodes.get(column) {
@@ -528,7 +519,7 @@ impl Layout {
                 group,
                 column,
                 index,
-            } => self.apply_move_group_command(group, column, index, metrics),
+            } => self.apply_move_group_command(group, column, index),
             DockCommand::MoveGroupToMainColumn { group, side, index } => {
                 self.apply_move_group_to_main_column_command(group, side, index, metrics)
             }
@@ -543,7 +534,6 @@ impl Layout {
         group: &NodeId,
         column: &NodeId,
         index: &usize,
-        metrics: &DockMetrics,
     ) -> Result<CommandApplication, CommandError> {
         match self.nodes.get(*group) {
             Some(Node::Tabs(_)) => {}
@@ -579,10 +569,6 @@ impl Layout {
         {
             return Ok(application);
         }
-        let source_column_id = self.find_owner_column(*group);
-        let (source_snapshot, target_snapshot) =
-            self.floating_column_sizing_snapshots(source_column_id, Some(*column), metrics)?;
-
         let source_column = source_parent.and_then(|parent| match self.nodes.get(parent) {
             Some(Node::Column(column)) if column.groups.len() > 1 => column
                 .groups
@@ -597,12 +583,6 @@ impl Layout {
             index: source_index,
         });
         self.move_group_to_existing_column(*group, *column, *index)?;
-        if let Some(snapshot) = source_snapshot {
-            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
-        }
-        if let Some(snapshot) = target_snapshot {
-            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
-        }
         Ok(CommandApplication {
             actual_value: None,
             inverse,

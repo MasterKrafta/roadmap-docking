@@ -335,24 +335,7 @@ impl Layout {
         let panel_nodes = self.panel_nodes_in_subtree(root);
         let moving_panels = self.panel_ids_in_subtree(root);
         self.validate_panel_ids_allowed_for_target(&moving_panels, *target)?;
-        let target_column = match target {
-            DropTarget::ColumnSlot { column, .. } => Some(*column),
-            DropTarget::Tabs { group, .. }
-            | DropTarget::GroupTabs { group, .. }
-            | DropTarget::GroupEdge { group, .. } => self.find_owner_column(*group),
-            DropTarget::MainColumn { .. }
-            | DropTarget::RailSlot { .. }
-            | DropTarget::FreeArea => None,
-        };
-        let target_snapshot = if let Some(column) = target_column {
-            self.floating_column_sizing_snapshot(column, metrics)?
-        } else {
-            None
-        };
         self.dock_floating_group(*group, *target, metrics)?;
-        if let Some(snapshot) = target_snapshot {
-            self.apply_floating_column_sizing_snapshot(snapshot, metrics)?;
-        }
         for panel_node in panel_nodes {
             self.remember_panel_dock_location(panel_node);
         }

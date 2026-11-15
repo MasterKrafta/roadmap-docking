@@ -5,13 +5,6 @@ use std::collections::HashMap;
 use super::helpers::{normalized_ratios, ratio_issues};
 use super::*;
 
-pub(super) struct FloatingColumnSizingSnapshot {
-    pub(super) floating_group: crate::FloatingGroupId,
-    column: NodeId,
-    bounds: Rect,
-    group_heights: Vec<(NodeId, f32)>,
-}
-
 impl Layout {
     pub(super) fn apply_group_resize_command(
         &mut self,
@@ -961,186 +954,6 @@ impl Layout {
         self.preferred_floating_height_for_root(root, None, metrics)
     }
 
-    /// Captures the actual allocated heights before changing a Floating Column.
-    pub(super) fn floating_column_sizing_snapshot(
-        &self,
-        column_id: NodeId,
-        metrics: &DockMetrics,
-    ) -> Result<Option<FloatingColumnSizingSnapshot>, CommandError> {
-        let Some(root) = self.find_floating_root_containing(column_id) else {
-            return Ok(None);
-        };
-        let Some((floating_group, floating)) = self.floating_groups.iter().find_map(
-            |(id, floating)| {
-                self.dock_areas
-                    .get(floating.area)
-                    .is_some_and(|area| area.root == root)
-                    .then_some((id, *floating))
-            },
-        ) else {
-            return Ok(None);
-        };
-        let Some(Node::Column(column)) = self.nodes.get(column_id) else {
-            return Ok(None);
-        };
-        let Ok(rects) = self.compute_floating_rects(floating_group, metrics) else {
-            return Ok(None);
-        };
-        let Some(group_heights) = column
-            .groups
-            .iter()
-            .map(|group| {
-                rects
-                    .groups
-                    .iter()
-                    .find(|rect| rect.group == *group)
-                    .map(|rect| (*group, rect.rect.size.height))
-            })
-            .collect::<Option<Vec<_>>>()
-        else {
-            return Ok(None);
-        };
-        let bounds = rects
-            .floating_groups
-            .first()
-            .map(|floating| floating.rect)
-            .unwrap_or(floating.bounds);
-
-        Ok(Some(FloatingColumnSizingSnapshot {
-            floating_group,
-            column: column_id,
-            bounds,
-            group_heights,
-        }))
-    }
-
-    /// Captures source and target Floating columns, avoiding duplicate snapshots
-    /// when a transfer happens inside the same native Floating window.
-    pub(super) fn floating_column_sizing_snapshots(
-        &self,
-        source_column: Option<NodeId>,
-        target_column: Option<NodeId>,
-        metrics: &DockMetrics,
-    ) -> Result<
-        (
-            Option<FloatingColumnSizingSnapshot>,
-            Option<FloatingColumnSizingSnapshot>,
-        ),
-        CommandError,
-    > {
-        let target_snapshot = if let Some(column) = target_column {
-            self.floating_column_sizing_snapshot(column, metrics)?
-        } else {
-            None
-        };
-        let mut source_snapshot = if let Some(column) = source_column {
-            self.floating_column_sizing_snapshot(column, metrics)?
-        } else {
-            None
-        };
-        if source_snapshot
-            .as_ref()
-            .zip(target_snapshot.as_ref())
-            .is_some_and(|(source, target)| {
-                source.floating_group == target.floating_group
-            })
-        {
-            source_snapshot = None;
-        }
-        Ok((source_snapshot, target_snapshot))
-    }
-
-    /// Restores existing Group heights and gives newly inserted Groups their
-    /// preferred height, growing the owning Floating window when necessary.
-    pub(super) fn apply_floating_column_sizing_snapshot(
-        &mut self,
-        snapshot: FloatingColumnSizingSnapshot,
-        metrics: &DockMetrics,
-    ) -> Result<(), CommandError> {
-        let Some(floating) = self.floating_groups.get(snapshot.floating_group).copied() else {
-            return Ok(());
-        };
-        let Some(root) = self.find_floating_root_containing(snapshot.column) else {
-            return Ok(());
-        };
-        let current_groups = match self.nodes.get(snapshot.column) {
-            Some(Node::Column(column)) => column.groups.clone(),
-            _ => return Ok(()),
-        };
-        if current_groups.is_empty() {
-            return Ok(());
-        }
-
-        let has_new_groups = current_groups.iter().any(|group| {
-            !snapshot
-                .group_heights
-                .iter()
-                .any(|(previous_group, _)| previous_group == group)
-        });
-        let has_removed_groups = snapshot
-            .group_heights
-            .iter()
-            .any(|(previous_group, _)| !current_groups.contains(previous_group));
-
-        // In a horizontal Floating composition, removing a Group from one
-        // Column must not shrink the shared window and compress sibling Columns.
-        if has_removed_groups && !has_new_groups && root != snapshot.column {
-            return Ok(());
-        }
-
-        let mut desired_heights = Vec::with_capacity(current_groups.len());
-        for group in &current_groups {
-            let height = if let Some((_, height)) = snapshot
-                .group_heights
-                .iter()
-                .find(|(previous_group, _)| previous_group == group)
-            {
-                *height
-            } else {
-                self.preferred_floating_node_height(*group, root, None, metrics)?
-            };
-            desired_heights.push(height);
-        }
-
-        let old_content_height = snapshot
-            .group_heights
-            .iter()
-            .map(|(_, height)| *height)
-            .sum::<f32>()
-            + metrics.splitter_thickness
-                * snapshot.group_heights.len().saturating_sub(1) as f32;
-        let new_content_height = desired_heights.iter().sum::<f32>()
-            + metrics.splitter_thickness * current_groups.len().saturating_sub(1) as f32;
-        if (old_content_height - new_content_height).abs() <= 1.0e-3
-            && current_groups.len() == snapshot.group_heights.len()
-        {
-            return Ok(());
-        }
-
-        let minimum_height = self.minimum_floating_size(root, metrics)?.height;
-        let new_height = (snapshot.bounds.size.height - old_content_height + new_content_height)
-            .max(minimum_height);
-        if !new_height.is_finite() || new_height <= 0.0 {
-            return Err(CommandError::InvalidValue {
-                field: "bounds",
-                reason: "adjusted Floating Column height must be finite and positive",
-            });
-        }
-
-        let ratios = self.group_ratios_from_heights(snapshot.column, &desired_heights)?;
-        if let Some(Node::Column(column)) = self.nodes.get_mut(snapshot.column) {
-            column.group_ratios = ratios;
-        }
-        if let Some(value) = self.floating_groups.get_mut(snapshot.floating_group) {
-            value.bounds = Rect::new(
-                snapshot.bounds.origin,
-                Size::new(snapshot.bounds.size.width, new_height),
-            );
-        }
-        let _ = floating;
-        Ok(())
-    }
-
     fn preferred_floating_height_for_root(
         &self,
         root: NodeId,
@@ -1189,7 +1002,7 @@ impl Layout {
         }
     }
 
-    pub(super) fn preferred_floating_node_height(
+    fn preferred_floating_node_height(
         &self,
         node_id: NodeId,
         floating_root: NodeId,
