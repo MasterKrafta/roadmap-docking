@@ -537,6 +537,11 @@ impl WindowChainRegistry {
         self.chains.get(&chain_id).map(Vec::as_slice)
     }
 
+    /// Returns true only for a native window that belongs to a multi-window chain.
+    fn is_chained(&self, group: FloatingGroupId) -> bool {
+        self.chain_by_group.contains_key(&group)
+    }
+
     /// Returns a chain's ordered members, treating an unlinked window as a
     /// one-member chain for move operations.
     fn members_for(&self, group: FloatingGroupId) -> Vec<FloatingGroupId> {
@@ -1560,6 +1565,22 @@ impl FloatingWindowManager {
         let client_size = self.native_ops.client_size(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
+    }
+
+    /// A single-tab window moves natively only when it is not joined to other windows.
+    ///
+    /// For a chained window, tab and group gestures must stay on the content-drag
+    /// path so they can detach into a separate Floating window.
+    pub(crate) fn begin_single_tab_window_move(
+        &mut self,
+        group: FloatingGroupId,
+        pointer: Point,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.window_chains.is_chained(group) {
+            return false;
+        }
+        self.begin_existing_window_move(group, pointer, cx)
     }
 
     /// Starts a thresholded native move from the shared floating DockAreaHeader.
@@ -4004,6 +4025,21 @@ mod window_chain_registry_tests {
         assert!(chains.link_before(b, d));
         assert_eq!(chains.members_for(a), vec![a, d, b, c]);
         assert_eq!(chains.members_for(c), vec![a, d, b, c]);
+    }
+
+    #[test]
+    fn only_linked_windows_are_marked_as_chained() {
+        let [a, b, standalone] = groups(3).try_into().expect("three group ids");
+        let mut chains = WindowChainRegistry::default();
+
+        assert!(!chains.is_chained(a));
+        assert!(chains.link_after(a, b));
+        assert!(chains.is_chained(a));
+        assert!(chains.is_chained(b));
+        assert!(!chains.is_chained(standalone));
+
+        assert!(chains.remove_member(a));
+        assert!(!chains.is_chained(b));
     }
 
     #[test]
