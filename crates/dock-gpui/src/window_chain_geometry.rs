@@ -85,6 +85,26 @@ impl NativeFrameGeometry {
         })
     }
 
+    /// Recalculates the expected native outer size for a requested Core client
+    /// size while preserving the measured non-client insets and this HWND's DPI.
+    pub(crate) fn with_logical_client_size(mut self, logical_size: Size) -> Option<Self> {
+        if !logical_size.width.is_finite()
+            || logical_size.width <= 0.0
+            || !logical_size.height.is_finite()
+            || logical_size.height <= 0.0
+        {
+            return None;
+        }
+
+        self.client_width = logical_size.width * self.scale_factor;
+        self.client_height = logical_size.height * self.scale_factor;
+        self.outer_width =
+            self.client_left_inset + self.client_width + self.client_right_inset;
+        self.outer_height =
+            self.client_top_inset + self.client_height + self.client_bottom_inset;
+        self.is_valid().then_some(self)
+    }
+
     /// Fallback for a not-yet-created HWND. Its future client is treated as a
     /// frame-less window; reconciliation replaces this estimate with native data.
     pub(crate) fn without_frame_size(
@@ -739,6 +759,47 @@ mod window_grid_bounds_tests {
     }
 
     #[test]
+    fn planned_client_size_uses_each_hwnd_scale_and_preserves_frame_insets() {
+        use platform::{PhysicalPoint, PhysicalRect, PhysicalSize};
+
+        let measured = NativeFrameGeometry::from_native_rects(
+            PhysicalRect {
+                left: 100,
+                top: 200,
+                right: 640,
+                bottom: 720,
+            },
+            PhysicalRect {
+                left: 106,
+                top: 200,
+                right: 634,
+                bottom: 720,
+            },
+            PhysicalPoint { x: 108, y: 230 },
+            PhysicalSize {
+                width: 524,
+                height: 480,
+            },
+            1.5,
+        )
+        .expect("consistent native frame");
+
+        let planned = measured
+            .with_logical_client_size(Size::new(240.0, 300.0))
+            .expect("valid planned client size");
+        assert_eq!(planned.client_width, 360.0);
+        assert_eq!(planned.client_height, 450.0);
+        assert_eq!(planned.outer_width, 376.0);
+        assert_eq!(planned.outer_height, 490.0);
+        assert_eq!(planned.visible_left_inset, 6.0);
+        assert_eq!(planned.visible_right_inset, 6.0);
+        assert_eq!(planned.client_left_inset, 8.0);
+        assert_eq!(planned.client_top_inset, 30.0);
+        assert_eq!(planned.client_right_inset, 8.0);
+        assert_eq!(planned.client_bottom_inset, 10.0);
+    }
+
+    #[test]
     fn places_a_vertical_stack_with_header_overlap_and_preserves_anchor() {
         let [a, b, c] = groups(3).try_into().expect("three group ids");
         let input = vec![
@@ -953,7 +1014,6 @@ mod window_grid_bounds_tests {
             "the target width must not be expanded to satisfy the moving window"
         );
     }
-}
 }
 
 #[cfg(test)]
