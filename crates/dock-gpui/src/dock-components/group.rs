@@ -13,7 +13,8 @@ pub use group_menu_button::GroupMenuButton;
 pub use panel_content::PanelContent;
 
 use dock_core::{
-    DockCommand, DockMetrics, GroupRect, NodeId, Point, TabHeaderRect, TabOverflowRect, TabStripRect,
+    DockCommand, DockMetrics, GroupRect, NodeId, PanelId, PanelRect, Point, Rect, Size,
+    TabHeaderRect, TabOverflowRect, TabStripRect,
 };
 use gpui::{
     Entity, IntoElement, ParentElement, StatefulInteractiveElement, Styled, div,
@@ -25,7 +26,11 @@ use super::tab::DockTab;
 
 use crate::{
     DockController,
-    components::{context_menu::GroupMenuToggle, tab_overflow::TabOverflow},
+    components::{
+        context_menu::GroupMenuToggle,
+        panel_host::PanelHost,
+        tab_overflow::TabOverflow,
+    },
     dock_components::GroupPresentation,
 };
 
@@ -86,6 +91,75 @@ impl DockGroupView {
                         Some(panel_view),
                     )),
             )
+    }
+
+    /// Renders one detached tab through the same Core Group and PanelHost
+    /// components used by Main, Floating and Group DragHost surfaces.
+    ///
+    /// A PanelTab DragHost uses the panel's preferred content size rather than
+    /// the original Group rectangle, so its transient single-tab geometry is
+    /// derived from the shared DockMetrics and the new host's content size.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_detached_tab(
+        group_id: NodeId,
+        panel: PanelId,
+        content_size: Size,
+        presentation: &GroupPresentation,
+        panel_view: gpui::AnyView,
+        metrics: DockMetrics,
+        controller: Entity<DockController>,
+        theme: Theme,
+        toggle_menu: GroupMenuToggle,
+    ) -> impl IntoElement {
+        let group_origin = Point::new(0.0, metrics.column_header_height);
+        let group_rect = Rect::new(group_origin, content_size);
+        let group = GroupRect::new(group_id, group_rect);
+
+        // Match dock-core's layout_tabs(column_group = true) geometry for a
+        // root Floating Group: the strip starts at the Group top, leaves room
+        // for the Group grip and menu, and the Panel starts below that strip.
+        let strip_height = metrics
+            .header_height
+            .max(metrics.tab_strip_height)
+            .min(content_size.height);
+        let control_width = metrics
+            .group_control_button_width
+            .min(content_size.width / 3.0)
+            .max(1.0);
+        let strip_width = (content_size.width - 2.0 * control_width).max(0.0);
+        let strip_rect = Rect::new(group_origin, Size::new(strip_width, strip_height));
+        let strip = TabStripRect::new(group_id, strip_rect);
+        let header = TabHeaderRect::new(group_id, panel, 0, strip_rect);
+        let panel_rect = Rect::new(
+            Point::new(group_origin.x, group_origin.y + strip_height),
+            Size::new(
+                content_size.width,
+                (content_size.height - strip_height).max(0.0),
+            ),
+        );
+
+        div()
+            .relative()
+            .size_full()
+            .child(Self::render_core(
+                None,
+                group,
+                strip,
+                &[header],
+                None,
+                presentation,
+                Point::ZERO,
+                metrics,
+                0.0,
+                controller,
+                theme,
+                toggle_menu,
+            ))
+            .child(PanelHost::render(
+                vec![(PanelRect::new(panel, panel_rect), Some(panel_view))],
+                Point::ZERO,
+                theme,
+            ))
     }
 
     /// Renders a Core Group with its complete tab strip and group controls.
