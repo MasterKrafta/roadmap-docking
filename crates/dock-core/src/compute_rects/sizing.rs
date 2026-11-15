@@ -197,6 +197,33 @@ pub(super) fn preferred_width(
     }
 }
 
+/// Computes minimum geometry for one Floating subtree, using only active-tab
+/// content heights while preserving the regular minimum-width contract.
+pub(super) fn minimum_floating_node_size(
+    layout: &Layout,
+    id: NodeId,
+    floating_root: NodeId,
+    metrics: &DockMetrics,
+    minimum_sizes: &mut HashMap<NodeId, Size>,
+) -> Result<Size, ComputeRectsError> {
+    #[cfg(test)]
+    visit_probe::record_minimum_node_size_helper(id);
+    layout
+        .minimum_floating_node_size_with_cache(id, floating_root, metrics, minimum_sizes)
+        .map_err(|error| match error {
+            crate::CommandError::InvalidValue {
+                field: "size",
+                reason,
+            } if reason.contains("overflow") => {
+                ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow)
+            }
+            crate::CommandError::InvalidValue { field: "size", .. } => {
+                ComputeRectsError::InvalidLayoutState
+            }
+            _ => ComputeRectsError::InvalidLayoutState,
+        })
+}
+
 /// Computes the minimum geometry of a node, including panel-content constraints
 /// and the chrome consumed by expanded Tabs groups.
 pub(super) fn minimum_node_size(
