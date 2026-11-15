@@ -906,7 +906,7 @@ impl DragHostManager {
 
             let needs_floating_bounds = target == Some(DropTarget::FreeArea)
                 || floating_window_chain_target(
-                    handle,
+                    Some(handle),
                     target,
                     target_window.and_then(DockingWindowAtPoint::role),
                 )
