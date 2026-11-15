@@ -602,6 +602,15 @@ mod tests {
             assert!(grid.link_to_side(a, c, side));
             assert_eq!(grid.direction_between(a, b), Some(side));
             assert_eq!(grid.direction_between(a, c), Some(side));
+            assert_eq!(
+                grid.members_for(a),
+                if matches!(side, WindowGridDirection::Left | WindowGridDirection::Above) {
+                    vec![c, b, a]
+                } else {
+                    vec![a, b, c]
+                },
+                "same-side members are ordered from nearest to farthest in the physical lane",
+            );
             assert!(grid.is_valid());
         }
     }
