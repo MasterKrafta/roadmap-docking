@@ -394,6 +394,7 @@ impl DragHostManager {
                         } else {
                             0.0
                         },
+                        drag_content_size: logical_size,
                         handoff_placeholder: false,
                         floating_host,
                         floating_group_active: false,
@@ -1724,6 +1725,7 @@ pub(crate) struct DragHostSurface {
     dock_area: Option<DockSide>,
     reserve_composition_header: bool,
     composition_header_width: f32,
+    drag_content_size: Size,
     handoff_placeholder: bool,
     floating_host: Option<Entity<FloatingHost>>,
     floating_group_active: bool,
@@ -2190,7 +2192,7 @@ impl Render for DragHostSurface {
                 ));
             }
         } else if let Some(panel) = self.panel
-            && let Some((view, title, metrics)) = self.controller.update(cx, |controller, _| {
+            && let Some((view, title, metrics, detached_group)) = self.controller.update(cx, |controller, _| {
                 let view = controller.panel_view_for_drag(panel)?;
                 let title = controller
                     .layout()
@@ -2198,18 +2200,47 @@ impl Render for DragHostSurface {
                     .and_then(|instance| controller.registry().get(&instance.key))
                     .map(|descriptor| descriptor.title().to_string())
                     .unwrap_or_else(|| format!("Panel {panel:?}"));
-                Some((view, title, controller.metrics()))
+                let detached_group = if self.reserve_composition_header {
+                    let group = controller.layout().nodes().find_map(|(id, node)| {
+                        let Node::Tabs(tabs) = node else {
+                            return None;
+                        };
+                        tabs.children
+                            .iter()
+                            .any(|child| {
+                                matches!(
+                                    controller.layout().node(*child),
+                                    Some(Node::Panel(value)) if value.panel_id == panel
+                                )
+                            })
+                            .then_some(id)
+                    });
+                    group.and_then(|group| {
+                        let mut presentation = collect_group_presentations(
+                            controller.layout(),
+                            controller.registry(),
+                            &HashSet::from([group]),
+                            None,
+                        )
+                        .remove(&group)?;
+                        presentation.tabs.retain(|tab| tab.panel == panel);
+                        let tab = presentation.tabs.first_mut()?;
+                        tab.index = 0;
+                        presentation.active_panel = Some(panel);
+                        presentation.collapsed = false;
+                        presentation.model_collapsed = false;
+                        presentation.auto_collapsed = false;
+                        presentation.auto_expanded = false;
+                        Some((group, presentation))
+                    })
+                } else {
+                    None
+                };
+                Some((view, title, controller.metrics(), detached_group))
             })
         {
-            // A detached tab keeps the same composition header visible during
-            // the drag and after a FreeArea drop. The DragHost does not attach
-            // pointer actions to this preview header, so it cannot start a second drag.
-            let mut tab_surface = div()
-                .size_full()
-                .min_w_0()
-                .min_h_0()
-                .flex()
-                .flex_col();
+            // A detached tab reserves the same CompositionHeader as a floating
+            // composition, then uses the shared Core Group and PanelHost renderer.
             if self.reserve_composition_header {
                 root = root.child(DockCompositionView::render_header(
                     format!("drag-tab-composition-header-{panel:?}"),
@@ -2241,20 +2272,46 @@ impl Render for DragHostSurface {
                             metrics.control_icon_size,
                         )),
                 );
-                tab_surface = tab_surface.child(
-                    div()
-                        .w_full()
-                        .h(px(metrics.column_header_height))
-                        .flex_none(),
-                );
             }
-            root = root.child(tab_surface.child(DockGroupView::render_active(
-                format!("drag-tab-group-{panel:?}"),
-                title,
-                view,
-                metrics,
-                self.theme,
-            )));
+
+            if let Some((group, presentation)) = detached_group {
+                let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
+                root = root.child(DockGroupView::render_detached_tab(
+                    group,
+                    panel,
+                    self.drag_content_size,
+                    &presentation,
+                    view,
+                    metrics,
+                    self.controller.clone(),
+                    self.theme,
+                    toggle_menu,
+                ));
+            } else {
+                // Flyout panels have no source Tabs Group. Keep their existing
+                // standalone preview; PanelTab drags take the Core renderer above.
+                let mut tab_surface = div()
+                    .size_full()
+                    .min_w_0()
+                    .min_h_0()
+                    .flex()
+                    .flex_col();
+                if self.reserve_composition_header {
+                    tab_surface = tab_surface.child(
+                        div()
+                            .w_full()
+                            .h(px(metrics.column_header_height))
+                            .flex_none(),
+                    );
+                }
+                root = root.child(tab_surface.child(DockGroupView::render_active(
+                    format!("drag-tab-group-{panel:?}"),
+                    title,
+                    view,
+                    metrics,
+                    self.theme,
+                )));
+            }
         }
 
         root
