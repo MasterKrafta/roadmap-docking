@@ -755,6 +755,67 @@ fn extracting_one_panel_from_a_floating_group_returns_its_new_window_id() {
 }
 
 #[test]
+fn simple_floating_composition_can_be_torn_off_from_panel_or_group_handle() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+    let (panel, panel_node) =
+        builder.panel(key("simple-floating-tearoff-panel"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![group],
+        vec![1.0],
+    );
+    let source_float = builder.floating_group(column, bounds(40.0, 50.0), 1);
+    let mut layout = builder.build();
+    let new_bounds = bounds(520.0, 80.0);
+
+    let panel_request = DragDropRequest {
+        payload: DragPayload::Panel { panel },
+        handle: DragHandle::PanelTab,
+        origin: Point::new(12.0, 8.0),
+        point: Point::new(800.0, 240.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(new_bounds),
+    };
+    let group_request = DragDropRequest {
+        payload: DragPayload::Group { group },
+        handle: DragHandle::GroupGrip,
+        origin: Point::new(12.0, 8.0),
+        point: Point::new(800.0, 240.0),
+        target: Some(DropTarget::FreeArea),
+        floating_bounds: Some(new_bounds),
+    };
+    let expected = DragDropAction::Command(DockCommand::Float {
+        node: column,
+        bounds: new_bounds,
+    });
+
+    assert_eq!(layout.resolve_drag_drop(&panel_request, &metrics).unwrap(), expected);
+    assert_eq!(layout.resolve_drag_drop(&group_request, &metrics).unwrap(), expected);
+
+    let DragDropAction::Command(command) =
+        layout.resolve_drag_drop(&group_request, &metrics).unwrap()
+    else {
+        panic!("a simple Floating Group drag to FreeArea must create a new FloatingGroup");
+    };
+    let outcome = layout.apply(command, &metrics).unwrap();
+    let new_float = match outcome.actual_value {
+        Some(crate::CommandValue::FloatingGroup(group)) => group,
+        other => panic!("Float must return the new FloatingGroupId, got {other:?}"),
+    };
+
+    assert_ne!(new_float, source_float);
+    assert!(layout.floating_group(source_float).is_none());
+    assert_eq!(
+        layout.dock_area(layout.floating_group(new_float).unwrap().area).unwrap().root,
+        column
+    );
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn photoshop_main_dock_area_can_float_all_columns_as_one_composition() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);

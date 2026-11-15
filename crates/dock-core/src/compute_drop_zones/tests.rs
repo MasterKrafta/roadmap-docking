@@ -725,6 +725,77 @@ fn allowed_areas_hide_disallowed_main_dock_targets_but_keep_floating_and_free_ar
     assert!(layout.floating_group(float_id).is_some());
 }
 #[test]
+fn floating_simple_composition_content_can_tear_off_to_the_main_canvas() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (source_panel, source_node) =
+        builder.panel(key("floating-simple-tearoff-source"), constraints());
+    let source_group = builder.tabs(vec![source_node], 0, false);
+    let source_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![source_group],
+        vec![1.0],
+    );
+    builder.floating_group(
+        source_column,
+        Rect::new(Point::new(420.0, 100.0), Size::new(420.0, 320.0)),
+        1,
+    );
+
+    let (_, main_panel_node) =
+        builder.panel(key("floating-simple-tearoff-main-target"), constraints());
+    let main_group = builder.tabs(vec![main_panel_node], 0, false);
+    let main_column = builder.column(
+        metrics.default_column_width,
+        ColumnMode::Expanded,
+        vec![main_group],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, main_column);
+
+    let layout = builder.build();
+    let rects = layout.compute_rects(viewport(), &metrics).unwrap();
+    let canvas = rects.canvas.expect("the Main layout should expose its free Canvas");
+    let point = Point::new(
+        canvas.origin.x + canvas.size.width * 0.5,
+        canvas.origin.y + canvas.size.height * 0.5,
+    );
+
+    for source in [
+        DropSource::Panel { panel: source_panel },
+        DropSource::Group { group: source_group },
+    ] {
+        let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
+        assert!(
+            zones.iter().any(|zone| {
+                zone.zone == DropZone::FreeArea && zone.target == DropTarget::FreeArea
+            }),
+            "content dragged out of a simple Floating composition must expose FreeArea on Main"
+        );
+        assert_eq!(
+            layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
+            Some(DropTarget::FreeArea)
+        );
+    }
+
+    let composition_zones = layout
+        .compute_drop_zones(
+            DropSource::Composition { root: source_column },
+            &rects,
+            &metrics,
+        )
+        .unwrap();
+    assert!(
+        !composition_zones
+            .iter()
+            .any(|zone| zone.target == DropTarget::FreeArea),
+        "the Floating composition itself must keep its existing title/capture semantics"
+    );
+}
+
+#[test]
 fn command_application_revalidates_allowed_area_even_for_forged_targets() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);

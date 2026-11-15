@@ -118,7 +118,9 @@ impl Layout {
         }
 
         if matches!(target, DropTarget::FreeArea) {
-            if self.find_floating_root_containing(column).is_some() {
+            if request.handle == DragHandle::FloatingCapture
+                && self.find_floating_root_containing(column).is_some()
+            {
                 return Err(CommandError::InvalidTarget {
                     reason: "a Floating composition cannot be floated into its own free area",
                 });

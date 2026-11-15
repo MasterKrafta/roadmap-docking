@@ -28,6 +28,7 @@ struct DropZoneBuildContext<'a> {
     source: DropSource,
     source_root: NodeId,
     source_panels: &'a [PanelId],
+    content_source_can_tear_off: bool,
     tree_index: &'a DropZoneTreeIndex,
     rects: &'a LayoutRects,
     metrics: &'a DockMetrics,
@@ -112,6 +113,8 @@ impl Layout {
         viewport
             .validate_non_empty()
             .map_err(ComputeRectsError::Geometry)?;
+        let content_source_can_tear_off =
+            matches!(source, DropSource::Panel { .. } | DropSource::Group { .. });
         let initial_root = source_root(self, source, tree_index)?;
         let simple_composition = self.simple_composition_root_for_source(source);
         let source = if let Some(root) = simple_composition {
@@ -179,6 +182,7 @@ impl Layout {
             source,
             source_root,
             source_panels: &source_panels,
+            content_source_can_tear_off,
             tree_index,
             rects,
             metrics,
@@ -442,6 +446,7 @@ impl Layout {
         let DropZoneBuildContext {
             source_root,
             source_panels,
+            content_source_can_tear_off,
             rects,
             metrics,
             viewport,
@@ -492,7 +497,7 @@ impl Layout {
 
         // A free Canvas is a Float command hint, never a fake tab/column destination.
         if source_allows(self, source_panels, AllowedArea::FLOATING)
-            && !source_is_floating_root(self, source_root)
+            && (content_source_can_tear_off || !source_is_floating_root(self, source_root))
             && let Some(canvas) = rects.canvas
         {
             push_zone(zones, DropTarget::FreeArea, DropZone::FreeArea, canvas)?;
