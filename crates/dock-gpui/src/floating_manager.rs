@@ -2972,6 +2972,7 @@ impl FloatingWindowManager {
         &self,
         group: FloatingGroupId,
         closing_drag_host: NativeWindowId,
+        foreground_at_release: Option<NativeWindowId>,
     ) -> bool {
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
@@ -2986,15 +2987,8 @@ impl FloatingWindowManager {
             return false;
         };
 
-        match self.native_ops.foreground_window() {
-            Ok(Some(foreground)) if foreground == native_window => return true,
-            Ok(Some(foreground)) if foreground == closing_drag_host => return false,
-            Ok(Some(foreground)) if Some(foreground) != self.main_native_window => {
-                // Respect a different app window or another FloatingHost that
-                // the user activated after releasing the drag.
-                return true;
-            }
-            Ok(_) => {}
+        let foreground = match self.native_ops.foreground_window() {
+            Ok(foreground) => foreground,
             Err(error) => {
                 tracing::debug!(
                     ?group,
@@ -3003,6 +2997,23 @@ impl FloatingWindowManager {
                 );
                 return false;
             }
+        };
+
+        if foreground == Some(native_window) {
+            return true;
+        }
+        if foreground == Some(closing_drag_host) {
+            return false;
+        }
+        if !handoff_foreground_allows_activation(
+            foreground,
+            native_window,
+            self.main_native_window,
+            foreground_at_release,
+        ) {
+            // A different window became foreground after mouse release. Respect
+            // that explicit user action instead of reclaiming focus.
+            return true;
         }
 
         if let Err(error) = self.native_ops.activate(native_window) {
@@ -3663,6 +3674,18 @@ impl FloatingWindowManager {
 }
 
 
+fn handoff_foreground_allows_activation(
+    foreground: Option<NativeWindowId>,
+    target_window: NativeWindowId,
+    main_window: Option<NativeWindowId>,
+    foreground_at_release: Option<NativeWindowId>,
+) -> bool {
+    foreground.is_none()
+        || foreground == Some(target_window)
+        || foreground == main_window
+        || foreground == foreground_at_release
+}
+
 fn is_managed_foreground_window(
     foreground: NativeWindowId,
     main_window: Option<NativeWindowId>,
@@ -3784,7 +3807,7 @@ impl Drop for FloatingWindowManager {
 
 #[cfg(test)]
 mod focus_tests {
-    use super::is_managed_foreground_window;
+    use super::{handoff_foreground_allows_activation, is_managed_foreground_window};
     use platform::NativeWindowId;
 
     fn window(raw: isize) -> NativeWindowId {
@@ -3829,6 +3852,61 @@ mod focus_tests {
             Some(main),
             [Some(floating)],
             Some(drag_host),
+        ));
+    }
+
+    #[test]
+    fn handoff_can_activate_when_the_release_window_remains_foreground() {
+        let main = window(1);
+        let release_window = window(2);
+        let target = window(3);
+
+        assert!(handoff_foreground_allows_activation(
+            Some(release_window),
+            target,
+            Some(main),
+            Some(release_window),
+        ));
+    }
+
+    #[test]
+    fn handoff_can_activate_when_windows_restores_main_foreground() {
+        let main = window(1);
+        let target = window(2);
+
+        assert!(handoff_foreground_allows_activation(
+            Some(main),
+            target,
+            Some(main),
+            None,
+        ));
+    }
+
+    #[test]
+    fn handoff_does_not_steal_focus_from_a_window_activated_after_release() {
+        let main = window(1);
+        let release_window = window(2);
+        let target = window(3);
+        let newly_activated = window(4);
+
+        assert!(!handoff_foreground_allows_activation(
+            Some(newly_activated),
+            target,
+            Some(main),
+            Some(release_window),
+        ));
+    }
+
+    #[test]
+    fn handoff_can_activate_when_no_foreground_window_is_reported() {
+        let main = window(1);
+        let target = window(2);
+
+        assert!(handoff_foreground_allows_activation(
+            None,
+            target,
+            Some(main),
+            None,
         ));
     }
 }
