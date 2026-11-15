@@ -14,7 +14,8 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide, DragDropAction,
+    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, ComputeRectsError, DockMetrics, DockSide,
+    DragDropAction,
     DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
     PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
     VerticalOverflow,
