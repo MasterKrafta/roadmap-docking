@@ -1,8 +1,8 @@
 //! Pure geometry and ordering helpers for native Floating window grids.
 //!
 //! This module intentionally has no GPUI Entity or NativeWindowOps access.
-//! The initial extraction preserves the existing horizontal calculations;
-//! vertical placement and grid-wide resize geometry are added in later stages.
+//! Native measurements are passed in as physical frame/client geometry, while
+//! DockCore bounds retain their mixed physical-origin/logical-size convention.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -691,6 +691,45 @@ mod window_grid_bounds_tests {
 
     fn link(from: FloatingGroupId, to: FloatingGroupId, direction: WindowGridDirection) -> WindowGridLink {
         WindowGridLink { from, to, direction }
+    }
+
+    #[test]
+    fn native_frame_measurements_capture_client_insets_and_monitor_scale() {
+        use platform::{PhysicalPoint, PhysicalRect, PhysicalSize};
+
+        let frame = NativeFrameGeometry::from_native_rects(
+            PhysicalRect {
+                left: 100,
+                top: 200,
+                right: 640,
+                bottom: 720,
+            },
+            PhysicalRect {
+                left: 106,
+                top: 200,
+                right: 634,
+                bottom: 720,
+            },
+            PhysicalPoint { x: 108, y: 230 },
+            PhysicalSize {
+                width: 524,
+                height: 480,
+            },
+            1.5,
+        )
+        .expect("consistent native outer/client rectangles");
+
+        assert_eq!(frame.outer_width, 540.0);
+        assert_eq!(frame.outer_height, 520.0);
+        assert_eq!(frame.visible_left_inset, 6.0);
+        assert_eq!(frame.visible_right_inset, 6.0);
+        assert_eq!(frame.client_left_inset, 8.0);
+        assert_eq!(frame.client_top_inset, 30.0);
+        assert_eq!(frame.client_right_inset, 8.0);
+        assert_eq!(frame.client_bottom_inset, 10.0);
+        assert_eq!(frame.client_width, 524.0);
+        assert_eq!(frame.client_height, 480.0);
+        assert_eq!(frame.scale_factor, 1.5);
     }
 
     #[test]
