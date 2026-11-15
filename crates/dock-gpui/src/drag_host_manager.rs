@@ -1243,7 +1243,7 @@ impl DragHostManager {
         id: DragHostId,
         anchor: FloatingGroupId,
         groups: &[FloatingGroupId],
-        direction: bool,
+        direction: WindowGridDirection,
         cx: &mut Context<Self>,
     ) {
         if groups.is_empty() {
