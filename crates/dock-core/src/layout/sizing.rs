@@ -719,6 +719,116 @@ impl Layout {
         Ok(size)
     }
 
+    /// Computes a node's minimum geometry for a Floating composition.
+    ///
+    /// Unlike Main geometry, expanded Tabs reserve only the active panel's
+    /// content height. Their width still accommodates every tab, and all Dock
+    /// chrome remains part of the calculated group size.
+    pub(crate) fn minimum_floating_node_size_with_cache(
+        &self,
+        node_id: NodeId,
+        floating_root: NodeId,
+        metrics: &DockMetrics,
+        cache: &mut HashMap<NodeId, Size>,
+    ) -> Result<Size, CommandError> {
+        if let Some(size) = cache.get(&node_id).copied() {
+            return Ok(size);
+        }
+
+        let node = self
+            .nodes
+            .get(node_id)
+            .ok_or(CommandError::MissingNode { node: node_id })?;
+        let size = match node {
+            Node::Panel(panel) => self
+                .panel_instances
+                .get(panel.panel_id)
+                .ok_or(CommandError::MissingPanel {
+                    panel: panel.panel_id,
+                })?
+                .constraints
+                .min_size,
+            Node::Tabs(tabs) if tabs.collapsed => {
+                Size::new(0.0, metrics.effective_collapsed_group_height())
+            }
+            Node::Tabs(tabs) => {
+                let mut width = 0.0_f32;
+                for child in &tabs.children {
+                    width = width.max(
+                        self.minimum_node_size_with_cache(*child, metrics, cache)?.width,
+                    );
+                }
+                let active_child = tabs.active_child().ok_or(CommandError::InvalidTarget {
+                    reason: "Floating Tabs group has no active panel",
+                })?;
+                let active_minimum = self.minimum_floating_node_size_with_cache(
+                    active_child,
+                    floating_root,
+                    metrics,
+                    cache,
+                )?;
+                let is_column_group =
+                    node_id == floating_root || self.find_owner_column(node_id).is_some();
+                let chrome_height = if is_column_group {
+                    metrics.header_height.max(metrics.tab_strip_height)
+                } else {
+                    metrics.header_height + metrics.tab_strip_height
+                };
+                Size::new(
+                    width.max(active_minimum.width),
+                    metrics
+                        .min_group_height
+                        .max(chrome_height + active_minimum.height),
+                )
+            }
+            Node::Split(split) => {
+                let mut width = 0.0_f32;
+                let mut height = 0.0_f32;
+                for child in &split.children {
+                    let child_size = self.minimum_floating_node_size_with_cache(
+                        *child,
+                        floating_root,
+                        metrics,
+                        cache,
+                    )?;
+                    match split.axis {
+                        Axis::X => {
+                            width += child_size.width;
+                            height = height.max(child_size.height);
+                        }
+                        Axis::Y => {
+                            width = width.max(child_size.width);
+                            height += child_size.height;
+                        }
+                    }
+                }
+                let gaps =
+                    metrics.splitter_thickness * split.children.len().saturating_sub(1) as f32;
+                match split.axis {
+                    Axis::X => width += gaps,
+                    Axis::Y => height += gaps,
+                }
+                Size::new(width, height)
+            }
+            Node::Column(_) => self.minimum_node_size_with_cache(node_id, metrics, cache)?,
+        };
+
+        if !size.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed Floating minimum size overflowed",
+            });
+        }
+        if size.width < 0.0 || size.height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "size",
+                reason: "computed Floating minimum size has invalid dimensions",
+            });
+        }
+        cache.insert(node_id, size);
+        Ok(size)
+    }
+
     /// Computes a floating composition's minimum client size.
     ///
     /// Floating windows have no generic title row. A root Column's minimum
