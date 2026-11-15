@@ -2759,3 +2759,132 @@ fn float_main_area_columns_creates_ordered_single_column_floating_groups_atomica
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
+#[test]
+fn floating_tab_sizing_uses_only_the_active_tab_constraints() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (compact_panel, compact_node) = builder.panel(
+        PanelKey::new("floating-compact-tab").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 60.0),
+            Size::new(220.0, 100.0),
+            None,
+            false,
+        ),
+    );
+    let (tall_panel, tall_node) = builder.panel(
+        PanelKey::new("floating-tall-tab").unwrap(),
+        PanelConstraints::new(
+            Size::new(140.0, 300.0),
+            Size::new(280.0, 420.0),
+            None,
+            false,
+        ),
+    );
+    let tabs_group = builder.tabs(vec![compact_node, tall_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![tabs_group],
+        vec![1.0],
+    );
+    let floating = builder.floating_group(
+        column,
+        Rect::new(Point::new(40.0, 50.0), Size::new(360.0, 520.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let group_chrome = metrics.header_height.max(metrics.tab_strip_height);
+    let compact_minimum = layout.floating_minimum_size(floating, &metrics).unwrap();
+    assert_eq!(
+        compact_minimum.height,
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 60.0)
+    );
+    assert_eq!(
+        layout
+            .floating_preferred_height_for_tab(floating, tabs_group, compact_panel, &metrics)
+            .unwrap(),
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 100.0)
+    );
+
+    // Main geometry deliberately keeps the maximum minimum across all tabs.
+    assert_eq!(
+        layout.minimum_node_size(tabs_group, &metrics).unwrap().height,
+        metrics.min_group_height.max(group_chrome + 300.0)
+    );
+
+    layout
+        .apply(
+            DockCommand::ActivateTab {
+                group: tabs_group,
+                panel: tall_panel,
+            },
+            &metrics,
+        )
+        .unwrap();
+    let tall_minimum = layout.floating_minimum_size(floating, &metrics).unwrap();
+    assert_eq!(
+        tall_minimum.height,
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 300.0)
+    );
+    assert_eq!(
+        layout
+            .floating_preferred_height_for_tab(floating, tabs_group, tall_panel, &metrics)
+            .unwrap(),
+        metrics.column_header_height
+            + metrics.min_group_height.max(group_chrome + 420.0)
+    );
+}
+
+#[test]
+fn floating_preferred_height_sums_vertical_groups_in_its_own_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (first_panel, first_node) = builder.panel(
+        PanelKey::new("floating-stack-first").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 60.0),
+            Size::new(220.0, 100.0),
+            None,
+            false,
+        ),
+    );
+    let (second_panel, second_node) = builder.panel(
+        PanelKey::new("floating-stack-second").unwrap(),
+        PanelConstraints::new(
+            Size::new(120.0, 80.0),
+            Size::new(220.0, 140.0),
+            None,
+            false,
+        ),
+    );
+    let first_group = builder.tabs(vec![first_node], 0, false);
+    let second_group = builder.tabs(vec![second_node], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![first_group, second_group],
+        vec![0.5, 0.5],
+    );
+    let floating = builder.floating_group(
+        column,
+        Rect::new(Point::new(80.0, 90.0), Size::new(360.0, 520.0)),
+        1,
+    );
+    let layout = builder.build();
+
+    let group_chrome = metrics.header_height.max(metrics.tab_strip_height);
+    let first_height = metrics.min_group_height.max(group_chrome + 100.0);
+    let second_height = metrics.min_group_height.max(group_chrome + 140.0);
+    assert_eq!(
+        layout
+            .floating_preferred_height_for_tab(floating, first_group, first_panel, &metrics)
+            .unwrap(),
+        metrics.column_header_height + first_height + second_height + metrics.splitter_thickness
+    );
+}
