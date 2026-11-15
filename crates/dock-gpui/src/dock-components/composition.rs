@@ -24,7 +24,7 @@ use crate::{
         context_menu::GroupMenuToggle, panel_host::PanelHost, rail::RailView,
         splitter::SplitterView,
     },
-    dock_components::GroupPresentation,
+    dock_components::{active_panels_for_groups, GroupPresentation},
 };
 
 pub use group::{GroupDragArea, GroupGrip, GroupMenuButton, PanelContent};
@@ -440,14 +440,8 @@ impl DockCompositionView {
             .iter()
             .find(|overflow| overflow.owner == column.column)
             .copied();
-        let active_panels = column_group_ids
-            .iter()
-            .filter_map(|group| {
-                group_presentations
-                    .get(group)
-                    .and_then(|presentation| presentation.active_panel)
-            })
-            .collect::<HashSet<PanelId>>();
+        let active_panels =
+            active_panels_for_groups(column_group_ids.iter().copied(), group_presentations, dragged_group);
         let column_panels = panels
             .iter()
             .filter(|(panel, _)| active_panels.contains(&panel.panel))
