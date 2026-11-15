@@ -32,6 +32,19 @@ use crate::{
     DockController, DockTheme, DockWindowRole, DragHostId, DragSourceHost, FloatingWindowManager,
 };
 
+fn source_layout_rects(
+    controller: &DockController,
+    source_host: DragSourceHost,
+    source_window_id: WindowId,
+) -> Option<dock_core::LayoutRects> {
+    match source_host {
+        DragSourceHost::Main => Some(controller.geometry().ok()?.clone()),
+        DragSourceHost::Floating { group } => {
+            Some(controller.floating_geometry(source_window_id, group).ok()?.clone())
+        }
+    }
+}
+
 fn floating_window_chain_target(
     handle: Option<DragHandle>,
     target: Option<DropTarget>,
@@ -2101,12 +2114,7 @@ impl Render for DragHostSurface {
                     }
                     (session.source_host(), session.source_window_id()?, panel)
                 };
-                let rects = match source_host {
-                    DragSourceHost::Main => controller.geometry().ok()?.clone(),
-                    DragSourceHost::Floating { group: floating } => {
-                        controller.floating_geometry(source_window_id, floating).ok()?.clone()
-                    }
-                };
+                let rects = source_layout_rects(controller, source_host, source_window_id)?;
                 let group_rect = rects
                     .groups
                     .iter()
@@ -2231,6 +2239,7 @@ impl Render for DragHostSurface {
                     .and_then(|instance| controller.registry().get(&instance.key))
                     .map(|descriptor| descriptor.title().to_string())
                     .unwrap_or_else(|| format!("Panel {panel:?}"));
+                let metrics = controller.metrics();
                 let detached_group = if reserve_composition_header {
                     let group = controller.layout().nodes().find_map(|(id, node)| {
                         let Node::Tabs(tabs) = node else {
@@ -2262,12 +2271,29 @@ impl Render for DragHostSurface {
                         presentation.model_collapsed = false;
                         presentation.auto_collapsed = false;
                         presentation.auto_expanded = false;
-                        Some((group, presentation))
+                        let tab_width = controller
+                            .drag()
+                            .host_session()
+                            .and_then(|session| {
+                                let source_window_id = session.source_window_id()?;
+                                let rects = source_layout_rects(
+                                    controller,
+                                    session.source_host(),
+                                    source_window_id,
+                                )?;
+                                rects
+                                    .tab_headers
+                                    .iter()
+                                    .find(|header| header.group == group && header.panel == panel)
+                                    .map(|header| header.rect.size.width)
+                            })
+                            .unwrap_or(metrics.min_tab_width);
+                        Some((group, presentation, tab_width))
                     })
                 } else {
                     None
                 };
-                Some((view, title, controller.metrics(), detached_group))
+                Some((view, title, metrics, detached_group))
             })
         {
             // A detached tab reserves the same CompositionHeader as a floating
@@ -2305,12 +2331,13 @@ impl Render for DragHostSurface {
                 );
             }
 
-            if let Some((group, presentation)) = detached_group {
+            if let Some((group, presentation, tab_width)) = detached_group {
                 let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
                 root = root.child(DockGroupView::render_detached_tab(
                     group,
                     panel,
                     self.drag_content_size,
+                    tab_width,
                     &presentation,
                     view,
                     metrics,
