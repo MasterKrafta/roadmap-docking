@@ -3279,9 +3279,6 @@ impl FloatingWindowManager {
                     aligned.origin.x - original.origin.x,
                     aligned.origin.y - original.origin.y,
                 );
-                if delta == Point::ZERO {
-                    continue;
-                }
                 match translations.get(&group).copied() {
                     Some(previous)
                         if (previous.x - delta.x).abs() > 0.5
