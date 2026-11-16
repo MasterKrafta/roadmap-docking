@@ -4180,9 +4180,15 @@ impl FloatingWindowManager {
         // Stale typed members are still pruned first, allowing WindowGrid to
         // produce straight-through candidates before the Core topology is rebuilt.
         let mut live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
+        let live_floating_groups = desired
+            .iter()
+            .map(|spec| spec.floating_group)
+            .collect::<HashSet<_>>();
         for link in self.window_chains.all_links() {
             for member in [link.from, link.to] {
-                if matches!(member, WindowGridMember::FloatingComposition(_)) {
+                if let WindowGridMember::FloatingComposition(group) = member
+                    && live_floating_groups.contains(&group)
+                {
                     live_members.insert(member);
                 }
             }
