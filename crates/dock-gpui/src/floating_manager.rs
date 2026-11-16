@@ -358,6 +358,104 @@ struct FloatingGroupSnapshot {
 }
 
 #[derive(Clone, Copy)]
+struct FloatingPartWindowSnapshot {
+    member: WindowGridMember,
+    floating_group: FloatingGroupId,
+    kind: FloatingPartKind,
+    bounds: Rect,
+    contains_transferred_panels: bool,
+}
+
+fn floating_part_screen_bounds(
+    floating_bounds: Rect,
+    local_bounds: Rect,
+    scale_factor: f32,
+) -> Rect {
+    Rect::new(
+        Point::new(
+            floating_bounds.origin.x + local_bounds.origin.x * scale_factor,
+            floating_bounds.origin.y + local_bounds.origin.y * scale_factor,
+        ),
+        local_bounds.size,
+    )
+}
+
+fn collect_floating_part_windows(
+    layout: &dock_core::Layout,
+    metrics: &dock_core::DockMetrics,
+    scale_factor: f32,
+    transferred_panels: &HashSet<PanelId>,
+) -> Vec<FloatingPartWindowSnapshot> {
+    let mut result = Vec::new();
+
+    for (floating_group, floating) in layout.floating_groups() {
+        let Ok(rects) = layout.compute_floating_rects(floating_group, metrics) else {
+            continue;
+        };
+
+        for column_rect in &rects.columns {
+            let Some(Node::Column(column)) = layout.node(column_rect.column) else {
+                continue;
+            };
+            let header_local = Rect::new(
+                column_rect.rect.origin,
+                Size::new(
+                    column_rect.rect.size.width,
+                    metrics.column_header_height,
+                ),
+            );
+            let header_bounds =
+                floating_part_screen_bounds(floating.bounds, header_local, scale_factor);
+            if header_bounds.validate_non_empty().is_ok() {
+                result.push(FloatingPartWindowSnapshot {
+                    member: WindowGridMember::Header(column_rect.column),
+                    floating_group,
+                    kind: FloatingPartKind::Header {
+                        column: column_rect.column,
+                    },
+                    bounds: header_bounds,
+                    contains_transferred_panels: false,
+                });
+            }
+
+            for group_id in &column.groups {
+                let Some(group_rect) = rects.groups.iter().find(|group| group.group == *group_id)
+                else {
+                    continue;
+                };
+                let mut panels = Vec::new();
+                let mut seen = HashSet::new();
+                collect_panel_order(layout, *group_id, &mut panels, &mut seen);
+                let contains_transferred_panels = panels
+                    .iter()
+                    .any(|panel| transferred_panels.contains(panel));
+                let bounds = floating_part_screen_bounds(
+                    floating.bounds,
+                    group_rect.rect,
+                    scale_factor,
+                );
+                if bounds.validate_non_empty().is_err() {
+                    continue;
+                }
+
+                result.push(FloatingPartWindowSnapshot {
+                    member: WindowGridMember::Group(*group_id),
+                    floating_group,
+                    kind: FloatingPartKind::Group {
+                        column: column_rect.column,
+                        group: *group_id,
+                    },
+                    bounds,
+                    contains_transferred_panels,
+                });
+            }
+        }
+    }
+
+    result
+}
+
+#[derive(Clone, Copy)]
 struct NativeResizeSession {
     group: FloatingGroupId,
     window_id: WindowId,
