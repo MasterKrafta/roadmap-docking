@@ -84,7 +84,14 @@ pub fn run(_options: RunOptions) {
     use gpui_platform::application;
 
     application().run(move |cx: &mut App| {
-        let metrics = DockMetrics::default();
+        let theme = DockTheme::default();
+        let metrics = match dock_metrics_from_theme(theme.metrics) {
+            Ok(metrics) => metrics,
+            Err(error) => {
+                tracing::error!(%error, "built-in theme contains invalid dock metrics");
+                return;
+            }
+        };
         let registry = starter_panel_registry();
         let viewport = Rect::new(Point::ZERO, Size::new(1440.0, 740.0));
         let controller =
@@ -98,7 +105,6 @@ pub fn run(_options: RunOptions) {
 
         let controller = cx.new(|_| controller);
         let bounds = Bounds::centered(None, size(px(1440.0), px(740.0)), cx);
-        let theme = DockTheme::default();
         let open_result = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -145,7 +151,7 @@ pub use floating_manager::{
     PanelWindowVisibility,
 };
 pub use missing_panel::MissingPanelPlaceholder;
-pub use theme::DockTheme;
+pub use theme::{DockTheme, dock_metrics_from_theme};
 
 pub use controller::{
     DockController, DockControllerConfigError, DockEvent, DragController, PanelCommandError,
