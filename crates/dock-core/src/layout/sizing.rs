@@ -840,10 +840,8 @@ impl Layout {
                 }
 
                 let height = match column.groups.as_slice() {
-                    [group] if matches!(
-                        self.nodes.get(*group),
-                        Some(Node::Tabs(tabs)) if tabs.collapsed
-                    ) => group_minimums[0].height,
+                    // A Column always reserves its CompositionHeader, even when
+                    // its only Group is collapsed to a compact tab strip.
                     [_] => metrics.column_header_height + group_minimums[0].height,
                     groups => metrics.column_header_height
                         + metrics.effective_collapsed_group_height() * groups.len() as f32,
@@ -870,8 +868,9 @@ impl Layout {
 
     /// Computes a floating composition's minimum client size.
     ///
-    /// Floating windows have no generic title row. A root Column's minimum
-    /// already includes its own ColumnHeader.
+    /// Floating windows have no generic title row. A root Column includes its
+    /// ColumnHeader recursively; a root Tabs group receives the shared
+    /// CompositionHeader row after its group minimum is calculated.
     pub(crate) fn minimum_floating_size(
         &self,
         node_id: NodeId,
@@ -1235,6 +1234,16 @@ impl Layout {
             )?,
             None => return Err(CommandError::MissingNode { node: node_id }),
         };
+
+        // A Floating root Tabs group shares the CompositionHeader row with
+        // its tabs. Column roots already include their own header in the
+        // recursive minimum above, so add this row only for a Tabs root.
+        let composition_header_height = if matches!(self.nodes.get(node_id), Some(Node::Tabs(_))) {
+            metrics.column_header_height
+        } else {
+            0.0
+        };
+        let minimum = Size::new(minimum.width, minimum.height + composition_header_height);
 
         if !minimum.is_finite() {
             return Err(CommandError::InvalidValue {
