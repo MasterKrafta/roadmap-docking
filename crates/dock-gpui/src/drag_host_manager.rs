@@ -70,6 +70,20 @@ fn floating_window_chain_target(
     let (Some(target), Some(DockWindowRole::Floating { group })) = (target, target_role) else {
         return None;
     };
+    // Only the Floating composition's outer edges join native windows.
+    // Plain Top/Bottom GroupEdge targets remain ordinary Core Group docking.
+    if !matches!(
+        target,
+        DropTarget::GroupEdge {
+            zone: dock_core::DropZone::Left
+                | dock_core::DropZone::Right
+                | dock_core::DropZone::FloatingTop
+                | dock_core::DropZone::FloatingBottom,
+            ..
+        }
+    ) {
+        return None;
+    }
     floating_window_chain_direction(target).map(|direction| (group, direction))
 }
 
@@ -2422,8 +2436,6 @@ mod floating_window_chain_target_tests {
         let zones = [
             (DropZone::Left, WindowGridDirection::Left),
             (DropZone::Right, WindowGridDirection::Right),
-            (DropZone::Top, WindowGridDirection::Above),
-            (DropZone::Bottom, WindowGridDirection::Below),
             (DropZone::FloatingTop, WindowGridDirection::Above),
             (DropZone::FloatingBottom, WindowGridDirection::Below),
         ];
@@ -2441,6 +2453,15 @@ mod floating_window_chain_target_tests {
                     "{handle:?} {zone:?} drop should preserve its WindowGrid direction",
                 );
             }
+        }
+
+        for zone in [DropZone::Top, DropZone::Bottom] {
+            let target = Some(DropTarget::GroupEdge { group, zone });
+            assert_eq!(
+                floating_window_chain_target(Some(DragHandle::GroupGrip), target, floating),
+                None,
+                "{zone:?} is an internal Group edge and must keep Core docking semantics",
+            );
         }
     }
 
