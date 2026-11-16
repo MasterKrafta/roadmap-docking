@@ -335,8 +335,8 @@ fn floating_drag_source(
 }
 
 /// Installs the same pointer/capture/drag pipeline on the legacy FloatingHost and
-/// an individual Group part window. point_origin is zero for the legacy host and
-/// the Core Group origin for a detached Group HWND.
+/// typed Header/Group part windows. point_origin is zero for the legacy host and
+/// the Core origin of the corresponding detached part HWND.
 fn render_floating_pointer_input(
     group: FloatingGroupId,
     manager: WeakEntity<FloatingWindowManager>,
@@ -487,7 +487,11 @@ fn render_floating_pointer_input(
                                 && let Some(manager) = manager_for_down.upgrade()
                             {
                                 manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(group, point, manager_cx)
+                                    match source_part {
+                                        Some(DockWindowPart::Header { column }) => manager
+                                            .begin_existing_column_move(group, column, point, manager_cx),
+                                        _ => manager.begin_existing_window_move(group, point, manager_cx),
+                                    }
                                 });
                             }
                             // The header owns this point, including the fixed controls.
@@ -1868,13 +1872,54 @@ impl Render for FloatingPartHost {
                     ),
                 );
                 let local_column = ColumnRect::new(column, header_rect);
-                root.child(DockCompositionView::render_header(
-                    format!("floating-column-header-{:?}", column),
-                    header_rect,
-                    &[local_column],
-                    snapshot.metrics,
-                    self.theme,
-                ))
+                let pointer_input = render_floating_pointer_input(
+                    self.floating_group,
+                    self.manager.clone(),
+                    self.controller.clone(),
+                    window.window_handle().window_id(),
+                    Some(snapshot.floating.rect),
+                    HashMap::new(),
+                    Some((
+                        snapshot.floating.rect,
+                        vec![*column_rect],
+                        Vec::new(),
+                        snapshot.metrics,
+                    )),
+                    false,
+                    self.tab_press.clone(),
+                    self.group_press.clone(),
+                    self.pointer_capture.clone(),
+                    Some(DockWindowPart::Header { column }),
+                    column_rect.rect.origin,
+                );
+                let mut root = root
+                    .child(pointer_input)
+                    .child(DockCompositionView::render_header(
+                        format!("floating-column-header-{:?}", column),
+                        header_rect,
+                        &[local_column],
+                        snapshot.metrics,
+                        self.theme,
+                    ));
+                let manager_for_escape = self.manager.clone();
+                let controller_for_escape = self.controller.clone();
+                let tab_press_for_escape = self.tab_press.clone();
+                let group_press_for_escape = self.group_press.clone();
+                let pointer_capture_for_escape = self.pointer_capture.clone();
+                root = root.capture_key_down(move |event, window, app| {
+                    handle_floating_escape(
+                        event,
+                        false,
+                        &manager_for_escape,
+                        &controller_for_escape,
+                        &tab_press_for_escape,
+                        &group_press_for_escape,
+                        &pointer_capture_for_escape,
+                        window,
+                        app,
+                    );
+                });
+                root
             }
             FloatingPartKind::Group { column, group } => div()
                 .id(format!("floating-group-part-window-root-{:?}", group))

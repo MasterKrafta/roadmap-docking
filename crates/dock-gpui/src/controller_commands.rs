@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     CommandError, CommandOutcome, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragState, DropTarget, FloatingGroupId, PanelId, PanelKey, Point, Rect,
+    DragState, DropTarget, FloatingGroupId, NodeId, PanelId, PanelKey, Point, Rect,
 };
 use gpui::{AnyView, App, AppContext, Context, Window};
 
@@ -428,6 +428,38 @@ impl DockController {
             bounds: floating_bounds,
         });
 
+        self.finish_native_window_move_commands(std::iter::once(command), cx)
+    }
+
+    /// Commits a native Floating Header move for exactly one Core Column.
+    ///
+    /// A root Column keeps its FloatingGroup and updates only its bounds. A Column
+    /// inside Split(X) is detached with the existing Float command so its Header
+    /// and Groups become one independent Floating stack.
+    pub(crate) fn finish_floating_column_move_in(
+        &mut self,
+        group: FloatingGroupId,
+        column: NodeId,
+        bounds: dock_core::Rect,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        if !self.native_window_move_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "native_floating_column_move",
+                reason: "there is no active native floating-window move transaction",
+            });
+        }
+
+        let is_root_column = self
+            .layout
+            .floating_group(group)
+            .and_then(|floating| self.layout.dock_area(floating.area))
+            .is_some_and(|area| area.root == column);
+        let command = if is_root_column {
+            DockCommand::ResizeFloatingBounds { group, bounds }
+        } else {
+            DockCommand::Float { node: column, bounds }
+        };
         self.finish_native_window_move_commands(std::iter::once(command), cx)
     }
 

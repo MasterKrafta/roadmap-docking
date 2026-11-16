@@ -333,6 +333,7 @@ struct NativeMoveSession {
     threshold_crossed: bool,
     high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
+    moving_column: Option<NodeId>,
 }
 
 #[derive(Clone)]
@@ -562,6 +563,37 @@ struct NativeResizeSession {
     transaction_started: bool,
 }
 
+
+fn previous_window_grid_link_is_external(
+    link: WindowGridLink,
+    previous_owners: &HashMap<WindowGridMember, FloatingGroupId>,
+    current_owners: &HashMap<WindowGridMember, FloatingGroupId>,
+) -> bool {
+    let from = previous_member_floating_group(link.from, previous_owners)
+        .or_else(|| current_owners.get(&link.from).copied());
+    let to = previous_member_floating_group(link.to, previous_owners)
+        .or_else(|| current_owners.get(&link.to).copied());
+    matches!((from, to), (Some(from), Some(to)) if from != to)
+}
+
+fn previous_member_floating_group(
+    member: WindowGridMember,
+    previous_owners: &HashMap<WindowGridMember, FloatingGroupId>,
+) -> Option<FloatingGroupId> {
+    match member {
+        WindowGridMember::FloatingComposition(group) => Some(group),
+        WindowGridMember::Header(_) | WindowGridMember::Group(_) => previous_owners.get(&member).copied(),
+    }
+}
+
+fn floating_column_window_members(
+    column: NodeId,
+    groups: &[NodeId],
+) -> Vec<WindowGridMember> {
+    std::iter::once(WindowGridMember::Header(column))
+        .chain(groups.iter().copied().map(WindowGridMember::Group))
+        .collect()
+}
 
 fn window_grid_member(group: FloatingGroupId) -> WindowGridMember {
     WindowGridMember::floating_composition(group)
@@ -1800,6 +1832,125 @@ impl FloatingWindowManager {
         self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
+    /// Starts a native move for one Header and only the Groups belonging to its Column.
+    pub(crate) fn begin_existing_column_move(
+        &mut self,
+        group: FloatingGroupId,
+        column: NodeId,
+        pointer: Point,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() || self.native_resize.is_some() {
+            return false;
+        }
+
+        let header_member = WindowGridMember::Header(column);
+        let Some(header_entry) = self.registry.members.get(&header_member) else {
+            return false;
+        };
+        if header_entry.host_group != Some(group)
+            || header_entry.visibility != PanelWindowVisibility::Visible
+        {
+            return false;
+        }
+        let Some(native_window) = header_entry.native_window else {
+            return false;
+        };
+        let window_id = header_entry.window_id;
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let Ok(header_rect) = self.native_ops.window_rect(native_window) else {
+            return false;
+        };
+        let scale = self.native_ops.scale_factor(native_window).ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let floating = controller.layout().floating_group(group)?;
+            let area = controller.layout().dock_area(floating.area)?;
+            let metrics = controller.metrics();
+            let rects = controller.layout().compute_floating_rects(group, &metrics).ok()?;
+            let column_rect = rects.columns.iter().find(|rect| rect.column == column)?;
+            let groups = match controller.layout().node(column)? {
+                Node::Column(column) => column.groups.clone(),
+                _ => return None,
+            };
+            let bounds = if area.root == column {
+                floating.bounds
+            } else {
+                Rect::new(
+                    Point::new(
+                        floating.bounds.origin.x + column_rect.rect.origin.x * scale,
+                        floating.bounds.origin.y + column_rect.rect.origin.y * scale,
+                    ),
+                    Size::new(column_rect.rect.size.width, floating.bounds.size.height),
+                )
+            };
+            Some((groups, bounds, metrics))
+        });
+        let Some((groups, start_bounds, metrics)) = snapshot else {
+            return false;
+        };
+
+        let members = floating_column_window_members(column, &groups);
+        let mut move_windows = Vec::with_capacity(members.len());
+        for member in members.iter().copied() {
+            let Some(entry) = self.registry.members.get(&member) else {
+                return false;
+            };
+            if entry.host_group != Some(group)
+                || entry.visibility != PanelWindowVisibility::Visible
+            {
+                return false;
+            }
+            let Some(member_window) = entry.native_window else {
+                return false;
+            };
+            let rect = if member_window == native_window {
+                header_rect
+            } else {
+                match self.native_ops.window_rect(member_window) {
+                    Ok(rect) => rect,
+                    Err(_) => return false,
+                }
+            };
+            let origin = PhysicalPoint { x: rect.left, y: rect.top };
+            move_windows.push(NativeMoveWindow {
+                group,
+                native_window: member_window,
+                drag_origin: origin,
+                cancel_origin: origin,
+            });
+        }
+        if move_windows.len() != members.len() || move_windows.is_empty() {
+            return false;
+        }
+        if !self.controller.update(cx, |controller, _| {
+            controller.begin_floating_window_move(group, pointer)
+        }) {
+            return false;
+        }
+
+        self.native_move_windows = move_windows;
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.native_move = Some(NativeMoveSession {
+            group,
+            native_window,
+            hide_header: false,
+            initial_cursor: cursor,
+            start_bounds,
+            start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale,
+            threshold_crossed: false,
+            high_resolution_timer,
+            drop_target: None,
+            moving_column: Some(column),
+        });
+        self.schedule_native_move(cx, group, window_id);
+        true
+    }
+
     fn begin_existing_window_move_with_header(
         &mut self,
         group: FloatingGroupId,
@@ -1912,6 +2063,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
+            moving_column: None,
         });
         self.schedule_native_move(cx, group, window_id);
         if hide_header {
@@ -1939,9 +2091,16 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
-        if self.panel_window_for_group(group).is_none_or(|entry| entry.window_id != window_id)
-            || self.native_move_windows.is_empty()
-        {
+        let source_is_current = if let Some(column) = state.moving_column {
+            self.registry.members.get(&WindowGridMember::Header(column)).is_some_and(|entry| {
+                entry.window_id == window_id
+                    && entry.native_window == Some(state.native_window)
+                    && entry.host_group == Some(group)
+            })
+        } else {
+            self.panel_window_for_group(group).is_some_and(|entry| entry.window_id == window_id)
+        };
+        if !source_is_current || self.native_move_windows.is_empty() {
             self.cancel_native_move(state, cx);
             return false;
         }
@@ -1966,7 +2125,11 @@ impl FloatingWindowManager {
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
-                    self.finish_native_move(state, cx);
+                    if state.moving_column.is_some() {
+                        self.cancel_native_move(state, cx);
+                    } else {
+                        self.finish_native_move(state, cx);
+                    }
                     return false;
                 }
                 return true;
@@ -2005,7 +2168,9 @@ impl FloatingWindowManager {
             }
         }
 
-        self.update_native_drop_target(&mut state, cursor, cx);
+        if state.moving_column.is_none() {
+            self.update_native_drop_target(&mut state, cursor, cx);
+        }
         self.native_move = Some(state);
         if !self.native_ops.left_button_down().unwrap_or(false) {
             self.finish_native_move(state, cx);
@@ -2410,6 +2575,10 @@ impl FloatingWindowManager {
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
+        if state.moving_column.is_some() && !state.threshold_crossed {
+            self.cancel_native_move(state, cx);
+            return;
+        }
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -2417,21 +2586,43 @@ impl FloatingWindowManager {
         let moving_windows = std::mem::take(&mut self.native_move_windows);
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let mut docked_chain_into_main = false;
-        let mut floating_bounds = self.controller.update(cx, |controller, _| {
-            controller
-                .layout()
-                .floating_group(state.group)
-                .map(|floating| floating.bounds)
-        }).unwrap_or(state.start_bounds);
+        let mut floating_bounds = if state.moving_column.is_some() {
+            state.start_bounds
+        } else {
+            self.controller.update(cx, |controller, _| {
+                controller.layout().floating_group(state.group).map(|floating| floating.bounds)
+            }).unwrap_or(state.start_bounds)
+        };
 
-        if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
+        if state.moving_column.is_some() {
+            if let Some(header) = moving_windows.iter().find(|member| member.native_window == state.native_window)
+                && let Ok(rect) = self.native_ops.window_rect(state.native_window)
+            {
+                let dx = rect.left.saturating_sub(header.cancel_origin.x);
+                let dy = rect.top.saturating_sub(header.cancel_origin.y);
+                floating_bounds.origin = Point::new(
+                    state.start_bounds.origin.x + dx as f32,
+                    state.start_bounds.origin.y + dy as f32,
+                );
+            }
+        } else if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
             floating_bounds = native_bounds;
         } else if let Ok(rect) = self.native_ops.window_rect(state.native_window) {
             floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
         }
 
         self.native_move = None;
-        let result = match state.drop_target {
+        let result = if let Some(column) = state.moving_column {
+            self.controller.update(cx, |controller, controller_cx| {
+                controller.finish_floating_column_move_in(
+                    state.group,
+                    column,
+                    floating_bounds,
+                    controller_cx,
+                )
+            })
+        } else {
+            match state.drop_target {
             Some(NativeMoveTarget::FloatingChain {
                 anchor,
                 direction,
@@ -2502,13 +2693,28 @@ impl FloatingWindowManager {
                     )
                 })
             }
+        }
         };
+
+        if result.is_ok()
+            && let Some(column) = state.moving_column
+        {
+            self.detach_column_from_window_grid(column, cx);
+        }
 
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native floating-window move");
             self.cancel_controller_move(cx);
             for member in &moving_windows {
-                self.mark_group_native_bounds_dirty(member.group);
+                if state.moving_column.is_some() {
+                    if let Some(entry) = self.registry.members.values_mut()
+                        .find(|entry| entry.native_window == Some(member.native_window))
+                    {
+                        entry.native_bounds_dirty = true;
+                    }
+                } else {
+                    self.mark_group_native_bounds_dirty(member.group);
+                }
             }
             if moving_windows.is_empty() {
                 self.mark_group_native_bounds_dirty(state.group);
@@ -2516,7 +2722,7 @@ impl FloatingWindowManager {
             self.schedule_reconcile(cx);
         }
 
-        if matches!(
+        if state.moving_column.is_some() || matches!(
             state.drop_target,
             Some(NativeMoveTarget::FloatingDock { .. })
                 | Some(NativeMoveTarget::MainDock {
@@ -2524,7 +2730,7 @@ impl FloatingWindowManager {
                     ..
                 })
         ) {
-            // Docking changes which native windows own visible compositions.
+            // Docking or detaching changes which native windows own visible compositions.
             // Reconcile after the active native-move update unwinds.
             self.schedule_reconcile(cx);
 
@@ -4171,11 +4377,42 @@ impl FloatingWindowManager {
 
     /// Replaces legacy composition-only graph nodes with the real Header/Group
     /// members while preserving links between different Floating compositions.
+    fn detach_column_from_window_grid(
+        &mut self,
+        column: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let groups = self.controller.update(cx, |controller, _| {
+            match controller.layout().node(column)? {
+                Node::Column(column) => Some(column.groups.clone()),
+                _ => None,
+            }
+        });
+        let Some(groups) = groups else {
+            return;
+        };
+        let members = floating_column_window_members(column, &groups);
+        let members_set = members.iter().copied().collect::<HashSet<_>>();
+        for member in members {
+            self.window_chains.remove_member(member);
+        }
+        self.pending_window_grid_reconnections.retain(|link| {
+            !members_set.contains(&link.from) && !members_set.contains(&link.to)
+        });
+        self.pending_window_chain_alignment
+            .retain(|member| !members_set.contains(member));
+    }
+
     fn rebuild_floating_part_window_grid(
         &mut self,
         desired: &[FloatingPartWindowSnapshot],
+        previous_part_members_by_group: &HashMap<FloatingGroupId, Vec<WindowGridMember>>,
     ) -> bool {
         let previous_links = self.window_chains.all_links();
+        let previous_owners = previous_part_members_by_group
+            .iter()
+            .flat_map(|(group, members)| members.iter().map(move |member| (*member, *group)))
+            .collect::<HashMap<_, _>>();
         let mut owners = HashMap::<WindowGridMember, FloatingGroupId>::new();
         for spec in desired {
             owners.insert(spec.member, spec.floating_group);
@@ -4183,18 +4420,7 @@ impl FloatingWindowManager {
 
         let mut links = floating_part_internal_links(desired);
         for previous in previous_links {
-            let from_group = match previous.from {
-                WindowGridMember::FloatingComposition(group) => Some(group),
-                member => owners.get(&member).copied(),
-            };
-            let to_group = match previous.to {
-                WindowGridMember::FloatingComposition(group) => Some(group),
-                member => owners.get(&member).copied(),
-            };
-            let (Some(from_group), Some(to_group)) = (from_group, to_group) else {
-                continue;
-            };
-            if from_group == to_group {
+            if !previous_window_grid_link_is_external(previous, &previous_owners, &owners) {
                 // Internal Header/Group edges are regenerated from the current
                 // Core layout; keep only relationships between compositions.
                 continue;
@@ -4300,7 +4526,8 @@ impl FloatingWindowManager {
                 .or_default()
                 .push(spec.member);
         }
-        self.part_members_by_group = members_by_group;
+        let previous_part_members_by_group =
+            std::mem::replace(&mut self.part_members_by_group, members_by_group);
 
         for spec in desired {
             if !self.registry.members.contains_key(&spec.member) {
@@ -4416,7 +4643,7 @@ impl FloatingWindowManager {
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
         // those identities to the current Header/Group boundary members.
-        if self.rebuild_floating_part_window_grid(&desired) {
+        if self.rebuild_floating_part_window_grid(&desired, &previous_part_members_by_group) {
             self.migrate_pending_window_grid_state();
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
@@ -5546,6 +5773,71 @@ mod floating_chain_drop_target_tests {
             zone: DropZone::Right,
         };
         assert!(floating_chain_drop_target_is_supported(right, false));
+    }
+}
+
+#[cfg(test)]
+mod floating_column_member_tests {
+    use super::floating_column_window_members;
+    use crate::window_chain::WindowGridMember;
+    use dock_core::NodeId;
+    use slotmap::SlotMap;
+
+    #[test]
+    fn moving_a_column_collects_only_its_header_and_ordered_groups() {
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
+        let column = nodes.insert(());
+        let groups = [nodes.insert(()), nodes.insert(())];
+        assert_eq!(
+            floating_column_window_members(column, &groups),
+            vec![
+                WindowGridMember::Header(column),
+                WindowGridMember::Group(groups[0]),
+                WindowGridMember::Group(groups[1]),
+            ],
+        );
+    }
+}
+
+#[cfg(test)]
+mod floating_part_window_grid_rebuild_tests {
+    use super::previous_window_grid_link_is_external;
+    use crate::window_chain::{WindowGridLink, WindowGridMember, WindowGridDirection};
+    use dock_core::{FloatingGroupId, NodeId};
+    use slotmap::SlotMap;
+    use std::collections::HashMap;
+
+    #[test]
+    fn links_internal_to_one_old_composition_are_not_migrated_as_external() {
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating = groups.insert(());
+        let first = nodes.insert(());
+        let second = nodes.insert(());
+        let link = WindowGridLink {
+            from: WindowGridMember::Header(first),
+            to: WindowGridMember::Header(second),
+            direction: WindowGridDirection::Right,
+        };
+        let owners = HashMap::from([(WindowGridMember::Header(first), floating), (WindowGridMember::Header(second), floating)]);
+        assert!(!previous_window_grid_link_is_external(link, &owners, &owners));
+    }
+
+    #[test]
+    fn links_between_two_old_compositions_are_preserved() {
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating_a = groups.insert(());
+        let floating_b = groups.insert(());
+        let first = nodes.insert(());
+        let second = nodes.insert(());
+        let link = WindowGridLink {
+            from: WindowGridMember::Header(first),
+            to: WindowGridMember::Header(second),
+            direction: WindowGridDirection::Right,
+        };
+        let previous = HashMap::from([(WindowGridMember::Header(first), floating_a), (WindowGridMember::Header(second), floating_b)]);
+        assert!(previous_window_grid_link_is_external(link, &previous, &previous));
     }
 }
 

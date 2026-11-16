@@ -374,7 +374,7 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 5. Подключить три маршрута переноса и временный DragHost
 
-<Статус: частично реализован 16 ноября 2026 г.; общий pointer pipeline подключён к Floating Group HWND.>
+<Статус: частично реализован 16 ноября 2026 г.; общий pointer pipeline подключён к Header/Group HWND, Header перемещает только свою Column stack.>
 
 Файлы: drag_host_manager.rs, input_drag.rs, floating_manager.rs, components/floating.rs и тесты маршрутизации.
 
@@ -385,10 +385,12 @@ Core Layout остаётся владельцем структуры Composition
 - Локальная позиция указателя Group HWND переводится в координаты Core Composition через origin соответствующей Group.
 - DragSourceHost сохраняет точную идентичность Header/Group HWND. Координаты FreeArea и проверка окна под курсором используют именно исходный part-host.
 - Drop между окнами, принадлежащими одной Floating Composition, остаётся Core Drop. WindowGrid-side insertion применяется только к другой Floating Composition.
+- FloatingPartHost::Header использует тот же pointer pipeline; перетаскивание двигает только HWND своего Header и Group этой Column.
+- После прохождения drag threshold отпускание мыши отделяет вложенную Column существующей Core-командой Float в одной Undo-транзакции. Если Column уже является корнем Floating, обновляются только её bounds.
+- После отделения очищаются прежние связи WindowGrid выбранной Column; внутренние Header/Group связи перестраиваются по актуальному Core Layout. Связи, которые ранее соединяли разные Floating Composition, сохраняются.
 
 Осталось:
 
-- Подключить Header input и перемещение только своей Column stack; его нельзя направлять через старый whole-composition move.
 - Завершить и локально проверить все три маршрута переноса, возврат Main → временный Floating → Main и особый drag простой Main Composition.
 - После проверки отметить этап завершённым.
 
@@ -397,7 +399,7 @@ Core Layout остаётся владельцем структуры Composition
 3. Floating → Main: выполнить Core Drop в Main, затем освободить пустые Group/Header окна и перестроить оставшуюся колонку.
 4. Main → временный Floating → Main: завершить Core Drop в Main, закрыть только временный DragHost; постоянные Floating окна не создавать.
 5. Перетаскивание простой Main Composition за Header должно создавать Floating-представление из двух окон: Header + Group с исходной вкладкой.
-6. Перетаскивание существующего Floating Header перемещает только его Column stack — Header и все Group этой колонки.
+6. Перетаскивание существующего Floating Header перемещает только его Column stack — Header и все Group этой колонки; при отпускании вложенная Column становится самостоятельной Floating.
 7. Сохранить уже работающую семантику DropZone и общий mapping направления WindowGrid. Не добавлять вторую реализацию hit-test или Drop routing только для Main-origin.
 8. Переиспользовать существующий pointer pipeline `FloatingHost`: выделить общие части обработки мыши, capture и cancellation и подключить их к typed Header/Group hosts. Не копировать второй независимый набор mouse handlers.
 9. Передавать в общий pipeline роль и NodeId текущего part-host; источник/цель переводить через существующие методы FloatingWindowManager.
