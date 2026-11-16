@@ -329,17 +329,27 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 3. Создание и согласование окон через reconcile
 
-Файлы: `floating_manager.rs`, host-модули и тесты менеджера.
+<Статус: реализация в коде завершена 16 ноября 2026 г.; ожидаются локальные проверки пользователя.>
 
-1. Переписать сбор желаемых окон: для каждой Floating Column — Header; для каждой Floating Group — Group.
-2. Перевести постоянный реестр с временной схемы PanelId-host на типизированные `WindowGridMember::Header` и `WindowGridMember::Group`; оставить `FloatingComposition` только на переходный период.
-3. Создавать недостающие HWND скрытыми, назначать owner, получать native frame/DPI, размещать и только затем показывать.
-4. Существующие окна сохранять, пока их Column/Group NodeId жив и роль не изменилась.
-5. Удалять окна, чьи Core Column/Group больше не существуют.
-6. Обеспечить идемпотентность reconcile: повторный вызов не создаёт новые окна.
-7. Сохранить общий PanelView cache и правило: один AnyView одновременно смонтирован только в одном окне.
+Файлы: `floating_manager.rs`, `components/floating.rs`, `drag_host_manager.rs`, `input_drag.rs`.
 
-Критерий: одно и то же Floating Layout всегда приводит к одному и тому же набору Header/Group HWND без дубликатов.
+Что сделано:
+
+1. Постоянный реестр Floating окон получил отдельную таблицу `WindowGridMember → PanelWindowEntry`. Header и Group хранятся по своим Core `NodeId`; старые `PanelId`/`FloatingComposition` таблицы больше не выбирают постоянное окно для всей Floating Composition.
+2. Добавлен сбор желаемых окон непосредственно из Core Layout: одна запись Header на каждую Floating Column и одна запись Group на каждую Group внутри Column.
+3. `reconcile_part_windows` создаёт недостающие окна скрытыми, назначает Main native owner, устанавливает начальные bounds, сохраняет native scale factor, затем показывает окна, когда их PanelViews можно безопасно монтировать.
+4. Существующие окна сохраняются по стабильному Core `NodeId`. Удалённые или недоступные HWND и исчезнувшие Column/Group удаляются из typed registry.
+5. Повторный reconcile переиспользует уже зарегистрированные окна и синхронизирует только изменившиеся bounds/visibility.
+6. `FloatingPartHost` подключён к создаваемым окнам. Group получает только собственную Core Group; Header — только свою Column. Main остаётся на прежнем `MainDockView` и общем `composition.rs`.
+7. Удалён старый путь adoption, в котором временный DragHost становился постоянным окном целой Floating Composition. DragHost теперь остаётся транспортным окном, а PanelViews переходят в отдельные Group hosts через двухфазный handoff.
+8. Handoff учитывает перенос Group, отдельной вкладки и DockArea, который может создать несколько FloatingGroups. Для закрытия DragHost собираются реальные активные PanelViews по затронутым Core Groups; он закрывается только после подтверждения кадра каждого соответствующего Group host.
+9. Существующий общий кеш PanelView и `PanelTransferPresentation` переиспользуются. Переносимая панель не монтируется одновременно в исходном и целевом окнах.
+
+Граница этапа: WindowGrid пока сохраняет переходную геометрию `FloatingComposition`, которая разрешается через один Group host. Полный граф Header/Group и их frame/client стыковка, включая отсутствие старого header overlap, относятся к этапу 4. Новые HWND пока не имеют подключённых пользовательских drag/resize/focus обработчиков; это следующие этапы.
+
+Критерий реализации: Core Layout согласуется с одним Header HWND на Column и одним Group HWND на каждую Group; окна сохраняются между reconcile и удаляются вместе со своими Core узлами. Сквозную визуальную и поведенческую проверку выполняет пользователь локально.
+
+Сборка и тесты не запускались: их выполняет пользователь в своём локальном окружении.
 
 ### Этап 4. Переработать геометрию WindowGrid
 
