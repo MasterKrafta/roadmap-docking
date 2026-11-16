@@ -905,7 +905,12 @@ mod tests {
 
     #[test]
     fn replace_all_links_builds_typed_header_and_group_topology_transactionally() {
-        let [header_a, group_a1, group_a2, header_b, group_b] = members(5);
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let header_a = WindowGridMember::Header(node_ids.insert(()));
+        let group_a1 = WindowGridMember::Group(node_ids.insert(()));
+        let group_a2 = WindowGridMember::Group(node_ids.insert(()));
+        let header_b = WindowGridMember::Header(node_ids.insert(()));
+        let group_b = WindowGridMember::Group(node_ids.insert(()));
         let links = [
             WindowGridLink {
                 from: header_a,
@@ -950,7 +955,8 @@ mod tests {
             },
         ];
         assert!(!registry.replace_all_links(&cyclic));
-        assert_eq!(registry, original);
+        assert_eq!(registry.all_links(), original.all_links());
+        assert!(registry.is_valid());
     }
 
     #[test]
