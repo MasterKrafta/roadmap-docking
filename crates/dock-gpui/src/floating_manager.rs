@@ -2578,13 +2578,7 @@ impl FloatingWindowManager {
         groups.sort_by_key(|group| group.z_order);
         self.reconcile_part_windows(&transferred_panels, cx);
 
-        let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
-        let live_members = live_groups
-            .iter()
-            .copied()
-            .map(window_grid_member)
-            .chain(self.registry.members.keys().copied())
-            .collect::<HashSet<_>>();
+        let live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
         let prune_result = self.window_chains.retain_members(&live_members);
         let removed_chain_members = prune_result.removed_members;
         let stale_alignment_anchors = self.pending_window_chain_alignment.iter()
