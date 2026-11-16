@@ -249,7 +249,10 @@ impl FloatingZoneContext<'_> {
             self.source,
             DropSource::Composition { .. }
         ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)));
+        let source_is_floating_composition = source_can_enter_column
+            && source_is_floating_root(self.layout, self.source_root);
         if !source_can_enter_column
+            || source_is_floating_composition
             || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
         {
             return Ok(());
@@ -618,7 +621,8 @@ impl FloatingZoneContext<'_> {
         let whole_column_source = matches!(
             self.source,
             DropSource::Composition { .. }
-        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)));
+        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
+            && !source_is_floating_root(self.layout, self.source_root);
 
         if horizontal_composition {
             self.append_horizontal_edge_zones(
