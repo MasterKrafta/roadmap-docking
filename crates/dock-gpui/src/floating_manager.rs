@@ -3794,7 +3794,6 @@ impl FloatingWindowManager {
         };
         let Some(expected_groups) = drag_host
             .update(cx, |manager, _| manager.pending_handoff_groups(group))
-            .flatten()
         else {
             return false;
         };
