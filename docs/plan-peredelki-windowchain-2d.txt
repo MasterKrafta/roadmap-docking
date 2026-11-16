@@ -119,7 +119,7 @@
   CompositionHeader, Group header и Tab strip; GPUI преобразует их в
   DockMetrics без зависимости dock-core от ui.
 - DockController::set_metrics проверяет новую конфигурацию и текущий Layout,
-  запрещает смену во время активного pointer/native move/DragHost, увеличивает
+  запрещает смену во время активного pointer/native move/native resize/DragHost, увеличивает
   metrics_revision, сбрасывает rect/floating caches и публикует MetricsChanged.
 - FloatingWindowManager подписан на MetricsChanged: ставит по одному anchor на
   каждую существующую WindowGrid, запускает reconcile и повторное выравнивание
@@ -847,7 +847,7 @@ crates/dock-gpui/src/floating_manager.rs
    высоту DockMetrics и отдельно проверяют малые значения 12/20 px.
 6. DockController::set_metrics() — контролируемая точка обновления. Она
    проверяет Layout на новой конфигурации, не допускает обновление при активном
-   pointer/native move/DragHost transfer, увеличивает metrics_revision,
+   pointer/native move/native resize/DragHost transfer, увеличивает metrics_revision,
    сбрасывает rect/floating caches и публикует MetricsChanged.
 7. FloatingWindowManager получает MetricsChanged, ставит существующие
    WindowGrid на повторное выравнивание и выполняет reconcile. Повторный
