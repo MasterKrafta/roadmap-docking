@@ -96,9 +96,11 @@ struct ActiveDragHost {
     handoff: Option<DragHostHandoff>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct DragHostHandoff {
-    target_group: FloatingGroupId,
+    primary_target_group: FloatingGroupId,
+    required_panels_by_group: HashMap<FloatingGroupId, Vec<PanelId>>,
+    rendered_panels: HashSet<PanelId>,
     foreground_at_release: Option<NativeWindowId>,
     source_placeholder_rendered: bool,
     source_released: bool,
@@ -1314,16 +1316,48 @@ impl DragHostManager {
         foreground_at_release: Option<NativeWindowId>,
         cx: &mut Context<Self>,
     ) -> bool {
+        let Some(active) = self.active.as_ref().filter(|active| active.id == id) else {
+            return false;
+        };
+        let panels = active.panels.clone();
+        let window = active.window.clone();
+
+        let required_panels_by_group = self.controller.update(cx, |controller, _| {
+            let handle = controller
+                .drag()
+                .host_session()
+                .map(|session| session.handle())
+                .unwrap_or(dock_core::DragHandle::PanelTab);
+            // GroupGrip DragHost presents only the active tab. Inactive tabs remain
+            // cached and are not mounted by the temporary transport window.
+            let required_panels = if handle == dock_core::DragHandle::GroupGrip {
+                panels.first().copied().into_iter().collect::<Vec<_>>()
+            } else {
+                panels.clone()
+            };
+            let mut by_group = HashMap::<FloatingGroupId, Vec<PanelId>>::new();
+            for panel in required_panels {
+                if let Some(group) = floating_group_for_panel(controller.layout(), panel) {
+                    by_group.entry(group).or_default().push(panel);
+                }
+            }
+            if by_group.is_empty() && !panels.is_empty() {
+                by_group.insert(target_group, panels.clone());
+            }
+            by_group
+        });
+
         let Some(active) = self.active.as_mut().filter(|active| active.id == id) else {
             return false;
         };
         active.handoff = Some(DragHostHandoff {
-            target_group,
+            primary_target_group: target_group,
+            required_panels_by_group,
+            rendered_panels: HashSet::new(),
             foreground_at_release,
             source_placeholder_rendered: false,
             source_released: false,
         });
-        let window = active.window.clone();
 
         let manager = cx.entity().downgrade();
         match window.update(cx, move |surface, window, host_cx| {
@@ -1391,14 +1425,13 @@ impl DragHostManager {
         id: DragHostId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((target_group, panels, placeholder_rendered, source_released)) = self
+        let Some((panels, placeholder_rendered, source_released)) = self
             .active
             .as_ref()
             .filter(|active| active.id == id)
             .and_then(|active| {
-                let handoff = active.handoff?;
+                let handoff = active.handoff.as_ref()?;
                 Some((
-                    handoff.target_group,
                     active.panels.clone(),
                     handoff.source_placeholder_rendered,
                     handoff.source_released,
@@ -1442,9 +1475,11 @@ impl DragHostManager {
         target_group: FloatingGroupId,
     ) -> Option<Vec<PanelId>> {
         let active = self.active.as_ref()?;
-        let handoff = active.handoff?;
-        (handoff.target_group == target_group && handoff.source_released)
-            .then(|| active.panels.clone())
+        let handoff = active.handoff.as_ref()?;
+        if !handoff.source_released {
+            return None;
+        }
+        handoff.required_panels_by_group.get(&target_group).cloned()
     }
 
     pub(crate) fn complete_floating_handoff(
@@ -1453,34 +1488,56 @@ impl DragHostManager {
         rendered_panels: &[PanelId],
         cx: &mut Context<Self>,
     ) {
-        let Some(active) = self.active.as_ref() else {
-            return;
-        };
-        let Some(handoff) = active.handoff else {
-            return;
-        };
-        if handoff.target_group != target_group
-            || !handoff.source_released
-            || !active.panels.iter().all(|panel| rendered_panels.contains(panel))
-        {
-            return;
-        }
+        let completion = {
+            let Some(active) = self.active.as_mut() else {
+                return;
+            };
+            let Some(handoff) = active.handoff.as_mut() else {
+                return;
+            };
+            let Some(required_for_group) = handoff.required_panels_by_group.get(&target_group)
+            else {
+                return;
+            };
+            if !handoff.source_released {
+                return;
+            }
 
-        let id = active.id;
-        let closing_drag_host = active.native_window;
-        let foreground_at_release = handoff.foreground_at_release;
+            for panel in rendered_panels {
+                if required_for_group.contains(panel) {
+                    handoff.rendered_panels.insert(*panel);
+                }
+            }
+
+            let complete = handoff
+                .required_panels_by_group
+                .values()
+                .flatten()
+                .all(|panel| handoff.rendered_panels.contains(panel));
+            complete.then_some((
+                active.id,
+                active.native_window,
+                handoff.primary_target_group,
+                handoff.foreground_at_release,
+            ))
+        };
+        let Some((id, closing_drag_host, primary_target_group, foreground_at_release)) = completion
+        else {
+            return;
+        };
+
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(
                 ?id,
-                ?target_group,
+                ?primary_target_group,
                 %error,
-                "could not close DragHost after FloatingHost rendered transferred content"
+                "could not close DragHost after Floating Group hosts rendered transferred content"
             );
         }
 
         // DragHost is owned by Main and hidden asynchronously. Retry briefly
-        // while it remains the foreground HWND; activate the destination only
-        // after Windows has completed the owner-focus handoff.
+        // while it remains the foreground HWND; activate the primary destination
+        // only after Windows has completed the owner-focus handoff.
         if let Some(floating_manager) = self.floating_manager.clone() {
             cx.spawn(async move |_, app| {
                 let mut activated = false;
@@ -1490,7 +1547,7 @@ impl DragHostManager {
                         .await;
                     activated = floating_manager.update(app, |manager, _| {
                         manager.activate_handoff_target(
-                            target_group,
+                            primary_target_group,
                             closing_drag_host,
                             foreground_at_release,
                         )
@@ -1501,7 +1558,7 @@ impl DragHostManager {
                 }
                 if !activated {
                     tracing::debug!(
-                        ?target_group,
+                        ?primary_target_group,
                         "Floating handoff completed without activating its destination"
                     );
                 }
