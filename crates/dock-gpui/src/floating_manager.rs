@@ -148,41 +148,7 @@ impl PanelWindowRegistry {
             .count()
     }
 
-    pub(crate) fn member_count(&self) -> usize {
-        self.members.len()
-    }
 
-    pub(crate) fn window_for_member(
-        &self,
-        member: WindowGridMember,
-    ) -> Option<WindowHandle<FloatingPartHost>> {
-        match self.members.get(&member)?.window {
-            PanelWindowHandle::Part(window) => Some(window),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn window_id_for_member(&self, member: WindowGridMember) -> Option<WindowId> {
-        self.members.get(&member).map(|entry| entry.window_id)
-    }
-
-    pub(crate) fn bounds_for_member(&self, member: WindowGridMember) -> Option<Rect> {
-        self.members.get(&member).map(|entry| entry.bounds)
-    }
-
-    pub(crate) fn native_window_for_member(
-        &self,
-        member: WindowGridMember,
-    ) -> Option<NativeWindowId> {
-        self.members.get(&member)?.native_window
-    }
-
-    pub(crate) fn visibility_for_member(
-        &self,
-        member: WindowGridMember,
-    ) -> Option<PanelWindowVisibility> {
-        self.members.get(&member).map(|entry| entry.visibility)
-    }
 
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
         match self.windows.get(&panel)?.window {
@@ -1296,20 +1262,6 @@ impl FloatingWindowManager {
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
     }
 
-    /// Returns true when the physical cursor is over another registered
-    /// docking window, even if the source window still owns pointer capture.
-    pub(crate) fn cursor_over_other_docking_window(
-        &self,
-        source_group: FloatingGroupId,
-    ) -> bool {
-        let Some(source_window) = self
-            .panel_window_for_group(source_group)
-            .and_then(|entry| entry.native_window)
-        else {
-            return false;
-        };
-        self.cursor_over_other_docking_window_from_native(source_window)
-    }
 
     /// Checks the cursor against the exact part HWND that initiated a Floating drag.
     /// The fallback path keeps compatibility with the legacy full-composition host.
