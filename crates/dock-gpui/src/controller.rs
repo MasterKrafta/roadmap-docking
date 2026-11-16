@@ -361,6 +361,8 @@ pub struct DockController {
     resize_frame: ResizeFrameThrottle,
     /// One history transaction remains open while an existing FloatingHost moves natively.
     native_window_move_transaction_active: bool,
+    /// A native OS resize loop may be active before its first Core bounds update.
+    native_resize_session_active: bool,
     /// A separate native OS resize loop also owns an open Core history transaction.
     native_resize_transaction_active: bool,
     /// The native adapter must place restored floating windows on available monitors.
@@ -406,6 +408,7 @@ impl DockController {
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             native_window_move_transaction_active: false,
+            native_resize_session_active: false,
             native_resize_transaction_active: false,
             initial_monitor_recovery_pending,
             registry,
@@ -459,6 +462,7 @@ impl DockController {
         }
         if self.has_active_pointer_interaction()
             || self.native_window_move_transaction_active
+            || self.native_resize_session_active
             || self.native_resize_transaction_active
             || self.drag.host_session.is_some()
         {
@@ -935,6 +939,7 @@ impl DockController {
     /// Opens one history transaction while an existing FloatingHost moves natively.
     pub(crate) fn begin_native_window_move_transaction(&mut self) -> bool {
         if self.native_window_move_transaction_active
+            || self.native_resize_session_active
             || self.native_resize_transaction_active
             || !self.history.begin_transaction(&self.layout)
         {
@@ -944,10 +949,30 @@ impl DockController {
         true
     }
 
+    /// Marks the OS sizing loop active before its first Core bounds update.
+    pub(crate) fn begin_native_resize_session(&mut self) -> bool {
+        if self.native_window_move_transaction_active
+            || self.native_resize_session_active
+            || self.native_resize_transaction_active
+            || self.has_active_pointer_interaction()
+            || self.drag.host_session.is_some()
+        {
+            return false;
+        }
+        self.native_resize_session_active = true;
+        true
+    }
+
+    /// Releases the metric-update guard after WM_EXITSIZEMOVE has completed.
+    pub(crate) fn end_native_resize_session(&mut self) {
+        self.native_resize_session_active = false;
+    }
+
     /// Opens a single history transaction for one continuous native OS resize.
     /// The adapter streams ResizeFloatingBounds commands until WM_EXITSIZEMOVE.
     pub(crate) fn begin_native_resize_transaction(&mut self) -> bool {
-        if self.native_window_move_transaction_active
+        if !self.native_resize_session_active
+            || self.native_window_move_transaction_active
             || self.native_resize_transaction_active
             || self.interaction.is_some()
             || !self.history.begin_transaction(&self.layout)
