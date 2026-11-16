@@ -483,7 +483,24 @@ impl FloatingWindowManager {
         &mut self,
         group: FloatingGroupId,
     ) -> bool {
-        self.window_chains.remove_member(group)
+        let previous_members = self.window_chains.members_for(group);
+        if !self.window_chains.remove_member(group) {
+            return false;
+        }
+
+        // A direct live detach is intentionally split first. Every surviving
+        // multi-window component is realigned independently; reconnecting the
+        // former neighbours is reserved for the geometry-validated reconcile path.
+        for member in previous_members {
+            if member == group || !self.window_chains.is_chained(member) {
+                continue;
+            }
+            let component = self.window_chains.members_for(member);
+            if component.len() > 1 && component.first() == Some(&member) {
+                self.pending_window_chain_alignment.insert(member);
+            }
+        }
+        true
     }
 
     /// Registers the ordered Core result of one Main DockArea tear-off.
@@ -2716,6 +2733,9 @@ impl FloatingWindowManager {
         // queued for the next reconciliation pass.
         let reconnect_candidates = std::mem::take(&mut self.pending_window_grid_reconnections);
         for candidate in reconnect_candidates {
+            if !live_groups.contains(&candidate.from) || !live_groups.contains(&candidate.to) {
+                continue;
+            }
             match self.try_reconnect_pruned_window_grid(candidate, cx) {
                 Some(true) => tracing::debug!(
                     from = ?candidate.from,
@@ -2831,7 +2851,7 @@ impl FloatingWindowManager {
             return None;
         }
 
-        let member_bounds = self.controller.update(cx, |controller, _| {
+        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
             members
                 .iter()
                 .map(|member| {
@@ -2841,8 +2861,12 @@ impl FloatingWindowManager {
                         .map(|floating| (*member, floating.bounds))
                 })
                 .collect::<Option<Vec<_>>>()
-        })?;
-        let links = next_chains.links_for(candidate.from)?.to_vec();
+        }) else {
+            return Some(false);
+        };
+        let Some(links) = next_chains.links_for(candidate.from).map(|links| links.to_vec()) else {
+            return Some(false);
+        };
 
         // The shared geometry routine also rejects invalid overlaps and cycles.
         // The target-side member remains the fixed anchor during this check.
