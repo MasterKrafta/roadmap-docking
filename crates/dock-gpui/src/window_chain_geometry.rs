@@ -199,6 +199,31 @@ impl NativeFrameGeometry {
     }
 }
 
+/// Converts one Core Floating member's local client rectangle into native
+/// outer bounds. FloatingGroup stores the original composition's outer origin;
+/// adding this HWND's client insets recovers the composition client origin before
+/// the local logical offset is scaled. The final conversion subtracts the new
+/// HWND's own insets, keeping its client area aligned with the Core rectangle.
+pub(crate) fn floating_part_outer_bounds(
+    floating_outer_origin: Point,
+    local_origin: Point,
+    logical_size: Size,
+    frame: NativeFrameGeometry,
+) -> Option<Rect> {
+    floating_outer_origin.validate().ok()?;
+    local_origin.validate().ok()?;
+    let client_origin = Point::new(
+        floating_outer_origin.x
+            + frame.client_left_inset
+            + local_origin.x * frame.scale_factor,
+        floating_outer_origin.y
+            + frame.client_top_inset
+            + local_origin.y * frame.scale_factor,
+    );
+    client_origin.validate().ok()?;
+    frame.outer_bounds_for_client_rect(Rect::new(client_origin, logical_size))
+}
+
 /// Keeps the anchor at its drop position and aligns a horizontal chain by its
 /// DWM-visible edges. Each member retains its own Core size.
 #[cfg(test)]
@@ -993,6 +1018,37 @@ mod window_grid_bounds_tests {
             client_height,
             scale_factor,
         }
+    }
+
+    #[test]
+    fn floating_part_bounds_keep_header_and_groups_on_the_core_client_grid() {
+        let frame = frame_with_native_insets(
+            200.0, 120.0, 1.5, 6.0, 6.0, 8.0, 30.0, 8.0, 10.0,
+        );
+        let floating_origin = Point::new(1000.0, 600.0);
+
+        let header = floating_part_outer_bounds(
+            floating_origin,
+            Point::ZERO,
+            Size::new(240.0, 40.0),
+            frame,
+        )
+        .expect("Header should align to the original Floating outer origin");
+        let group = floating_part_outer_bounds(
+            floating_origin,
+            Point::new(0.0, 40.0),
+            Size::new(240.0, 180.0),
+            frame,
+        )
+        .expect("Group should align below the Header using Core logical coordinates");
+
+        assert_eq!(header.origin, floating_origin);
+        assert_eq!(group.origin, Point::new(1000.0, 660.0));
+        assert_eq!(header.size.width, group.size.width);
+        assert_eq!(
+            group.origin.y - header.origin.y,
+            40.0 * frame.scale_factor,
+        );
     }
 
     #[test]
