@@ -835,7 +835,7 @@ impl FloatingZoneContext<'_> {
             self.zones,
             DropTarget::GroupEdge {
                 group: target_group,
-                zone: edge,
+                zone: kind,
             },
             kind,
             rect,
