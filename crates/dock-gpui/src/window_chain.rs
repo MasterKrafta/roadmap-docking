@@ -684,6 +684,29 @@ mod tests {
     }
 
     #[test]
+    fn ambiguous_moving_grid_boundary_is_rejected_without_mutating_either_grid() {
+        let [anchor, branch, moving, lower, other] =
+            groups(5).try_into().expect("five group ids");
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_to_side(moving, branch, WindowGridDirection::Right));
+        assert!(grid.link_to_side(moving, lower, WindowGridDirection::Below));
+        let before_anchor = grid.members_for(anchor);
+        let before_moving = grid.members_for(moving);
+        let before_links = grid.links_for(moving).unwrap().to_vec();
+
+        // The moving component has two exposed west-side candidates. Since the
+        // grabbed member is not on that boundary, choosing a replacement edge
+        // would be ambiguous and must leave both components untouched.
+        assert!(!grid.link_to_side(anchor, branch, WindowGridDirection::Right));
+        assert_eq!(grid.members_for(anchor), before_anchor);
+        assert_eq!(grid.members_for(moving), before_moving);
+        assert_eq!(grid.links_for(moving), Some(before_links.as_slice()));
+        assert!(!grid.is_chained(other));
+        assert!(grid.is_valid());
+    }
+
+    #[test]
     fn permits_multiple_windows_on_the_same_side_as_separate_branches() {
         for side in [
             WindowGridDirection::Left,
