@@ -62,6 +62,8 @@ pub struct DockHost {
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
     floating_manager: Option<Entity<FloatingWindowManager>>,
+    /// ThemeMetrics seed DockController once; later changes go through set_metrics().
+    theme_metrics_applied: bool,
     floating_manager_enabled: bool,
     floating_manager_attached: bool,
     drag_host_manager: Option<Entity<DragHostManager>>,
@@ -93,6 +95,7 @@ impl DockHost {
             root_focus_handle: None,
             focus_observed: false,
             floating_manager: None,
+            theme_metrics_applied: false,
             floating_manager_enabled: false,
             floating_manager_attached: false,
             drag_host_manager: None,
@@ -251,29 +254,41 @@ impl Render for DockHost {
             manager.attach_drag_host_manager(drag_host_manager.downgrade());
         });
 
-        // The shared ThemeMetrics are authoritative at the GPUI boundary.
-        // Apply them only after FloatingWindowManager has subscribed to controller
-        // events, so already-open WindowGrids can be realigned for the new header.
-        match dock_metrics_from_theme(self.theme.metrics) {
-            Ok(metrics) => {
-                self.controller.update(cx, |controller, controller_cx| {
-                    match controller.set_metrics(metrics) {
-                        Ok(true) => {
-                            controller.flush_events(controller_cx);
-                            controller_cx.notify();
+        // ThemeMetrics seed the controller once. Runtime metric changes go
+        // through DockController::set_metrics so a later render cannot overwrite
+        // a caller's explicit update with the original DockHost theme snapshot.
+        if !self.theme_metrics_applied {
+            let mut applied = false;
+            match dock_metrics_from_theme(self.theme.metrics) {
+                Ok(metrics) => {
+                    self.controller.update(cx, |controller, controller_cx| {
+                        match controller.set_metrics(metrics) {
+                            Ok(true) => {
+                                controller.flush_events(controller_cx);
+                                controller_cx.notify();
+                                applied = true;
+                            }
+                            Ok(false) => applied = true,
+                            Err(DockControllerConfigError::ActiveInteraction) => {}
+                            Err(error) => {
+                                tracing::warn!(
+                                    %error,
+                                    "could not synchronize DockMetrics with the initial ThemeMetrics"
+                                );
+                                applied = true;
+                            }
                         }
-                        Ok(false) | Err(DockControllerConfigError::ActiveInteraction) => {}
-                        Err(error) => tracing::warn!(
-                            %error,
-                            "could not synchronize DockMetrics with the current ThemeMetrics"
-                        ),
-                    }
-                });
+                    });
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        %error,
+                        "could not convert the initial ThemeMetrics into valid DockMetrics"
+                    );
+                    applied = true;
+                }
             }
-            Err(error) => tracing::warn!(
-                %error,
-                "could not convert the current ThemeMetrics into valid DockMetrics"
-            ),
+            self.theme_metrics_applied = applied;
         }
 
         let focus_handle = self
