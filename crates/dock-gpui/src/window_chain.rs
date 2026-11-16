@@ -17,7 +17,7 @@ pub(crate) enum WindowGridDirection {
 }
 
 impl WindowGridDirection {
-    fn opposite(self) -> Self {
+    pub(crate) fn opposite(self) -> Self {
         match self {
             Self::Left => Self::Right,
             Self::Right => Self::Left,
