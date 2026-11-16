@@ -1051,7 +1051,7 @@ impl DragHostManager {
                         tracing::warn!(
                             ?id,
                             ?anchor,
-                            direction,
+                            ?direction,
                             "WindowGrid side drop has no valid DragHost bounds"
                         );
                     }
