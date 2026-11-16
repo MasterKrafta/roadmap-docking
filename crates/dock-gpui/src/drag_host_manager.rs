@@ -842,8 +842,13 @@ impl DragHostManager {
                 manager_cx,
             )
         });
-        let source_point = floating_manager.update(cx, |manager, _| {
-            manager.core_point_for_drag_source(source_host, source_window_id, cursor)
+        let source_point = floating_manager.update(cx, |manager, manager_cx| {
+            manager.core_point_for_drag_source(
+                source_host,
+                source_window_id,
+                cursor,
+                manager_cx,
+            )
         });
         let Some(source_point) = source_point else {
             tracing::warn!(
