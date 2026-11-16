@@ -829,7 +829,7 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
         .unwrap();
     assert_eq!(
         resized.actual_value,
-        Some(CommandValue::FloatingSize(Size::new(120.0, 80.0)))
+        Some(CommandValue::FloatingSize(Size::new(120.0, 60.0)))
     );
     assert_eq!(
         layout.floating_group(source_floating).unwrap().bounds.size,
@@ -854,8 +854,12 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
         resized_bounds.actual_value,
         Some(CommandValue::FloatingBounds(Rect::new(
             Point::new(140.0, 150.0),
-            Size::new(120.0, 80.0),
+            Size::new(120.0, 60.0),
         )))
+    );
+    assert_eq!(
+        layout.compute_floating_rects(source_floating, &metrics).unwrap().floating_groups[0].rect.size,
+        Size::new(120.0, 60.0)
     );
     layout
         .apply(resized_bounds.inverse.unwrap(), &metrics)
