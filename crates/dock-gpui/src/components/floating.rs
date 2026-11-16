@@ -1709,6 +1709,11 @@ pub(crate) struct FloatingPartHost {
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
     open_context_menu: Option<FloatingHostOpenMenu>,
+    tab_press: Rc<Cell<Option<FloatingTabPress>>>,
+    group_press: Rc<Cell<Option<FloatingGroupPress>>>,
+    pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    root_focus_handle: Option<FocusHandle>,
+    focus_observed: bool,
 }
 
 impl FloatingPartHost {
@@ -1760,6 +1765,11 @@ impl FloatingPartHost {
             manager,
             controller_observed: false,
             open_context_menu: None,
+            tab_press: Rc::new(Cell::new(None)),
+            group_press: Rc::new(Cell::new(None)),
+            pointer_capture: Rc::new(Cell::new(None)),
+            root_focus_handle: None,
+            focus_observed: false,
         }
     }
 }
@@ -1773,6 +1783,37 @@ impl Render for FloatingPartHost {
         }
 
         let window_id = window.window_handle().window_id();
+        let focus_handle = self
+            .root_focus_handle
+            .get_or_insert_with(|| cx.focus_handle())
+            .clone();
+        if !self.focus_observed {
+            let controller = self.controller.clone();
+            let manager = self.manager.clone();
+            let tab_press = self.tab_press.clone();
+            let group_press = self.group_press.clone();
+            let pointer_capture = self.pointer_capture.clone();
+            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
+                let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                    manager.update(app, |manager, manager_cx| {
+                        manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                    })
+                });
+                if preserve_interaction {
+                    return;
+                }
+                DockInteractionCoordinator::cancel_on_focus_loss(
+                    &controller,
+                    window,
+                    &pointer_capture,
+                    app,
+                );
+                tab_press.set(None);
+                group_press.set(None);
+            })
+            .detach();
+            self.focus_observed = true;
+        }
         if matches!(self.part, FloatingPartKind::Group { .. }) {
             self.controller.update(cx, |controller, panel_cx| {
                 controller.ensure_panel_views(window, panel_cx);
@@ -1799,6 +1840,7 @@ impl Render for FloatingPartHost {
             FloatingPartKind::Header { column } => {
                 let root = div()
                     .id(format!("floating-header-host-root-{:?}", column))
+                    .track_focus(&focus_handle)
                     .relative()
                     .size_full()
                     .overflow_hidden()
@@ -1829,6 +1871,7 @@ impl Render for FloatingPartHost {
             }
             FloatingPartKind::Group { column, group } => div()
                 .id(format!("floating-group-part-window-root-{:?}", group))
+                .track_focus(&focus_handle)
                 .relative()
                 .size_full()
                 .overflow_hidden()
@@ -1953,6 +1996,22 @@ impl FloatingPartHost {
                 overflow
             });
 
+        let pointer_input = render_floating_pointer_input(
+            self.floating_group,
+            self.manager.clone(),
+            self.controller.clone(),
+            window.window_handle().window_id(),
+            Some(snapshot.floating.rect),
+            floating_dock_component_tab_zones(snapshot),
+            None,
+            true,
+            self.tab_press.clone(),
+            self.group_press.clone(),
+            self.pointer_capture.clone(),
+            Some(DockWindowPart::Group { group: group_id }),
+            group_rect.rect.origin,
+        );
+
         let toggle_host = cx.entity().downgrade();
         let toggle_context_menu: GroupMenuToggle = Rc::new(move |target, anchor, app| {
             if let Some(host) = toggle_host.upgrade() {
@@ -2027,6 +2086,7 @@ impl FloatingPartHost {
         }
 
         root = root
+            .child(pointer_input)
             .child(DockGroupView::render_core(
                 Some(column),
                 local_group,
@@ -2094,6 +2154,26 @@ impl FloatingPartHost {
                 ));
             }
         }
+
+        let manager_for_escape = self.manager.clone();
+        let controller_for_escape = self.controller.clone();
+        let tab_press_for_escape = self.tab_press.clone();
+        let group_press_for_escape = self.group_press.clone();
+        let pointer_capture_for_escape = self.pointer_capture.clone();
+        let context_menu_is_open = self.open_context_menu.is_some();
+        root = root.capture_key_down(move |event, window, app| {
+            handle_floating_escape(
+                event,
+                context_menu_is_open,
+                &manager_for_escape,
+                &controller_for_escape,
+                &tab_press_for_escape,
+                &group_press_for_escape,
+                &pointer_capture_for_escape,
+                window,
+                app,
+            );
+        });
 
         root
     }
