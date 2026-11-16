@@ -5552,15 +5552,15 @@ mod floating_part_topology_tests {
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
         let column_c = node_ids.insert(());
-        let group_a = node_ids.insert(());
-        let group_b = node_ids.insert(());
-        let group_c = node_ids.insert(());
+        let group_a_id = node_ids.insert(());
+        let group_b_id = node_ids.insert(());
+        let group_c_id = node_ids.insert(());
         let header_a = WindowGridMember::Header(column_a);
         let header_b = WindowGridMember::Header(column_b);
         let header_c = WindowGridMember::Header(column_c);
-        let group_a = WindowGridMember::Group(group_a);
-        let group_b = WindowGridMember::Group(group_b);
-        let group_c = WindowGridMember::Group(group_c);
+        let group_a = WindowGridMember::Group(group_a_id);
+        let group_b = WindowGridMember::Group(group_b_id);
+        let group_c = WindowGridMember::Group(group_c_id);
         let specs = [
             part(
                 header_a,
@@ -5572,10 +5572,7 @@ mod floating_part_topology_tests {
             part(
                 group_a,
                 floating_a,
-                FloatingPartKind::Group { column: column_a, group: match group_a {
-                    WindowGridMember::Group(id) => id,
-                    _ => unreachable!(),
-                } },
+                FloatingPartKind::Group { column: column_a, group: group_a_id },
                 0.0,
                 40.0,
             ),
@@ -5589,10 +5586,7 @@ mod floating_part_topology_tests {
             part(
                 group_b,
                 floating_a,
-                FloatingPartKind::Group { column: column_b, group: match group_b {
-                    WindowGridMember::Group(id) => id,
-                    _ => unreachable!(),
-                } },
+                FloatingPartKind::Group { column: column_b, group: group_b_id },
                 244.0,
                 40.0,
             ),
@@ -5606,10 +5600,7 @@ mod floating_part_topology_tests {
             part(
                 group_c,
                 floating_b,
-                FloatingPartKind::Group { column: column_c, group: match group_c {
-                    WindowGridMember::Group(id) => id,
-                    _ => unreachable!(),
-                } },
+                FloatingPartKind::Group { column: column_c, group: group_c_id },
                 600.0,
                 40.0,
             ),
