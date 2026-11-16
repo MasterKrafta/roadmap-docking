@@ -2648,7 +2648,7 @@ fn floating_group_edges_use_the_shared_main_column_boundary() {
 }
 
 #[test]
-fn floating_stack_exposes_column_end_for_another_floating_column() {
+fn floating_stack_exposes_outer_edges_for_another_floating_windowgrid() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -2691,46 +2691,52 @@ fn floating_stack_exposes_column_end_for_another_floating_column() {
     let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
     let source = DropSource::Composition { root: source_stack };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
-    let expected_target = DropTarget::ColumnSlot {
-        column: target_column,
-        index: 2,
-    };
-    let end_zone = zones.iter().find(|zone| {
-        zone.zone == DropZone::ColumnEnd && zone.target == expected_target
-    }).expect("a Floating Column must expose its end slot to a whole vertical stack");
+    let top_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingTop
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: target_first_group,
+                        zone: DropZone::FloatingTop,
+                    }
+        })
+        .expect("a whole Floating stack must expose the target window's outer top edge");
+    let bottom_zone = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::FloatingBottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: target_second_group,
+                        zone: DropZone::FloatingBottom,
+                    }
+        })
+        .expect("a whole Floating stack must expose the target window's outer bottom edge");
 
     assert!(!zones
         .iter()
         .any(|zone| matches!(zone.target, DropTarget::GroupTabs { .. })));
-    let point = Point::new(
-        end_zone.rect.origin.x + end_zone.rect.size.width / 2.0,
-        end_zone.rect.origin.y + end_zone.rect.size.height / 2.0,
+    assert!(
+        !zones.iter().any(|zone| zone.zone == DropZone::ColumnEnd),
+        "whole-window drops must not expose legacy Core ColumnEnd docking"
     );
-    assert_eq!(
-        layout.resolve_drop(point, source, &rects, &metrics).unwrap(),
-        Some(expected_target)
-    );
-
-    layout.apply(
-        DockCommand::DockFloating {
-            group: source_float,
-            target: expected_target,
-        },
-        &metrics,
-    ).unwrap();
-    let Some(crate::Node::Column(column)) = layout.node(target_column) else {
-        panic!("the target Floating composition must remain a Column");
-    };
-    assert_eq!(
-        column.groups,
-        vec![
-            target_first_group,
-            target_second_group,
-            source_first_group,
-            source_second_group,
-        ]
-    );
-    assert!(layout.floating_group(source_float).is_none());
+    for zone in [top_zone, bottom_zone] {
+        let point = Point::new(
+            zone.rect.origin.x + zone.rect.size.width / 2.0,
+            zone.rect.origin.y + zone.rect.size.height / 2.0,
+        );
+        let resolved = layout
+            .prepare_drop_resolver(source, &rects, &metrics)
+            .unwrap()
+            .resolve_zone(point)
+            .unwrap()
+            .expect("the whole-window edge must resolve");
+        assert_eq!(resolved.target, zone.target);
+        assert_eq!(resolved.zone, zone.zone);
+    }
+    assert!(layout.floating_group(source_float).is_some());
+    assert!(layout.floating_group(target_float).is_some());
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -4299,14 +4305,18 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
     let bottom = zones
         .iter()
         .find(|zone| {
-            zone.zone == DropZone::ColumnEnd
+            zone.zone == DropZone::FloatingBottom
                 && zone.target
-                    == DropTarget::ColumnSlot {
-                        column: target_column,
-                        index: 3,
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::FloatingBottom,
                     }
         })
-        .expect("a simple Main composition must expose the Floating Column end slot");
+        .expect("a Main composition must expose the target Floating window's outer bottom edge");
+    assert!(
+        !zones.iter().any(|zone| zone.zone == DropZone::ColumnEnd),
+        "a whole Main composition must not expose the legacy Core ColumnEnd target"
+    );
 
     let resolver = layout
         .prepare_drop_resolver(source, &rects, &metrics)
@@ -4890,12 +4900,16 @@ fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
     }));
     assert!(zones.iter().any(|zone| {
         zone.target
-            == DropTarget::ColumnSlot {
-                column: target_column,
-                index: 2,
+            == DropTarget::GroupEdge {
+                group: target_bottom,
+                zone: DropZone::FloatingBottom,
             }
-            && zone.zone == DropZone::ColumnEnd
+            && zone.zone == DropZone::FloatingBottom
     }));
+    assert!(
+        !zones.iter().any(|zone| zone.zone == DropZone::ColumnEnd),
+        "a whole Main composition must not expose the legacy Core ColumnEnd target"
+    );
     assert!(zones.iter().any(|zone| {
         zone.target
             == DropTarget::GroupEdge {
