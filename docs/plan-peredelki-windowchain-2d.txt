@@ -115,7 +115,25 @@
   Resize, pruning и idempotence сохранены.
 - Локальный запуск тестов и полный ручной регрессионный прогон этапа 8 ещё
   ожидают подтверждения пользователя.
-- Следующий этап после приёмки: этап 9 — централизация метрик и формул.
+- Этап 9 реализован в коде: ThemeMetrics теперь отдельно задаёт высоту общей
+  CompositionHeader, Group header и Tab strip; GPUI преобразует их в
+  DockMetrics без зависимости dock-core от ui.
+- DockController::set_metrics проверяет новую конфигурацию и текущий Layout,
+  запрещает смену во время активного pointer/native move/DragHost, увеличивает
+  metrics_revision, сбрасывает rect/floating caches и публикует MetricsChanged.
+- FloatingWindowManager подписан на MetricsChanged: ставит по одному anchor на
+  каждую существующую WindowGrid, запускает reconcile и повторное выравнивание
+  по актуальной высоте CompositionHeader; штатная синхронизация повторно
+  применяет Z-order и native resize constraints.
+- Начальная конфигурация встроенного приложения и статические preview Column
+  используют тот же GPUI-конвертер ThemeMetrics -> DockMetrics.
+- Тесты WindowGrid больше не передают фиксированные 32 px: базовая высота
+  берётся из DockMetrics, отдельно проверяются Above/Below при 12, 20 и текущем
+  значении метрики с дробным DPI и разными native inset. Добавлены проверки
+  set_metrics, MetricsChanged, idempotence и запрета обновления во время drag.
+- Локальная сборка, unit-тесты и ручная проверка изменения ThemeMetrics,
+  перекрытия существующих/новых окон и сохранения независимости Group/Tab
+  metrics ещё ожидают подтверждения пользователя.
 
 ======================================================================
 1. ЦЕЛЬ И ЗАФИКСИРОВАННОЕ ПОВЕДЕНИЕ
@@ -392,7 +410,7 @@ FloatingGroup. При создании отдельного FloatingGroup его
 минимальный размер для всей сетки и не менять внутренний Split/Column ради
 стыковки отдельных HWND.
 
-2.11. Метрики сейчас дублируются и не связаны автоматически
+2.11. Метрики и формулы WindowGrid
 
 Файлы:
 - crates/dock-core/src/dock_metrics.rs;
@@ -400,16 +418,11 @@ FloatingGroup. При создании отдельного FloatingGroup его
 - crates/dock-gpui/src/theme.rs;
 - crates/dock-gpui/src/controller.rs.
 
-DockMetrics содержит column_header_height и другие размеры Dock Core.
-ThemeMetrics содержит часть визуальных метрик, но не содержит отдельный
-composition_header_height. DockController получает DockMetrics при создании;
-текущего публичного обновления metrics после смены темы в контроллере нет.
-
-Сейчас ничего здесь не менять. В конце проекта нужен отдельный этап:
-единый источник высоты шапки, преобразование ThemeMetrics -> DockMetrics на
-границе GPUI и инвалидирование геометрических кэшей/пересчёт WindowGrid при
-изменении метрики.
-
+ThemeMetrics хранит отдельные значения общей CompositionHeader, Group header и
+Tab strip. GPUI преобразует их в DockMetrics на границе адаптера; dock-core не
+зависит от ui crate. DockController::set_metrics() обновляет метрики
+контролируемо и публикует MetricsChanged, после чего FloatingWindowManager
+пересчитывает положение существующих WindowGrid.
 ======================================================================
 3. ЦЕЛЕВАЯ МОДЕЛЬ WINDOWCHAIN GRID
 ======================================================================
@@ -813,30 +826,59 @@ crates/dock-gpui/src/floating_manager.rs
 13. Undo/Redo, Escape/cancel и повторный reconcile.
 14. Обычный внутренний Dock Group/Tab между композициями по-прежнему работает.
 
-ЭТАП 9. МЕТРИКИ И ФОРМУЛЫ — ТОЛЬКО ПОСЛЕ СТАБИЛЬНОЙ РАБОТЫ СЕТКИ
+ЭТАП 9. МЕТРИКИ И ФОРМУЛЫ — РЕАЛИЗОВАНО В КОДЕ
 
-Сейчас не менять DockMetrics/ThemeMetrics и не затевать рефакторинг формул.
-Вернуться к ним после того, как четыре направления, Resize и Z-order работают.
+Реализация:
+1. ThemeMetrics.column_header_height — единый источник высоты общей
+   CompositionHeader над Main/Floating Composition.
+2. ThemeMetrics.group_header_height и ThemeMetrics.tab_strip_height остаются
+   отдельными метриками Group и полосы вкладок.
+3. crates/dock-gpui/src/theme.rs содержит единственный конвертер
+   dock_metrics_from_theme(). Он валидирует исходные и итоговые значения;
+   dock-core не зависит от ui crate.
+4. Существующее поле DockMetrics.column_header_height сохранено, его контракт
+   уточнён: оно используется CompositionHeader, резервированием пространства
+   Column, Core sizing/hit-test и WindowGrid geometry. Group header и Tab strip
+   продолжают использовать свои отдельные DockMetrics.header_height и
+   DockMetrics.tab_strip_height.
+5. В production-формуле вертикального перекрытия не добавлялись локальные
+   поправки: place_grid_neighbour() по-прежнему получает header_height через
+   параметр. У тестов больше нет жёсткого значения 32 px — они читают базовую
+   высоту DockMetrics и отдельно проверяют малые значения 12/20 px.
+6. DockController::set_metrics() — контролируемая точка обновления. Она
+   проверяет Layout на новой конфигурации, не допускает обновление при активном
+   pointer/native move/DragHost transfer, увеличивает metrics_revision,
+   сбрасывает rect/floating caches и публикует MetricsChanged.
+7. FloatingWindowManager получает MetricsChanged, ставит существующие
+   WindowGrid на повторное выравнивание и выполняет reconcile. Повторный
+   reconcile применяет актуальные native bounds, Z-order и resize constraints.
+8. Встроенный запуск и preview Composition используют тот же конвертер, чтобы
+   не оставлять альтернативную пару Theme/Dock значений.
 
-В финальном этапе:
-1. Определить единый источник высоты composition header в ThemeMetrics.
-2. На границе GPUI преобразовывать ThemeMetrics в DockMetrics. Не добавлять
-   зависимость dock-core от ui crate.
-3. Удалить дублирующие значения высоты шапки из других конфигураций.
-4. Все места отрисовки, hit-test, минимумов и WindowGrid geometry должны
-   использовать один и тот же metric.
-5. Формула вертикального перекрытия и resize reflow не должны содержать
-   собственные числа 28/32 или отдельные поправки.
-6. Добавить контролируемый путь обновления DockMetrics в DockController,
-   увеличить metrics_revision, сбросить rect caches и пересчитать bounds/Z-order
-   существующих WindowGrid после изменения высоты шапки.
-7. Повторить тесты стыковки на нескольких значениях header height, в том числе
-   меньше текущего временного значения. Не должно появляться зазоров.
-8. Убедиться, что обычные высоты Column header, Group header и Tab strip —
-   разные сущности и не смешиваются в одну настройку.
+Автоматическое покрытие:
+- независимое преобразование CompositionHeader / Group header / Tab strip;
+- маппинг остальных совпадающих layout metrics;
+- отклонение ThemeMetrics, которые не проходят DockMetrics validation;
+- один MetricsChanged на фактическую смену метрик, no-op при повторном значении;
+- запрет обновления метрик во время активного drag;
+- Above/Below overlap при 12, 20 и базовой высоте с разным DPI и inset.
 
-Критерий готовности: изменение одной настройки высоты шапки меняет её
-отрисовку, hit-zone и перекрытие уже существующих и новых окон без зазоров.
+Локальная сборка и unit-тесты ещё не запущены в окружении пользователя.
+Ручная приёмка этапа:
+1. Изменить ThemeMetrics.column_header_height на 12, 20 и 32 px; проверить
+   отрисовку общей шапки и резервируемое пространство Column в Main/Floating.
+2. Создать вертикальные связи Above и Below для каждого значения; не должно
+   быть зазора между перекрываемыми client-областями.
+3. Изменить метрику при уже существующей WindowGrid через DockController::set_metrics:
+   существующие окна должны выровняться заново, размеры и связи не меняются.
+4. Повторить Resize и активацию окон после изменения метрики; Z-order и общие
+   resize edges должны сохраниться.
+5. Убедиться, что изменение Group header или Tab strip не меняет CompositionHeader,
+   а изменение CompositionHeader не смешивается с высотой Group/Tab.
+
+Критерий готовности: одна настройка CompositionHeader влияет на рендеринг,
+geometry/hit-test и overlap новых и существующих WindowGrid без зазоров;
+локальная сборка, тесты и ручная приёмка подтверждены пользователем.
 
 ======================================================================
 6. СПИСОК ОСНОВНЫХ ФАЙЛОВ ПО ОТВЕТСТВЕННОСТИ
