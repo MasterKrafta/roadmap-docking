@@ -171,11 +171,11 @@ impl PanelWindowRegistry {
             .count()
     }
 
-    pub fn member_count(&self) -> usize {
+    pub(crate) fn member_count(&self) -> usize {
         self.members.len()
     }
 
-    pub fn window_for_member(
+    pub(crate) fn window_for_member(
         &self,
         member: WindowGridMember,
     ) -> Option<WindowHandle<FloatingPartHost>> {
@@ -185,22 +185,22 @@ impl PanelWindowRegistry {
         }
     }
 
-    pub fn window_id_for_member(&self, member: WindowGridMember) -> Option<WindowId> {
+    pub(crate) fn window_id_for_member(&self, member: WindowGridMember) -> Option<WindowId> {
         self.members.get(&member).map(|entry| entry.window_id)
     }
 
-    pub fn bounds_for_member(&self, member: WindowGridMember) -> Option<Rect> {
+    pub(crate) fn bounds_for_member(&self, member: WindowGridMember) -> Option<Rect> {
         self.members.get(&member).map(|entry| entry.bounds)
     }
 
-    pub fn native_window_for_member(
+    pub(crate) fn native_window_for_member(
         &self,
         member: WindowGridMember,
     ) -> Option<NativeWindowId> {
         self.members.get(&member)?.native_window
     }
 
-    pub fn visibility_for_member(
+    pub(crate) fn visibility_for_member(
         &self,
         member: WindowGridMember,
     ) -> Option<PanelWindowVisibility> {
@@ -210,7 +210,7 @@ impl PanelWindowRegistry {
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
         match self.windows.get(&panel)?.window {
             PanelWindowHandle::Floating(window) => Some(window),
-            PanelWindowHandle::DragHost(_) => None,
+            PanelWindowHandle::Part(_) | PanelWindowHandle::DragHost(_) => None,
         }
     }
 
@@ -3668,13 +3668,20 @@ impl FloatingWindowManager {
             .iter()
             .map(|spec| spec.member)
             .collect::<HashSet<_>>();
+        let unavailable_members = self
+            .registry
+            .members
+            .iter()
+            .filter_map(|(member, entry)| (!entry.window.is_available(cx)).then_some(*member))
+            .collect::<Vec<_>>();
         let stale_members = self
             .registry
             .members
             .keys()
             .filter(|member| !desired_members.contains(member))
             .copied()
-            .collect::<Vec<_>>();
+            .chain(unavailable_members)
+            .collect::<HashSet<_>>();
         for member in stale_members {
             self.release_member_window(member, cx);
         }
@@ -3697,47 +3704,66 @@ impl FloatingWindowManager {
                 }
             }
 
-            let Some(entry) = self.registry.members.get_mut(&spec.member) else {
-                continue;
-            };
-            if entry.bounds != spec.bounds || entry.native_bounds_dirty {
-                if let Some(native_window) = entry.native_window {
+            let needs_bounds_sync = self
+                .registry
+                .members
+                .get(&spec.member)
+                .is_some_and(|entry| entry.bounds != spec.bounds || entry.native_bounds_dirty);
+            if needs_bounds_sync {
+                let native_window = self
+                    .registry
+                    .members
+                    .get(&spec.member)
+                    .and_then(|entry| entry.native_window);
+                if let Some(native_window) = native_window {
                     self.sync_part_window_bounds(native_window, spec.bounds);
-                    entry.native_scale_factor = self
-                        .native_ops
-                        .scale_factor(native_window)
-                        .ok()
+                    let scale = self.native_ops.scale_factor(native_window).ok()
                         .filter(|scale| scale.is_finite() && *scale > 0.0);
+                    if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                        entry.native_scale_factor = scale;
+                    }
                 }
-                entry.bounds = spec.bounds;
-                entry.native_bounds_dirty = false;
+                if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                    entry.bounds = spec.bounds;
+                    entry.native_bounds_dirty = false;
+                }
             }
 
-            let should_be_visible = !spec.contains_transferred_panels;
-            if should_be_visible && entry.visibility == PanelWindowVisibility::Hidden {
-                let Some(native_window) = entry.native_window else {
-                    continue;
-                };
-                match self.native_ops.show_no_activate(native_window) {
-                    Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
-                    Err(error) => tracing::warn!(
-                        ?spec.member,
-                        %error,
-                        "could not show a Floating part window"
-                    ),
+            let native_window = self
+                .registry
+                .members
+                .get(&spec.member)
+                .and_then(|entry| entry.native_window);
+            let visibility = self.registry.members
+                .get(&spec.member)
+                .map(|entry| entry.visibility);
+            match (spec.contains_transferred_panels, visibility, native_window) {
+                (false, Some(PanelWindowVisibility::Hidden), Some(native_window)) => {
+                    match self.native_ops.show_no_activate(native_window) {
+                        Ok(()) => {
+                            if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                                entry.visibility = PanelWindowVisibility::Visible;
+                            }
+                        }
+                        Err(error) => tracing::warn!(
+                            ?spec.member,
+                            %error,
+                            "could not show a Floating part window"
+                        ),
+                    }
                 }
-            } else if !should_be_visible && entry.visibility == PanelWindowVisibility::Visible {
-                if let Some(native_window) = entry.native_window {
+                (true, Some(PanelWindowVisibility::Visible), Some(native_window)) => {
                     if let Err(error) = self.native_ops.hide(native_window) {
                         tracing::warn!(
                             ?spec.member,
                             %error,
                             "could not hide a Floating part while its PanelViews are transported"
                         );
-                    } else {
+                    } else if let Some(entry) = self.registry.members.get_mut(&spec.member) {
                         entry.visibility = PanelWindowVisibility::Hidden;
                     }
                 }
+                _ => {}
             }
         }
     }
