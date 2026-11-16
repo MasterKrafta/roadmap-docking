@@ -3620,12 +3620,13 @@ impl FloatingWindowManager {
             return;
         }
 
+        let member = window_grid_member(group);
         let desired_left_enabled = !self
             .window_chains
-            .has_neighbor_on_side(group, WindowGridDirection::Left);
+            .has_neighbor_on_side(member, WindowGridDirection::Left);
         let desired_top_enabled = !self
             .window_chains
-            .has_neighbor_on_side(group, WindowGridDirection::Above);
+            .has_neighbor_on_side(member, WindowGridDirection::Above);
 
         if entry.native_left_resize_enabled != Some(desired_left_enabled) {
             match self
