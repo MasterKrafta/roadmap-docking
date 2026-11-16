@@ -24,8 +24,7 @@ use crate::{
     components::FloatingHost, drag_host_manager::DragHostSurface, geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridRegistry},
     window_chain_geometry::{
-        NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
-        arrange_window_grid_bounds as arrange_grid_geometry_bounds,
+        NativeFrameGeometry, arrange_window_grid_bounds as arrange_grid_geometry_bounds,
         match_moving_window_width_to_target,
         floating_grid_members_in_native_front_to_back,
         floating_groups_in_native_z_order as grid_floating_groups_in_native_z_order,
@@ -408,6 +407,7 @@ pub struct FloatingWindowManager {
     host_registry: CompositionHostRegistry,
     window_chains: WindowGridRegistry,
     pending_window_chain_alignment: HashSet<FloatingGroupId>,
+    pending_window_grid_reconnections: Vec<WindowGridLink>,
     window_chain_alignment_scheduled: bool,
     native_ops: SystemNativeWindowOps,
     controller_subscription: Option<Subscription>,
@@ -430,6 +430,7 @@ impl FloatingWindowManager {
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowGridRegistry::default(),
             pending_window_chain_alignment: HashSet::new(),
+            pending_window_grid_reconnections: Vec::new(),
             window_chain_alignment_scheduled: false,
             native_ops: SystemNativeWindowOps,
             controller_subscription: None,
@@ -2431,8 +2432,8 @@ impl FloatingWindowManager {
         groups.sort_by_key(|group| group.z_order);
 
         let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
-        let (removed_chain_members, chains_to_compact) =
-            self.window_chains.retain_groups(&live_groups);
+        let prune_result = self.window_chains.retain_groups(&live_groups);
+        let removed_chain_members = prune_result.removed_members;
         let stale_alignment_anchors = self
             .pending_window_chain_alignment
             .iter()
@@ -2447,55 +2448,18 @@ impl FloatingWindowManager {
         if removed_chain_members > 0 {
             tracing::debug!(
                 removed_chain_members,
-                "removed stale FloatingGroups from window chains"
+                "removed stale FloatingGroups from WindowGrid"
             );
         }
 
-        if !chains_to_compact.is_empty() {
-            let mut compacted_bounds = Vec::new();
-            for members in &chains_to_compact {
-                let member_bounds = members
-                    .iter()
-                    .map(|member| {
-                        groups
-                            .iter()
-                            .find(|snapshot| snapshot.id == *member)
-                            .map(|snapshot| (snapshot.id, snapshot.bounds))
-                    })
-                    .collect::<Option<Vec<_>>>();
-                let Some(member_bounds) = member_bounds else {
-                    continue;
-                };
-                let Some(frame_geometries) = self.frame_geometries_for_bounds(&member_bounds) else {
-                    continue;
-                };
-                if let Some(anchor) = members.first().copied()
-                    && let Some(bounds) = arrange_contiguous_window_chain_bounds(
-                        member_bounds,
-                        &frame_geometries,
-                        anchor,
-                    )
-                {
-                    compacted_bounds.extend(bounds);
-                }
-            }
-
-            let commands = compacted_bounds
-                .iter()
-                .filter_map(|(group, bounds)| {
-                    groups
-                        .iter()
-                        .find(|snapshot| snapshot.id == *group)
-                        .filter(|snapshot| snapshot.bounds != *bounds)
-                        .map(|_| DockCommand::ResizeFloatingBounds {
-                            group: *group,
-                            bounds: *bounds,
-                        })
-                })
-                .collect::<Vec<_>>();
-
-            if !commands.is_empty() {
-                self.schedule_window_chain_bounds_update(commands, cx);
+        // Every surviving multi-window component must be realigned after a
+        // member disappears. Singletons are deliberately left as ordinary
+        // Floating windows with their normal, visible CompositionHeader.
+        self.pending_window_chain_alignment
+            .extend(prune_result.components_to_align.iter().copied());
+        for candidate in prune_result.reconnect_candidates {
+            if !self.pending_window_grid_reconnections.contains(&candidate) {
+                self.pending_window_grid_reconnections.push(candidate);
             }
         }
 
@@ -2724,6 +2688,29 @@ impl FloatingWindowManager {
         }
         self.host_registry.floating_groups = active_hosts.clone();
 
+        // Reconnect a straight-through pair only after its surviving native
+        // hosts are available and the proposed complete grid passes geometry
+        // validation. A temporarily unavailable host leaves the candidate
+        // queued for the next reconciliation pass.
+        let reconnect_candidates = std::mem::take(&mut self.pending_window_grid_reconnections);
+        for candidate in reconnect_candidates {
+            match self.try_reconnect_pruned_window_grid(candidate, cx) {
+                Some(true) => tracing::debug!(
+                    from = ?candidate.from,
+                    to = ?candidate.to,
+                    direction = ?candidate.direction,
+                    "reconnected surviving WindowGrid members after removal"
+                ),
+                Some(false) => tracing::debug!(
+                    from = ?candidate.from,
+                    to = ?candidate.to,
+                    direction = ?candidate.direction,
+                    "kept surviving WindowGrid components separate because reconnect geometry was invalid"
+                ),
+                None => self.pending_window_grid_reconnections.push(candidate),
+            }
+        }
+
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
         self.schedule_pending_window_chain_alignment(cx);
 
@@ -2791,6 +2778,62 @@ impl FloatingWindowManager {
                 self.reconcile(cx);
             }
         }
+    }
+
+    /// Attempts a straight-through reconnection after a deleted WindowGrid member.
+    ///
+    /// None means that native hosts are not ready yet and the candidate should
+    /// be retried. Some(false) means that the graph or measured geometry
+    /// rejected the connection, so the surviving components remain independent.
+    fn try_reconnect_pruned_window_grid(
+        &mut self,
+        candidate: WindowGridLink,
+        cx: &mut Context<Self>,
+    ) -> Option<bool> {
+        let mut next_chains = self.window_chains.clone();
+        if !next_chains.link_to_side(
+            candidate.from,
+            candidate.to,
+            candidate.direction,
+        ) {
+            return Some(false);
+        }
+
+        let members = next_chains.members_for(candidate.from);
+        if !members.iter().all(|member| {
+            self.panel_window_for_group(*member).is_some_and(|entry| {
+                entry.visibility == PanelWindowVisibility::Visible
+                    && entry.native_window.is_some()
+            })
+        }) {
+            return None;
+        }
+
+        let member_bounds = self.controller.update(cx, |controller, _| {
+            members
+                .iter()
+                .map(|member| {
+                    controller
+                        .layout()
+                        .floating_group(*member)
+                        .map(|floating| (*member, floating.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
+        })?;
+        let links = next_chains.links_for(candidate.from)?.to_vec();
+
+        // The shared geometry routine also rejects invalid overlaps and cycles.
+        // The target-side member remains the fixed anchor during this check.
+        if self
+            .arrange_window_grid_bounds(member_bounds, &links, candidate.from, cx)
+            .is_none()
+        {
+            return Some(false);
+        }
+
+        self.window_chains = next_chains;
+        self.pending_window_chain_alignment.insert(candidate.from);
+        Some(true)
     }
 
     /// Defers initial WindowChain frame alignment until the current reconcile update ends.
