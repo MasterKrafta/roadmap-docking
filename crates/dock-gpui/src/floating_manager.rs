@@ -896,17 +896,33 @@ impl FloatingWindowManager {
             })
     }
 
-    /// Resolves the typed WindowGrid key through the current transitional host registry.
+    /// Resolves each typed WindowGrid identity to its matching permanent native host.
     ///
-    /// FloatingComposition maps through CompositionHostRegistry -> PanelWindowRegistry.
-    /// Header and Group variants will resolve through their dedicated native entries later.
+    /// Header/Group resolve directly from the Core-node registry. FloatingComposition
+    /// remains a temporary bridge and resolves to the first Group window in that composition.
     fn panel_window_for_grid_member(&self, member: WindowGridMember) -> Option<&PanelWindowEntry> {
-        self.panel_window_for_group(member.floating_group()?)
+        match member {
+            WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
+                .registry
+                .members
+                .get(&member)
+                .or_else(|| self.panel_window_for_group(member.floating_group()?)),
+            WindowGridMember::FloatingComposition(group) => self.panel_window_for_group(group),
+        }
     }
 
     fn panel_window_for_group(&self, group: FloatingGroupId) -> Option<&PanelWindowEntry> {
-        let panel = self.host_registry.panel_for_group(group)?;
-        self.registry.windows.get(&panel)
+        if let Some(panel) = self.host_registry.panel_for_group(group)
+            && let Some(entry) = self.registry.windows.get(&panel)
+        {
+            return Some(entry);
+        }
+        let members = self.part_members_by_group.get(&group)?;
+        members
+            .iter()
+            .find(|member| matches!(member, WindowGridMember::Group(_)))
+            .or_else(|| members.first())
+            .and_then(|member| self.registry.members.get(member))
     }
 
     /// Reads each HWND's actual outer frame, DWM-visible horizontal frame,
