@@ -588,15 +588,14 @@ impl Render for FloatingPartHost {
             }
         };
 
-        let root = div()
-            .id(format!("floating-part-host-root-{:?}", self.part))
-            .relative()
-            .size_full()
-            .overflow_hidden()
-            .bg(rgb(self.theme.colors.panel_surface_background));
-
         match self.part {
             FloatingPartKind::Header { column } => {
+                let root = div()
+                    .id(format!("floating-header-host-root-{:?}", column))
+                    .relative()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(rgb(self.theme.colors.panel_surface_background));
                 let Some(column_rect) = snapshot
                     .rects
                     .columns
@@ -625,7 +624,7 @@ impl Render for FloatingPartHost {
                 ))
             }
             FloatingPartKind::Group { column, group } => {
-                self.render_group(window, cx, root, &snapshot, column, group)
+                self.render_group(window, cx, &snapshot, column, group)
             }
         }
     }
@@ -636,11 +635,16 @@ impl FloatingPartHost {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        mut root: gpui::Div,
         snapshot: &FloatingHostSnapshot,
         column: NodeId,
         group_id: NodeId,
     ) -> impl IntoElement {
+        let mut root = div()
+            .id(format!("floating-group-host-root-{:?}", group_id))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.panel_surface_background));
         let Some(group_rect) = snapshot
             .rects
             .groups
