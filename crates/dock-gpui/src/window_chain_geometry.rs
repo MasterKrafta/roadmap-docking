@@ -385,8 +385,8 @@ pub(crate) fn arrange_window_grid_bounds(
         return None;
     }
 
-    // An unrelated pair must not overlap in client space. Intentional vertical
-    // header overlap is allowed only for the physical adjacent pairs above.
+    // Unrelated pairs must not overlap in client space. The physical
+    // adjacency edges above are allowed to touch, but never to cover one another.
     for first in 0..bounds.len() {
         for second in first + 1..bounds.len() {
             if physical_edges.contains(&(first, second)) {
@@ -698,8 +698,8 @@ pub(crate) fn shift_window_grid_after_resize(
 /// Returns the native Z priority from front to back for one WindowGrid.
 ///
 /// A left neighbor stays in front of its right neighbor so their shared resize
-/// edge remains reachable. An upper window stays in front of the lower window
-/// so its HWND physically covers the lower CompositionHeader.
+/// edge remains reachable. An upper window stays in front of the lower window,
+/// preserving deterministic edge-hit priority without relying on overlap.
 pub(crate) fn floating_grid_members_in_native_front_to_back(
     members: &[WindowGridMember],
     links: &[WindowGridLink],
