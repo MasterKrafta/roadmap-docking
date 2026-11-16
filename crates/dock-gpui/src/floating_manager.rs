@@ -340,7 +340,12 @@ struct FloatingPartWindowSnapshot {
     member: WindowGridMember,
     floating_group: FloatingGroupId,
     kind: FloatingPartKind,
+    /// Initial client bounds, using the main-monitor scale until the HWND exists.
     bounds: Rect,
+    /// Core FloatingGroup origin is already in physical virtual-desktop pixels.
+    floating_origin: Point,
+    /// Core layout origin inside the Floating client area remains logical.
+    local_origin: Point,
     contains_transferred_panels: bool,
 }
 
@@ -392,6 +397,8 @@ fn collect_floating_part_windows(
                         column: column_rect.column,
                     },
                     bounds: header_bounds,
+                    floating_origin: floating.bounds.origin,
+                    local_origin: header_local.origin,
                     contains_transferred_panels: false,
                 });
             }
@@ -424,6 +431,8 @@ fn collect_floating_part_windows(
                         group: *group_id,
                     },
                     bounds,
+                    floating_origin: floating.bounds.origin,
+                    local_origin: group_rect.rect.origin,
                     contains_transferred_panels,
                 });
             }
@@ -766,9 +775,51 @@ impl FloatingWindowManager {
             .chain(self.registry.members.values())
     }
 
-    /// Reads each HWND's actual outer frame, DWM-visible horizontal frame,
-    /// client rectangle and monitor scale. Core bounds supply the fallback only
-    /// while a persistent native host has not been created yet.
+    /// Reads one HWND's actual outer frame, DWM-visible bounds, client insets
+    /// and monitor scale. The fallback is used only before native measurements exist.
+    fn native_frame_geometry(
+        &self,
+        native_window: NativeWindowId,
+        fallback_scale: Option<f32>,
+    ) -> Option<NativeFrameGeometry> {
+        let outer = self.native_ops.window_rect(native_window).ok()?;
+        let visible = self.native_ops.visible_frame_rect(native_window).unwrap_or(outer);
+        let client_origin = self.native_ops.client_origin(native_window).ok()?;
+        let client_size = self.native_ops.client_size(native_window).ok()?;
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .or(fallback_scale)
+            .filter(|scale| scale.is_finite() && *scale > 0.0)?;
+        NativeFrameGeometry::from_native_rects(
+            outer,
+            visible,
+            client_origin,
+            client_size,
+            scale,
+        )
+    }
+
+    /// Computes native outer bounds from the desired Core client rectangle.
+    /// The physical origin uses this HWND's own monitor scale and measured insets.
+    fn part_outer_bounds_for_target(
+        &self,
+        spec: FloatingPartWindowSnapshot,
+        native_window: NativeWindowId,
+        fallback_scale: Option<f32>,
+    ) -> Option<Rect> {
+        let frame = self.native_frame_geometry(native_window, fallback_scale)?;
+        let client_origin = Point::new(
+            spec.floating_origin.x + spec.local_origin.x * frame.scale_factor,
+            spec.floating_origin.y + spec.local_origin.y * frame.scale_factor,
+        );
+        client_origin.validate().ok()?;
+        let client_rect = Rect::new(client_origin, spec.bounds.size);
+        frame.outer_bounds_for_client_rect(client_rect)
+    }
+
+    /// Returns each member's measured native frame using its own HWND and DPI.
     fn frame_geometries_for_bounds(
         &self,
         bounds: &[(WindowGridMember, Rect)],
@@ -778,17 +829,12 @@ impl FloatingWindowManager {
                 return NativeFrameGeometry::without_frame_size(bounds.size, 1.0);
             };
             let Some(native_window) = entry.native_window else {
-                let scale = entry.native_scale_factor.filter(|scale| scale.is_finite() && *scale > 0.0).unwrap_or(1.0);
+                let scale = entry.native_scale_factor
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+                    .unwrap_or(1.0);
                 return NativeFrameGeometry::without_frame_size(bounds.size, scale);
             };
-            let outer = self.native_ops.window_rect(native_window).ok()?;
-            let visible = self.native_ops.visible_frame_rect(native_window).unwrap_or(outer);
-            let client_origin = self.native_ops.client_origin(native_window).ok()?;
-            let client_size = self.native_ops.client_size(native_window).ok()?;
-            let scale = self.native_ops.scale_factor(native_window).ok()
-                .or(entry.native_scale_factor)
-                .filter(|scale| scale.is_finite() && *scale > 0.0)?;
-            NativeFrameGeometry::from_native_rects(outer, visible, client_origin, client_size, scale)?
+            self.native_frame_geometry(native_window, entry.native_scale_factor)?
                 .with_logical_client_size(bounds.size)
         }).collect()
     }
@@ -3631,18 +3677,21 @@ impl FloatingWindowManager {
             );
         }
 
-        self.sync_part_window_bounds(native_window, spec.bounds);
         let scale = self
             .native_ops
             .scale_factor(native_window)
             .ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0);
+        let outer_bounds = self
+            .part_outer_bounds_for_target(spec, native_window, scale)
+            .unwrap_or(spec.bounds);
+        self.sync_part_window_bounds(native_window, outer_bounds);
 
         Some(PanelWindowEntry {
             window: PanelWindowHandle::Part(window),
             window_id,
             native_window: Some(native_window),
-            bounds: spec.bounds,
+            bounds: outer_bounds,
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
@@ -3764,27 +3813,33 @@ impl FloatingWindowManager {
                 }
             }
 
-            let needs_bounds_sync = self
-                .registry
-                .members
-                .get(&spec.member)
-                .is_some_and(|entry| entry.bounds != spec.bounds || entry.native_bounds_dirty);
-            if needs_bounds_sync {
-                let native_window = self
-                    .registry
-                    .members
-                    .get(&spec.member)
-                    .and_then(|entry| entry.native_window);
+            let current = self.registry.members.get(&spec.member).map(|entry| {
+                (entry.bounds, entry.native_bounds_dirty, entry.native_window, entry.native_scale_factor)
+            });
+            let Some((current_bounds, native_bounds_dirty, native_window, previous_scale)) = current else {
+                continue;
+            };
+            let current_scale = native_window
+                .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .or(previous_scale);
+            let target_bounds = native_window
+                .and_then(|native_window| {
+                    self.part_outer_bounds_for_target(spec, native_window, current_scale)
+                })
+                .unwrap_or_else(|| {
+                    if native_window.is_some() { current_bounds } else { spec.bounds }
+                });
+            let scale_changed = current_scale.is_some_and(|scale| {
+                previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
+            });
+            if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
                 if let Some(native_window) = native_window {
-                    self.sync_part_window_bounds(native_window, spec.bounds);
-                    let scale = self.native_ops.scale_factor(native_window).ok()
-                        .filter(|scale| scale.is_finite() && *scale > 0.0);
-                    if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                        entry.native_scale_factor = scale;
-                    }
+                    self.sync_part_window_bounds(native_window, target_bounds);
                 }
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                    entry.bounds = spec.bounds;
+                    entry.bounds = target_bounds;
+                    entry.native_scale_factor = current_scale;
                     entry.native_bounds_dirty = false;
                 }
             }
