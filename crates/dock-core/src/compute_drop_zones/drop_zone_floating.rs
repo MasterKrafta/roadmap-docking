@@ -114,7 +114,6 @@ impl FloatingZoneContext<'_> {
 
         self.append_center_zones(&target_groups)?;
         self.append_group_edge_zones(&target_groups)?;
-        self.append_column_slot_zones(area.root)?;
         self.append_column_boundary_zones(&target_groups, area.root)?;
         self.append_edge_zones(floating_rect, area.root, &target_groups)?;
         // Side targets are source-aware: Photoshop uses composition-wide edges,
@@ -237,73 +236,6 @@ impl FloatingZoneContext<'_> {
                     zone_rect,
                 )?;
             }
-        }
-        Ok(())
-    }
-
-    pub(super) fn append_column_slot_zones(
-        &mut self,
-        floating_root: NodeId,
-    ) -> Result<(), ComputeRectsError> {
-        let source_can_enter_column = matches!(
-            self.source,
-            DropSource::Composition { .. }
-        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)));
-        let source_is_floating_composition = source_can_enter_column
-            && source_is_floating_root(self.layout, self.source_root);
-        if !source_can_enter_column
-            || source_is_floating_composition
-            || !source_allows(self.layout, self.source_panels, AllowedArea::FLOATING)
-        {
-            return Ok(());
-        }
-
-        for column_rect in self.rects.columns.iter().filter(|column| {
-            contains_node(self.tree_index, floating_root, column.column)
-        }) {
-            let Some(Node::Column(column)) = self.layout.node(column_rect.column) else {
-                continue;
-            };
-            if column.mode.is_rail() {
-                continue;
-            }
-
-            let bottom = column_rect
-                .rect
-                .checked_bottom()
-                .map_err(ComputeRectsError::Geometry)?;
-            let end_height = self
-                .metrics
-                .edge_drop_width
-                .min(column_rect.rect.size.height / 3.0);
-            let side_inset = self
-                .metrics
-                .edge_drop_width
-                .min(column_rect.rect.size.width / 4.0);
-            let end_rect = Rect::new(
-                Point::new(column_rect.rect.origin.x + side_inset, bottom - end_height),
-                Size::new(
-                    (column_rect.rect.size.width - 2.0 * side_inset).max(0.0),
-                    end_height,
-                ),
-            );
-            let index = column.groups.len();
-            if let DropSource::Group { group } = self.source
-                && matches!(self.layout.node(self.source_root), Some(Node::Tabs(_)))
-                && self.layout.group_slot_is_noop(group, column_rect.column, index)
-            {
-                continue;
-            }
-
-            push_zone(
-                self.zones,
-                DropTarget::ColumnSlot {
-                    column: column_rect.column,
-                    index,
-                },
-                DropZone::ColumnEnd,
-                end_rect,
-            )?;
         }
         Ok(())
     }
@@ -618,30 +550,18 @@ impl FloatingZoneContext<'_> {
             self.layout.node(root),
             Some(Node::Split(split)) if split.axis == crate::Axis::X
         );
-        let whole_column_source = matches!(
-            self.source,
-            DropSource::Composition { .. }
-        ) && matches!(self.layout.node(self.source_root), Some(Node::Column(_)))
-            && !source_is_floating_root(self.layout, self.source_root);
-
+        // A whole Composition dropped on a Floating window always uses the
+        // target window's outer bounds. This is the same for Main- and
+        // Floating-origin drags; only internal Group boundaries remain Core drops.
         if horizontal_composition {
-            self.append_horizontal_edge_zones(
-                floating_rect,
-                target_groups,
-                !whole_column_source,
-            )?;
+            self.append_horizontal_edge_zones(floating_rect, target_groups, true)?;
         } else {
             let top_rect = if let Some(first_group) = target_groups.first() {
                 floating_top_edge_rect(floating_rect.rect, first_group.rect, self.metrics)?
             } else {
                 None
             };
-            self.append_vertical_edge_zones(
-                top_rect,
-                bottom_rect,
-                target_groups,
-                !whole_column_source,
-            )?;
+            self.append_vertical_edge_zones(top_rect, bottom_rect, target_groups, true)?;
         }
         Ok(())
     }
