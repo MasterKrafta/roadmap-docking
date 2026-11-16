@@ -15,7 +15,7 @@ use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember,
 ///
 /// Core stores each window's outer origin in physical pixels and client size in
 /// logical pixels. Keeping the native client insets and scale beside the Core
-/// bounds lets vertical header overlap be calculated without mixing DPI spaces.
+/// bounds lets every independent window align its client edges without mixing DPI spaces.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct NativeFrameGeometry {
     pub(crate) outer_width: f32,
@@ -223,22 +223,19 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
 /// Calculates every member's physical desktop origin from the WindowGrid links.
 ///
 /// The anchor remains fixed. Horizontal neighbors meet at their DWM-visible
-/// frame edges. Vertical neighbors align their client left edges and overlap
-/// exactly the lower window's CompositionHeader height, so the upper HWND
-/// covers the lower header. Repeated links on one side are laid out as a
-/// deterministic outward lane in member order.
+/// frame edges. Vertical neighbors align their client left edges and touch at
+/// their client top/bottom edges without overlap. Repeated links on one side
+/// are laid out as a deterministic outward lane in member order.
 pub(crate) fn arrange_window_grid_bounds(
     mut bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
     links: &[WindowGridLink],
     anchor: WindowGridMember,
-    header_height: f32,
+    _legacy_header_height: f32,
 ) -> Option<Vec<(WindowGridMember, Rect)>> {
     if bounds.len() != frames.len()
         || bounds.is_empty()
         || frames.iter().any(|frame| !frame.is_valid())
-        || !header_height.is_finite()
-        || header_height <= 0.0
     {
         return None;
     }
@@ -317,7 +314,6 @@ pub(crate) fn arrange_window_grid_bounds(
                         &mut from_neighbour[0].1,
                         &frames[neighbour],
                         direction,
-                        header_height,
                     )
                 } else {
                     let (before_previous, from_previous) = bounds.split_at_mut(previous);
@@ -327,7 +323,6 @@ pub(crate) fn arrange_window_grid_bounds(
                         &mut before_previous[neighbour].1,
                         &frames[neighbour],
                         direction,
-                        header_height,
                     )
                 };
                 placed?;
@@ -376,7 +371,6 @@ fn place_grid_neighbour(
     to_bounds: &mut Rect,
     to_frame: &NativeFrameGeometry,
     direction: WindowGridDirection,
-    header_height: f32,
 ) -> Option<()> {
     let x = match direction {
         WindowGridDirection::Left => {
@@ -400,15 +394,11 @@ fn place_grid_neighbour(
             let from_client_bottom = from_bounds.origin.y
                 + from_frame.client_top_inset
                 + from_frame.client_height;
-            let overlap = header_height * to_frame.scale_factor;
-            from_client_bottom - overlap - to_frame.client_top_inset
+            from_client_bottom - to_frame.client_top_inset
         }
         WindowGridDirection::Above => {
             let from_client_top = from_bounds.origin.y + from_frame.client_top_inset;
-            let overlap = header_height * from_frame.scale_factor;
-            from_client_top + overlap
-                - to_frame.client_top_inset
-                - to_frame.client_height
+            from_client_top - to_frame.client_top_inset - to_frame.client_height
         }
     };
 
@@ -1127,13 +1117,11 @@ mod window_grid_bounds_tests {
                     anchor_bounds.1.origin.y
                         + anchor_frame.client_top_inset
                         + anchor_frame.client_height
-                        - composition_header_height() * moving_frame.scale_factor
                         - moving_frame.client_top_inset
                 }
                 WindowGridDirection::Above => {
                     anchor_bounds.1.origin.y
                         + anchor_frame.client_top_inset
-                        + composition_header_height() * anchor_frame.scale_factor
                         - moving_frame.client_top_inset
                         - moving_frame.client_height
                 }
@@ -1147,7 +1135,7 @@ mod window_grid_bounds_tests {
     }
 
     #[test]
-    fn uses_configured_small_header_height_for_both_vertical_edges() {
+    fn vertical_edges_touch_client_bounds_with_mixed_dpi_and_frame_insets() {
         let [anchor, moving] = groups(2).try_into().expect("two group ids");
         let input = vec![
             bounds(anchor, 100.0, 200.0, 200.0, 120.0),
@@ -1161,42 +1149,39 @@ mod window_grid_bounds_tests {
         );
         let frames = [anchor_frame, moving_frame];
 
-        for header_height in [12.0, 20.0, composition_header_height()] {
-            let below = arrange_window_grid_bounds(
-                input.clone(),
-                &frames,
-                &[link(anchor, moving, WindowGridDirection::Below)],
-                anchor,
-                header_height,
-            )
-            .expect("small configured header height should lay out a lower window");
-            let anchor_client_bottom =
-                below[0].1.origin.y + anchor_frame.client_top_inset + anchor_frame.client_height;
-            let moving_client_top =
-                below[1].1.origin.y + moving_frame.client_top_inset;
-            let below_overlap = anchor_client_bottom - moving_client_top;
-            assert!(
-                (below_overlap - header_height * moving_frame.scale_factor).abs() < 0.001,
-                "Below overlap must use the configured header height at the moving HWND DPI",
-            );
+        let below = arrange_window_grid_bounds(
+            input.clone(),
+            &frames,
+            &[link(anchor, moving, WindowGridDirection::Below)],
+            anchor,
+            composition_header_height(),
+        )
+        .expect("a lower window should align at the client edge");
+        let anchor_client_bottom =
+            below[0].1.origin.y + anchor_frame.client_top_inset + anchor_frame.client_height;
+        let moving_client_top = below[1].1.origin.y + moving_frame.client_top_inset;
+        assert!((anchor_client_bottom - moving_client_top).abs() < 0.001);
+        assert_eq!(
+            below[0].1.origin.x + anchor_frame.client_left_inset,
+            below[1].1.origin.x + moving_frame.client_left_inset,
+        );
 
-            let above = arrange_window_grid_bounds(
-                input.clone(),
-                &frames,
-                &[link(anchor, moving, WindowGridDirection::Above)],
-                anchor,
-                header_height,
-            )
-            .expect("small configured header height should lay out an upper window");
-            let moving_client_bottom =
-                above[1].1.origin.y + moving_frame.client_top_inset + moving_frame.client_height;
-            let anchor_client_top = above[0].1.origin.y + anchor_frame.client_top_inset;
-            let above_overlap = moving_client_bottom - anchor_client_top;
-            assert!(
-                (above_overlap - header_height * anchor_frame.scale_factor).abs() < 0.001,
-                "Above overlap must use the configured header height at the anchor HWND DPI",
-            );
-        }
+        let above = arrange_window_grid_bounds(
+            input,
+            &frames,
+            &[link(anchor, moving, WindowGridDirection::Above)],
+            anchor,
+            composition_header_height(),
+        )
+        .expect("an upper window should align at the client edge");
+        let moving_client_bottom =
+            above[1].1.origin.y + moving_frame.client_top_inset + moving_frame.client_height;
+        let anchor_client_top = above[0].1.origin.y + anchor_frame.client_top_inset;
+        assert!((moving_client_bottom - anchor_client_top).abs() < 0.001);
+        assert_eq!(
+            above[0].1.origin.x + anchor_frame.client_left_inset,
+            above[1].1.origin.x + moving_frame.client_left_inset,
+        );
     }
 
     #[test]
@@ -1258,7 +1243,7 @@ mod window_grid_bounds_tests {
     }
 
     #[test]
-    fn places_a_vertical_stack_with_header_overlap_and_preserves_anchor() {
+    fn places_a_vertical_stack_without_overlap_and_preserves_anchor() {
         let [a, b, c] = groups(3).try_into().expect("three group ids");
         let input = vec![
             bounds(a, 100.0, 100.0, 300.0, 300.0),
@@ -1279,13 +1264,8 @@ mod window_grid_bounds_tests {
             .expect("a vertical grid should have finite bounds");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
-        let header_height = composition_header_height();
-        let second_y = 100.0 + frames[0].client_height
-            - header_height * frames[1].scale_factor
-            - frames[1].client_top_inset;
-        let third_y = second_y + frames[1].client_height
-            - header_height * frames[2].scale_factor
-            - frames[2].client_top_inset;
+        let second_y = 100.0 + frames[0].client_height - frames[1].client_top_inset;
+        let third_y = second_y + frames[1].client_height - frames[2].client_top_inset;
         assert_eq!(arranged[1].1.origin, Point::new(100.0, second_y));
         assert_eq!(arranged[2].1.origin, Point::new(100.0, third_y));
         assert_eq!(arranged[0].1.size, Size::new(300.0, 300.0));
@@ -1294,14 +1274,11 @@ mod window_grid_bounds_tests {
 
         let a_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
         let b_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
-        assert_eq!(
-            a_client_bottom - b_client_top,
-            composition_header_height() * frames[1].scale_factor
-        );
+        assert_eq!(a_client_bottom, b_client_top);
 
         let b_client_bottom = arranged[1].1.origin.y + frames[1].client_height;
-        let c_client_top = arranged[2].1.origin.y;
-        assert_eq!(b_client_bottom - c_client_top, composition_header_height());
+        let c_client_top = arranged[2].1.origin.y + frames[2].client_top_inset;
+        assert_eq!(b_client_bottom, c_client_top);
     }
 
     #[test]
@@ -1318,13 +1295,11 @@ mod window_grid_bounds_tests {
             .expect("the upper window should be positioned");
 
         assert_eq!(arranged[1].1.origin, Point::new(120.0, 500.0));
-        assert_eq!(
-            arranged[0].1.origin,
-            Point::new(120.0, 200.0 + composition_header_height())
-        );
-        let moving_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
+        assert_eq!(arranged[0].1.origin, Point::new(120.0, 200.0));
+        let moving_client_bottom =
+            arranged[0].1.origin.y + frames[0].client_top_inset + frames[0].client_height;
         let target_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
-        assert_eq!(moving_client_bottom - target_client_top, composition_header_height());
+        assert_eq!(moving_client_bottom, target_client_top);
     }
 
     #[test]
@@ -1369,11 +1344,11 @@ mod window_grid_bounds_tests {
             .expect("a T-shaped grid should have a consistent embedding");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
-        assert_eq!(arranged[1].1.origin, Point::new(100.0, composition_header_height()));
+        assert_eq!(arranged[1].1.origin, Point::new(100.0, 0.0));
         assert_eq!(arranged[2].1.origin, Point::new(300.0, 100.0));
         assert_eq!(
             arranged[3].1.origin,
-            Point::new(300.0, 300.0 - composition_header_height())
+            Point::new(300.0, 300.0)
         );
     }
 
@@ -1398,9 +1373,8 @@ mod window_grid_bounds_tests {
         let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("same-side neighbors should form a vertical lane");
 
-        let header_height = composition_header_height();
-        let second_y = 100.0 + frames[0].client_height - header_height;
-        let third_y = second_y + frames[1].client_height - header_height;
+        let second_y = 100.0 + frames[0].client_height;
+        let third_y = second_y + frames[1].client_height;
         assert_eq!(arranged[1].1.origin.y, second_y);
         assert_eq!(arranged[2].1.origin.y, third_y);
     }
