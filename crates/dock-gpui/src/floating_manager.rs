@@ -21,7 +21,8 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
-    components::FloatingHost, drag_host_manager::DragHostSurface, geometry::DockGeometry,
+    components::{FloatingHost, floating::{FloatingPartHost, FloatingPartKind}},
+    drag_host_manager::DragHostSurface, geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
         NativeFrameGeometry, arrange_window_grid_bounds as arrange_grid_geometry_bounds,
@@ -48,6 +49,7 @@ pub enum PanelWindowVisibility {
 #[derive(Clone, Copy)]
 enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
+    Part(WindowHandle<FloatingPartHost>),
     DragHost(WindowHandle<DragHostSurface>),
 }
 
@@ -55,6 +57,7 @@ impl PanelWindowHandle {
     fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
         match self {
             Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
+            Self::Part(window) => window.update(cx, |_, _, _| ()).is_ok(),
             Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
         }
     }
@@ -71,6 +74,7 @@ impl PanelWindowHandle {
                     host_cx.notify();
                 })
                 .map_err(|error| error.to_string()),
+            Self::Part(_) => Err("Floating part windows have immutable Core ownership".into()),
             Self::DragHost(window) => {
                 match window.update(cx, |surface, window, host_cx| {
                     let updated = surface.set_floating_group(group, window, host_cx);
@@ -91,6 +95,9 @@ impl PanelWindowHandle {
             Self::Floating(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
+            Self::Part(window) => window
+                .update(cx, |_, _, host_cx| host_cx.notify())
+                .map_err(|error| error.to_string()),
             Self::DragHost(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
@@ -104,6 +111,9 @@ impl PanelWindowHandle {
                     host.set_host_group(None, window);
                     window.remove_window();
                 });
+            }
+            Self::Part(window) => {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
             }
             Self::DragHost(window) => {
                 let _ = window.update(cx, |surface, window, surface_cx| {
@@ -141,7 +151,10 @@ struct PanelWindowEntry {
 /// the selected host panel leaves it.
 #[derive(Default)]
 pub struct PanelWindowRegistry {
+    /// Transitional PanelId entries are retained only for an active DragHost adoption.
     windows: HashMap<PanelId, PanelWindowEntry>,
+    /// Permanent Floating Header/Group windows are keyed by their Core-node identity.
+    members: HashMap<WindowGridMember, PanelWindowEntry>,
     panel_locations: HashMap<PanelId, PanelLayoutLocation>,
 }
 
@@ -153,8 +166,45 @@ impl PanelWindowRegistry {
     pub fn visible_count(&self) -> usize {
         self.windows
             .values()
+            .chain(self.members.values())
             .filter(|entry| entry.visibility == PanelWindowVisibility::Visible)
             .count()
+    }
+
+    pub fn member_count(&self) -> usize {
+        self.members.len()
+    }
+
+    pub fn window_for_member(
+        &self,
+        member: WindowGridMember,
+    ) -> Option<WindowHandle<FloatingPartHost>> {
+        match self.members.get(&member)?.window {
+            PanelWindowHandle::Part(window) => Some(window),
+            _ => None,
+        }
+    }
+
+    pub fn window_id_for_member(&self, member: WindowGridMember) -> Option<WindowId> {
+        self.members.get(&member).map(|entry| entry.window_id)
+    }
+
+    pub fn bounds_for_member(&self, member: WindowGridMember) -> Option<Rect> {
+        self.members.get(&member).map(|entry| entry.bounds)
+    }
+
+    pub fn native_window_for_member(
+        &self,
+        member: WindowGridMember,
+    ) -> Option<NativeWindowId> {
+        self.members.get(&member)?.native_window
+    }
+
+    pub fn visibility_for_member(
+        &self,
+        member: WindowGridMember,
+    ) -> Option<PanelWindowVisibility> {
+        self.members.get(&member).map(|entry| entry.visibility)
     }
 
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
@@ -411,6 +461,8 @@ pub struct FloatingWindowManager {
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     window_chains: WindowGridRegistry,
+    /// Ordered permanent Header/Group members belonging to each Core FloatingGroup.
+    part_members_by_group: HashMap<FloatingGroupId, Vec<WindowGridMember>>,
     pending_window_chain_alignment: HashSet<WindowGridMember>,
     pending_window_grid_reconnections: Vec<WindowGridLink>,
     window_chain_alignment_scheduled: bool,
@@ -434,6 +486,7 @@ impl FloatingWindowManager {
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowGridRegistry::default(),
+            part_members_by_group: HashMap::new(),
             pending_window_chain_alignment: HashSet::new(),
             pending_window_grid_reconnections: Vec::new(),
             window_chain_alignment_scheduled: false,
