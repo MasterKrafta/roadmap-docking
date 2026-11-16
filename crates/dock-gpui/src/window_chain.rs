@@ -250,15 +250,6 @@ impl WindowGrid {
         components
     }
 
-    fn is_ordered_horizontal_chain(&self) -> bool {
-        self.members.len() > 1
-            && self.links.len() == self.members.len() - 1
-            && self.members.windows(2).all(|pair| {
-                self.direction_between(pair[0], pair[1])
-                    == Some(WindowGridDirection::Right)
-            })
-    }
-
     /// Each stored grid is a connected, acyclic graph with unique member IDs.
     fn is_valid(&self) -> bool {
         if self.members.len() < 2 || self.links.len() != self.members.len() - 1 {
@@ -854,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn pruning_missing_groups_compacts_straight_horizontal_chains() {
+    fn pruning_missing_middle_group_returns_a_straight_reconnect_candidate() {
         let [a, b, c, d] = groups(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
