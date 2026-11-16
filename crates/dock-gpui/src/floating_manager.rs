@@ -1177,11 +1177,9 @@ impl FloatingWindowManager {
         };
         // Protect metric updates from the moment Windows enters its modal sizing
         // loop, even before the first size delta opens the Core history transaction.
-        let Some(session_started) = self.controller.update(cx, |controller, _| {
+        let session_started = self.controller.update(cx, |controller, _| {
             controller.begin_native_resize_session()
-        }) else {
-            return false;
-        };
+        });
         if !session_started {
             return false;
         }
