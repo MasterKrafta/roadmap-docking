@@ -2905,6 +2905,15 @@ impl FloatingWindowManager {
         }
 
         self.window_chains = next_chains;
+        for member in &members {
+            if let Some(panel) = self.host_registry.panel_for_group(*member)
+                && let Some(mut entry) = self.registry.windows.remove(&panel)
+            {
+                self.sync_native_resize_edge_policy(&mut entry, *member);
+                self.registry.windows.insert(panel, entry);
+            }
+        }
+
         // The reconnect merges formerly separate components. Collapse their
         // pending anchors to the new edge's stable target so the same HWNDs do
         // not receive competing position-correction passes.
