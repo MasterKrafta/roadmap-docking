@@ -307,14 +307,28 @@ pub(crate) fn arrange_window_grid_bounds(
 
             let mut previous = current;
             for neighbour in neighbours {
-                place_grid_neighbour(
-                    &bounds[previous].1,
-                    &frames[previous],
-                    &mut bounds[neighbour].1,
-                    &frames[neighbour],
-                    direction,
-                    header_height,
-                )?;
+                let placed = if previous < neighbour {
+                    let (before_neighbour, from_neighbour) = bounds.split_at_mut(neighbour);
+                    place_grid_neighbour(
+                        &before_neighbour[previous].1,
+                        &frames[previous],
+                        &mut from_neighbour[0].1,
+                        &frames[neighbour],
+                        direction,
+                        header_height,
+                    )
+                } else {
+                    let (before_previous, from_previous) = bounds.split_at_mut(previous);
+                    place_grid_neighbour(
+                        &from_previous[0].1,
+                        &frames[previous],
+                        &mut before_previous[neighbour].1,
+                        &frames[neighbour],
+                        direction,
+                        header_height,
+                    )
+                };
+                placed?;
                 if !visited.insert(neighbour) {
                     return None;
                 }
