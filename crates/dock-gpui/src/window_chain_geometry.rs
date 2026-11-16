@@ -935,6 +935,10 @@ mod window_grid_bounds_tests {
         WindowGridLink { from, to, direction }
     }
 
+    fn composition_header_height() -> f32 {
+        dock_core::DockMetrics::default().column_header_height
+    }
+
     fn frame_with_native_insets(
         logical_width: f32,
         logical_height: f32,
@@ -1067,7 +1071,7 @@ mod window_grid_bounds_tests {
                 &[anchor_frame, moving_frame],
                 &[link(anchor, moving, direction)],
                 anchor,
-                32.0,
+                composition_header_height(),
             )
             .expect("fractional-DPI native frames should produce a valid join");
 
@@ -1101,13 +1105,13 @@ mod window_grid_bounds_tests {
                     anchor_bounds.1.origin.y
                         + anchor_frame.client_top_inset
                         + anchor_frame.client_height
-                        - 32.0 * moving_frame.scale_factor
+                        - composition_header_height() * moving_frame.scale_factor
                         - moving_frame.client_top_inset
                 }
                 WindowGridDirection::Above => {
                     anchor_bounds.1.origin.y
                         + anchor_frame.client_top_inset
-                        + 32.0 * anchor_frame.scale_factor
+                        + composition_header_height() * anchor_frame.scale_factor
                         - moving_frame.client_top_inset
                         - moving_frame.client_height
                 }
@@ -1116,6 +1120,59 @@ mod window_grid_bounds_tests {
                 arranged[1].1.origin,
                 Point::new(expected_x, expected_y),
                 "{direction:?} used the wrong physical edge or monitor scale",
+            );
+        }
+    }
+
+    #[test]
+    fn uses_configured_small_header_height_for_both_vertical_edges() {
+        let [anchor, moving] = groups(2).try_into().expect("two group ids");
+        let input = vec![
+            bounds(anchor, 100.0, 200.0, 200.0, 120.0),
+            bounds(moving, 900.0, 1000.0, 160.0, 100.0),
+        ];
+        let anchor_frame = frame_with_native_insets(
+            200.0, 120.0, 1.25, 2.0, 3.0, 8.0, 10.0, 7.0, 6.0,
+        );
+        let moving_frame = frame_with_native_insets(
+            160.0, 100.0, 1.5, 4.0, 5.0, 13.0, 17.0, 8.0, 9.0,
+        );
+        let frames = [anchor_frame, moving_frame];
+
+        for header_height in [12.0, 20.0, composition_header_height()] {
+            let below = arrange_window_grid_bounds(
+                input.clone(),
+                &frames,
+                &[link(anchor, moving, WindowGridDirection::Below)],
+                anchor,
+                header_height,
+            )
+            .expect("small configured header height should lay out a lower window");
+            let anchor_client_bottom =
+                below[0].1.origin.y + anchor_frame.client_top_inset + anchor_frame.client_height;
+            let moving_client_top =
+                below[1].1.origin.y + moving_frame.client_top_inset;
+            let below_overlap = anchor_client_bottom - moving_client_top;
+            assert!(
+                (below_overlap - header_height * moving_frame.scale_factor).abs() < 0.001,
+                "Below overlap must use the configured header height at the moving HWND DPI",
+            );
+
+            let above = arrange_window_grid_bounds(
+                input.clone(),
+                &frames,
+                &[link(anchor, moving, WindowGridDirection::Above)],
+                anchor,
+                header_height,
+            )
+            .expect("small configured header height should lay out an upper window");
+            let moving_client_bottom =
+                above[1].1.origin.y + moving_frame.client_top_inset + moving_frame.client_height;
+            let anchor_client_top = above[0].1.origin.y + anchor_frame.client_top_inset;
+            let above_overlap = moving_client_bottom - anchor_client_top;
+            assert!(
+                (above_overlap - header_height * anchor_frame.scale_factor).abs() < 0.001,
+                "Above overlap must use the configured header height at the anchor HWND DPI",
             );
         }
     }
@@ -1140,7 +1197,7 @@ mod window_grid_bounds_tests {
                 &[frames[0], frames[0]],
                 &[],
                 a,
-                32.0,
+                composition_header_height(),
             )
             .is_none(),
             "duplicate FloatingGroup IDs must be rejected",
@@ -1151,7 +1208,7 @@ mod window_grid_bounds_tests {
                 &frames,
                 &[link(a, b, WindowGridDirection::Right)],
                 a,
-                32.0,
+                composition_header_height(),
             )
             .is_none(),
             "disconnected components must not be laid out as one grid",
@@ -1166,7 +1223,7 @@ mod window_grid_bounds_tests {
                     link(a, c, WindowGridDirection::Below),
                 ],
                 a,
-                32.0,
+                composition_header_height(),
             )
             .is_none(),
             "extra cyclic edges must be rejected",
@@ -1196,7 +1253,7 @@ mod window_grid_bounds_tests {
             link(b, c, WindowGridDirection::Below),
         ];
 
-        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("a vertical grid should have finite bounds");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
@@ -1212,7 +1269,7 @@ mod window_grid_bounds_tests {
 
         let b_client_bottom = arranged[1].1.origin.y + frames[1].client_height;
         let c_client_top = arranged[2].1.origin.y;
-        assert_eq!(b_client_bottom - c_client_top, 32.0);
+        assert_eq!(b_client_bottom - c_client_top, composition_header_height());
     }
 
     #[test]
@@ -1225,14 +1282,14 @@ mod window_grid_bounds_tests {
         let frames = [frame(300.0, 200.0, 1.5), frame(300.0, 300.0, 1.0)];
         let links = [link(target, moving, WindowGridDirection::Above)];
 
-        let arranged = arrange_window_grid_bounds(input, &frames, &links, target, 32.0)
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, target, composition_header_height())
             .expect("the upper window should be positioned");
 
         assert_eq!(arranged[1].1.origin, Point::new(120.0, 500.0));
-        assert_eq!(arranged[0].1.origin, Point::new(120.0, 232.0));
+        assert_eq!(arranged[0].1.origin, Point::new(120.0, 2composition_header_height()));
         let moving_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
         let target_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
-        assert_eq!(moving_client_bottom - target_client_top, 32.0);
+        assert_eq!(moving_client_bottom - target_client_top, composition_header_height());
     }
 
     #[test]
@@ -1245,7 +1302,7 @@ mod window_grid_bounds_tests {
         let frames = [frame(200.0, 120.0, 1.0), frame(150.0, 120.0, 1.0)];
         let links = [link(a, b, WindowGridDirection::Right)];
 
-        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("the horizontal grid should be positioned");
 
         assert_eq!(arranged[0].1.origin, Point::new(10.0, 70.0));
@@ -1273,11 +1330,11 @@ mod window_grid_bounds_tests {
             link(c, d, WindowGridDirection::Below),
         ];
 
-        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("a T-shaped grid should have a consistent embedding");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
-        assert_eq!(arranged[1].1.origin, Point::new(100.0, 32.0));
+        assert_eq!(arranged[1].1.origin, Point::new(100.0, composition_header_height()));
         assert_eq!(arranged[2].1.origin, Point::new(300.0, 100.0));
         assert_eq!(arranged[3].1.origin, Point::new(300.0, 268.0));
     }
@@ -1300,7 +1357,7 @@ mod window_grid_bounds_tests {
             link(a, c, WindowGridDirection::Below),
         ];
 
-        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, 32.0)
+        let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("same-side neighbors should form a vertical lane");
 
         assert_eq!(arranged[1].1.origin.y, 368.0);
@@ -1329,7 +1386,7 @@ mod window_grid_bounds_tests {
         ];
 
         assert!(
-            arrange_window_grid_bounds(input, &frames, &links, a, 32.0).is_none(),
+            arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height()).is_none(),
             "a conflicting branch must not commit overlapping windows"
         );
     }
@@ -1352,9 +1409,9 @@ mod window_grid_bounds_tests {
             link(b, c, WindowGridDirection::Below),
         ];
         let first =
-            arrange_window_grid_bounds(input, &frames, &links, a, 32.0).unwrap();
+            arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height()).unwrap();
         let second =
-            arrange_window_grid_bounds(first.clone(), &frames, &links, a, 32.0).unwrap();
+            arrange_window_grid_bounds(first.clone(), &frames, &links, a, composition_header_height()).unwrap();
         assert_eq!(first, second);
     }
 
