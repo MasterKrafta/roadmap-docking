@@ -2760,6 +2760,52 @@ impl FloatingWindowManager {
         // graph. Newly-created PanelWindows start hidden, so their frame metrics
         // are not eligible for reconnection validation until this pass finishes.
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
+        self.synchronize_native_part_z_order(&groups);
+
+    /// Applies Core FloatingGroup stacking order to each permanent Header/Group HWND.
+    ///
+    /// A Floating composition is now several native windows. Move every visible
+    /// member together in Core z-order so a later reconciliation cannot leave one
+    /// of its Groups behind an unrelated Floating composition.
+    fn synchronize_native_part_z_order(&self, groups: &[FloatingGroupSnapshot]) {
+        for group in groups {
+            let Some(members) = self.part_members_by_group.get(&group.id) else {
+                continue;
+            };
+            for member in members {
+                let Some(entry) = self.registry.members.get(member) else {
+                    continue;
+                };
+                if entry.visibility != PanelWindowVisibility::Visible {
+                    continue;
+                }
+                let Some(native_window) = entry.native_window else {
+                    continue;
+                };
+                let position = match self.native_ops.window_rect(native_window) {
+                    Ok(rect) => PhysicalPoint {
+                        x: rect.left,
+                        y: rect.top,
+                    },
+                    Err(error) => {
+                        tracing::debug!(
+                            ?member,
+                            %error,
+                            "could not read Floating member bounds before Z-order synchronization"
+                        );
+                        continue;
+                    }
+                };
+                if let Err(error) = self.native_ops.move_window_to_top(native_window, position) {
+                    tracing::debug!(
+                        ?member,
+                        %error,
+                        "could not synchronize a Floating member's native Z-order"
+                    );
+                }
+            }
+        }
+    }
 
         // Reconnect a straight-through pair only after its surviving native
         // hosts are visible and the proposed complete grid passes geometry
