@@ -2382,7 +2382,7 @@ fn floating_multi_group_composition_can_stack_into_another_floating_column() {
 }
 
 #[test]
-fn panel_and_group_drags_can_stack_into_a_floating_column() {
+fn panel_and_group_drags_leave_outer_floating_edges_for_window_grid() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Photoshop);
 
@@ -2442,7 +2442,7 @@ fn panel_and_group_drags_can_stack_into_a_floating_column() {
             DropZone::FloatingTop,
             DropTarget::GroupEdge {
                 group: target_top,
-                zone: DropZone::Top,
+                zone: DropZone::FloatingTop,
             },
             0usize,
         ),
@@ -2458,7 +2458,7 @@ fn panel_and_group_drags_can_stack_into_a_floating_column() {
             DropZone::FloatingBottom,
             DropTarget::GroupEdge {
                 group: target_bottom,
-                zone: DropZone::Bottom,
+                zone: DropZone::FloatingBottom,
             },
             2usize,
         ),
@@ -2521,7 +2521,15 @@ fn panel_and_group_drags_can_stack_into_a_floating_column() {
             };
 
             let mut updated = layout.clone();
-            let action = updated.resolve_drag_drop(&request, &metrics).unwrap();
+            let resolved_action = updated.resolve_drag_drop(&request, &metrics);
+            if matches!(zone_kind, DropZone::FloatingTop | DropZone::FloatingBottom) {
+                assert!(
+                    !matches!(resolved_action, Ok(DragDropAction::Command(_))),
+                    "outer Floating edges must be handled by GPUI WindowGrid, not Core Group docking"
+                );
+                continue;
+            }
+            let action = resolved_action.unwrap();
             assert_eq!(action, expected);
 
             let DragDropAction::Command(command) = action else {
