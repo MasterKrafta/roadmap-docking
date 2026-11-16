@@ -1106,7 +1106,7 @@ fn c43_opening_existing_singleton_activates_it_without_toggling_or_validating_ne
 }
 
 #[test]
-fn moving_panel_to_own_group_edge_is_a_no_op() {
+fn moving_panel_to_own_group_horizontal_edge_is_a_no_op() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
     let (panel_id, panel_node) =
@@ -1132,7 +1132,7 @@ fn moving_panel_to_own_group_edge_is_a_no_op() {
                 panel: panel_id,
                 target: DropTarget::GroupEdge {
                     group,
-                    zone: crate::DropZone::Top,
+                    zone: crate::DropZone::Left,
                 },
             },
             &metrics,
@@ -1145,6 +1145,69 @@ fn moving_panel_to_own_group_edge_is_a_no_op() {
         matches!(layout.node(group), Some(Node::Tabs(tabs)) if tabs.collapsed && tabs.children == vec![panel_node,sibling_node])
     );
     assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+
+#[test]
+fn moving_panel_to_own_group_vertical_edge_extracts_a_sibling_group() {
+    let metrics = DockMetrics::default();
+
+    for zone in [crate::DropZone::Top, crate::DropZone::Bottom] {
+        let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+        let (panel_id, panel_node) =
+            builder.panel(PanelKey::new("own-edge-extract-panel").unwrap(), descriptors()[0].1);
+        let (_, sibling_node) = builder.panel(
+            PanelKey::new("own-edge-extract-sibling").unwrap(),
+            descriptors()[0].1,
+        );
+        let group = builder.tabs(vec![panel_node, sibling_node], 0, true);
+        let column = builder.column(
+            metrics.default_column_width,
+            crate::ColumnMode::Expanded,
+            vec![group],
+            vec![1.0],
+        );
+        builder.main_area(DockSide::Right, column);
+        let mut layout = builder.build();
+        let before_version = layout.version();
+
+        let outcome = layout
+            .apply(
+                DockCommand::MovePanel {
+                    panel: panel_id,
+                    target: DropTarget::GroupEdge { group, zone },
+                },
+                &metrics,
+            )
+            .unwrap();
+
+        let Some(Node::Column(updated_column)) = layout.node(column) else {
+            panic!("the owning Column must remain in the Main dock");
+        };
+        assert_eq!(updated_column.groups.len(), 2);
+        assert_eq!(
+            updated_column.groups,
+            if zone == crate::DropZone::Top {
+                vec![layout.find_parent(panel_node).unwrap(), group]
+            } else {
+                vec![group, layout.find_parent(panel_node).unwrap()]
+            }
+        );
+        assert!(matches!(
+            layout.node(group),
+            Some(Node::Tabs(tabs)) if tabs.children == vec![sibling_node] && tabs.collapsed
+        ));
+        let extracted_group = layout.find_parent(panel_node).unwrap();
+        assert_ne!(extracted_group, group);
+        assert!(matches!(
+            layout.node(extracted_group),
+            Some(Node::Tabs(tabs)) if tabs.children == vec![panel_node]
+        ));
+        assert_eq!(layout.version(), before_version + 1);
+        assert_eq!(outcome.new_version, layout.version());
+        assert!(!outcome.changed_nodes.is_empty());
+        assert_eq!(layout.validate(&metrics), Ok(()));
+    }
 }
 
 #[test]
