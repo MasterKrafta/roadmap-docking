@@ -868,6 +868,33 @@ mod tests {
         assert_eq!(grid.members_for(a), vec![a]);
         assert_eq!(grid.members_for(c), vec![c, d]);
         assert!(grid.is_valid());
+
+        let repeated = grid.retain_groups(&live);
+        assert_eq!(repeated.removed_members, 0);
+        assert!(repeated.reconnect_candidates.is_empty());
+        assert!(repeated.components_to_align.is_empty());
+    }
+
+    #[test]
+    fn pruning_a_vertical_middle_group_returns_a_below_reconnect_candidate() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_to_side(a, b, WindowGridDirection::Below));
+        assert!(grid.link_to_side(b, c, WindowGridDirection::Below));
+
+        let live = HashSet::from([a, c]);
+        let pruned = grid.retain_groups(&live);
+        assert_eq!(
+            pruned.reconnect_candidates,
+            vec![super::WindowGridLink {
+                from: a,
+                to: c,
+                direction: WindowGridDirection::Below,
+            }],
+        );
+        assert_eq!(grid.members_for(a), vec![a]);
+        assert_eq!(grid.members_for(c), vec![c]);
     }
 
     #[test]
