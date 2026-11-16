@@ -27,6 +27,7 @@ use crate::{
         NativeFrameGeometry, arrange_contiguous_window_chain_bounds,
         arrange_window_grid_bounds as arrange_grid_geometry_bounds,
         match_moving_window_width_to_target,
+        floating_grid_members_in_native_front_to_back,
         floating_groups_in_native_z_order as grid_floating_groups_in_native_z_order,
         native_resize_right_edge_delta, shift_window_chain_after_resize,
     },
@@ -2839,12 +2840,12 @@ impl FloatingWindowManager {
         pending
     }
 
-    /// Applies Core's floating z-order to native windows and stores each chain's
-    /// left-to-right order for activation-time correction.
+    /// Applies Core's floating Z-order to native windows and stores each grid's
+    /// direction-aware front-to-back order for activation-time correction.
     ///
-    /// Windows are raised from back to front without activation. Members inside
-    /// one chain are raised right-to-left so the left member owns the overlapping
-    /// seam and its right Resize edge remains reachable.
+    /// Windows are raised from back to front without activation. Left and upper
+    /// members stay in front, preserving shared resize edges and physically
+    /// covering the CompositionHeader of every lower member.
     fn synchronize_native_z_order(
         &mut self,
         groups: &[FloatingGroupSnapshot],
@@ -2900,9 +2901,14 @@ impl FloatingWindowManager {
                 native_window
             };
 
-            let chain_windows = self
-                .window_chains
-                .members_for(group_id)
+            let chain_members = self.window_chains.members_for(group_id);
+            let chain_links = self.window_chains.links_for(group_id).unwrap_or_default();
+            // Native activation restores this same front-to-back order by raising
+            // its members in reverse, regardless of which HWND receives focus.
+            let chain_order =
+                floating_grid_members_in_native_front_to_back(&chain_members, chain_links)
+                    .unwrap_or(chain_members);
+            let chain_windows = chain_order
                 .into_iter()
                 .filter_map(|member| self.panel_window_for_group(member)?.native_window)
                 .collect::<Vec<_>>();
