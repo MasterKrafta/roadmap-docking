@@ -2399,7 +2399,17 @@ mod floating_window_chain_target_tests {
     fn tab_group_and_composition_side_drops_keep_all_four_directions() {
         let anchor = FloatingGroupId::null();
         let group = NodeId::null();
-        let floating = Some(DockWindowRole::Floating { group: anchor });
+        let floating_roles = [
+            Some(DockWindowRole::Floating { group: anchor }),
+            Some(DockWindowRole::FloatingPart {
+                group: anchor,
+                part: crate::DockWindowPart::Header { column: group },
+            }),
+            Some(DockWindowRole::FloatingPart {
+                group: anchor,
+                part: crate::DockWindowPart::Group { group },
+            }),
+        ];
         let zones = [
             (DropZone::Left, WindowGridDirection::Left),
             (DropZone::Right, WindowGridDirection::Right),
@@ -2409,18 +2419,20 @@ mod floating_window_chain_target_tests {
             (DropZone::FloatingBottom, WindowGridDirection::Below),
         ];
 
-        for handle in [
-            DragHandle::PanelTab,
-            DragHandle::GroupGrip,
-            DragHandle::DockAreaHeader,
-        ] {
-            for (zone, direction) in zones {
-                let target = Some(DropTarget::GroupEdge { group, zone });
-                assert_eq!(
-                    floating_window_chain_target(Some(handle), target, floating),
-                    Some((anchor, direction)),
-                    "{handle:?} {zone:?} drop should preserve its WindowGrid direction",
-                );
+        for floating in floating_roles {
+            for handle in [
+                DragHandle::PanelTab,
+                DragHandle::GroupGrip,
+                DragHandle::DockAreaHeader,
+            ] {
+                for (zone, direction) in zones {
+                    let target = Some(DropTarget::GroupEdge { group, zone });
+                    assert_eq!(
+                        floating_window_chain_target(Some(handle), target, floating),
+                        Some((anchor, direction)),
+                        "{handle:?} {zone:?} drop should preserve its WindowGrid direction",
+                    );
+                }
             }
         }
 

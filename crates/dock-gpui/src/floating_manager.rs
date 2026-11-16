@@ -21,7 +21,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DockWindowPart, DragHostManager, DragSourceHost,
-    components::{FloatingHost, floating::{FloatingPartHost, FloatingPartKind}},
+    components::{FloatingHost, floating::{floating_part_local_rect, FloatingPartHost, FloatingPartKind}},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
@@ -1227,13 +1227,7 @@ impl FloatingWindowManager {
                     .map(|rect| rect.rect.origin),
             }
         })?;
-        let host_local_bounds = Rect::new(
-            Point::new(
-                bounds.origin.x - part_origin.x,
-                bounds.origin.y - part_origin.y,
-            ),
-            bounds.size,
-        );
+        let host_local_bounds = floating_part_local_rect(bounds, part_origin);
         self.screen_bounds_from_floating_native_window(native_window, host_local_bounds)
     }
 

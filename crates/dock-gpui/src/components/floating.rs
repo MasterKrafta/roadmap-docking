@@ -897,7 +897,7 @@ impl FloatingPartHost {
     }
 }
 
-fn floating_part_local_rect(rect: Rect, origin: Point) -> Rect {
+pub(crate) fn floating_part_local_rect(rect: Rect, origin: Point) -> Rect {
     Rect::new(
         Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
         rect.size,
