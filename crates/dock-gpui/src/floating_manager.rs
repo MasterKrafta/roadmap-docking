@@ -1,7 +1,7 @@
 //! Runtime owner of native windows for floating dock compositions.
 //!
-//! Main-dock panels do not allocate native surfaces. A composition gets one
-//! host window only after it becomes a floating group. The shared DockController
+//! Main-dock panels do not allocate native surfaces. A floating Column owns one
+//! Header host and each Core Group owns one content host. The shared DockController
 //! remains the sole owner of Layout and panel views.
 
 use std::{collections::{HashMap, HashSet}, time::Duration};
@@ -675,13 +675,55 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
-    /// Returns every WindowGrid member in a stable native front-to-back order.
-    /// An unlinked Floating window is represented as a one-member grid.
+    fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
+        match member {
+            WindowGridMember::FloatingComposition(group) => Some(group),
+            WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
+                .part_members_by_group
+                .iter()
+                .find_map(|(group, members)| members.contains(&member).then_some(*group)),
+        }
+    }
+
+    fn grid_anchor_member_for_group(&self, group: FloatingGroupId) -> WindowGridMember {
+        self.part_members_by_group
+            .get(&group)
+            .and_then(|members| {
+                members
+                    .iter()
+                    .find(|member| matches!(member, WindowGridMember::Header(_)))
+                    .or_else(|| {
+                        members
+                            .iter()
+                            .find(|member| matches!(member, WindowGridMember::Group(_)))
+                    })
+                    .copied()
+            })
+            .unwrap_or_else(|| window_grid_member(group))
+    }
+
+    fn native_bounds_for_grid_members(
+        &self,
+        members: &[WindowGridMember],
+    ) -> Option<Vec<(WindowGridMember, Rect)>> {
+        members
+            .iter()
+            .map(|member| {
+                let entry = self.panel_window_for_grid_member(*member)?;
+                let native_window = entry.native_window?;
+                self.core_bounds_from_native_window(native_window)
+                    .map(|bounds| (*member, bounds))
+            })
+            .collect()
+    }
+
+    /// Returns every real Header/Group HWND in stable native front-to-back order.
+    /// Legacy FloatingComposition members are used only before part hosts exist.
     pub(crate) fn window_grid_members_in_native_order(
         &self,
         group: FloatingGroupId,
     ) -> Vec<WindowGridMember> {
-        let key = window_grid_member(group);
+        let key = self.grid_anchor_member_for_group(group);
         let members = self.window_chains.members_for(key);
         let links = self.window_chains.links_for(key).unwrap_or_default();
         floating_grid_members_in_native_front_to_back(&members, links).unwrap_or(members)
@@ -2946,47 +2988,47 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Applies Core FloatingGroup stacking order to each permanent Header/Group HWND.
-    ///
-    /// A Floating composition is now several native windows. Move every visible
-    /// member together in Core z-order so a later reconciliation cannot leave one
-    /// of its Groups behind an unrelated Floating composition.
+    /// Applies Core composition stacking and WindowGrid edge priority to all
+    /// visible Header/Group HWNDs, raising members from back to front.
     fn synchronize_native_part_z_order(&self, groups: &[FloatingGroupSnapshot]) {
+        let mut member_z_orders = Vec::new();
         for group in groups {
-            let Some(members) = self.part_members_by_group.get(&group.id) else {
+            if let Some(members) = self.part_members_by_group.get(&group.id) {
+                member_z_orders.extend(members.iter().copied().map(|member| (member, group.z_order)));
+            }
+        }
+        let ordered = grid_window_members_in_native_z_order(&member_z_orders, &self.window_chains);
+
+        for member in ordered {
+            let Some(entry) = self.registry.members.get(&member) else {
                 continue;
             };
-            for member in members {
-                let Some(entry) = self.registry.members.get(member) else {
-                    continue;
-                };
-                if entry.visibility != PanelWindowVisibility::Visible {
-                    continue;
-                }
-                let Some(native_window) = entry.native_window else {
-                    continue;
-                };
-                let position = match self.native_ops.window_rect(native_window) {
-                    Ok(rect) => PhysicalPoint {
-                        x: rect.left,
-                        y: rect.top,
-                    },
-                    Err(error) => {
-                        tracing::debug!(
-                            ?member,
-                            %error,
-                            "could not read Floating member bounds before Z-order synchronization"
-                        );
-                        continue;
-                    }
-                };
-                if let Err(error) = self.native_ops.move_window_to_top(native_window, position) {
+            if entry.visibility != PanelWindowVisibility::Visible {
+                continue;
+            }
+            let Some(native_window) = entry.native_window else {
+                continue;
+            };
+            let position = match self.native_ops.window_rect(native_window) {
+                Ok(rect) => PhysicalPoint {
+                    x: rect.left,
+                    y: rect.top,
+                },
+                Err(error) => {
                     tracing::debug!(
                         ?member,
                         %error,
-                        "could not synchronize a Floating member's native Z-order"
+                        "could not read Floating member bounds before Z-order synchronization"
                     );
+                    continue;
                 }
+            };
+            if let Err(error) = self.native_ops.move_window_to_top(native_window, position) {
+                tracing::debug!(
+                    ?member,
+                    %error,
+                    "could not synchronize a Floating member's native Z-order"
+                );
             }
         }
     }
