@@ -5544,6 +5544,96 @@ mod floating_part_topology_tests {
     }
 
     #[test]
+    fn external_composition_link_migrates_to_real_header_boundaries() {
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating_a = floating_ids.insert(());
+        let floating_b = floating_ids.insert(());
+        let column_a = node_ids.insert(());
+        let column_b = node_ids.insert(());
+        let column_c = node_ids.insert(());
+        let group_a = node_ids.insert(());
+        let group_b = node_ids.insert(());
+        let group_c = node_ids.insert(());
+        let header_a = WindowGridMember::Header(column_a);
+        let header_b = WindowGridMember::Header(column_b);
+        let header_c = WindowGridMember::Header(column_c);
+        let group_a = WindowGridMember::Group(group_a);
+        let group_b = WindowGridMember::Group(group_b);
+        let group_c = WindowGridMember::Group(group_c);
+        let specs = [
+            part(
+                header_a,
+                floating_a,
+                FloatingPartKind::Header { column: column_a },
+                0.0,
+                0.0,
+            ),
+            part(
+                group_a,
+                floating_a,
+                FloatingPartKind::Group { column: column_a, group: match group_a {
+                    WindowGridMember::Group(id) => id,
+                    _ => unreachable!(),
+                } },
+                0.0,
+                40.0,
+            ),
+            part(
+                header_b,
+                floating_a,
+                FloatingPartKind::Header { column: column_b },
+                244.0,
+                0.0,
+            ),
+            part(
+                group_b,
+                floating_a,
+                FloatingPartKind::Group { column: column_b, group: match group_b {
+                    WindowGridMember::Group(id) => id,
+                    _ => unreachable!(),
+                } },
+                244.0,
+                40.0,
+            ),
+            part(
+                header_c,
+                floating_b,
+                FloatingPartKind::Header { column: column_c },
+                600.0,
+                0.0,
+            ),
+            part(
+                group_c,
+                floating_b,
+                FloatingPartKind::Group { column: column_c, group: match group_c {
+                    WindowGridMember::Group(id) => id,
+                    _ => unreachable!(),
+                } },
+                600.0,
+                40.0,
+            ),
+        ];
+
+        let mut links = floating_part_internal_links(&specs);
+        let migrated = crate::window_chain::WindowGridLink {
+            from: floating_part_boundary_member(&specs, floating_a, WindowGridDirection::Right)
+                .expect("right boundary of the first composition"),
+            to: floating_part_boundary_member(&specs, floating_b, WindowGridDirection::Left)
+                .expect("left boundary of the second composition"),
+            direction: WindowGridDirection::Right,
+        };
+        assert_eq!(migrated.from, header_b);
+        assert_eq!(migrated.to, header_c);
+        links.push(migrated);
+
+        let mut registry = WindowGridRegistry::default();
+        assert!(registry.replace_all_links(&links));
+        assert_eq!(registry.members_for(header_a).len(), specs.len());
+        assert!(registry.all_links().contains(&migrated));
+    }
+
+    #[test]
     fn composition_boundaries_resolve_to_outermost_header_and_group() {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
