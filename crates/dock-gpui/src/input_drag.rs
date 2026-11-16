@@ -761,7 +761,27 @@ pub(crate) fn finish_floating_tab_drag(
             }
         };
 
-        if let Some(request) = request {
+        if let Some(mut request) = request {
+            // This release path is used only while the tab stays in its source
+            // Floating host. Keep its legacy local Group split behavior; outer
+            // FloatingTop/Bottom targets are reserved for cross-window WindowGrid joins.
+            request.target = request.target.map(|target| match target {
+                DropTarget::GroupEdge {
+                    group,
+                    zone: dock_core::DropZone::FloatingTop,
+                } => DropTarget::GroupEdge {
+                    group,
+                    zone: dock_core::DropZone::Top,
+                },
+                DropTarget::GroupEdge {
+                    group,
+                    zone: dock_core::DropZone::FloatingBottom,
+                } => DropTarget::GroupEdge {
+                    group,
+                    zone: dock_core::DropZone::Bottom,
+                },
+                target => target,
+            });
             let action = {
                 let metrics = controller.metrics();
                 controller.layout().resolve_drag_drop(&request, &metrics)
