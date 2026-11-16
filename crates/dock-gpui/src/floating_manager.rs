@@ -2502,6 +2502,19 @@ impl FloatingWindowManager {
                 (!entry.window.is_available(cx)).then_some(*panel)
             })
             .collect::<Vec<_>>();
+        for group in &groups {
+            if !self.window_chains.is_chained(group.id) {
+                continue;
+            }
+            let Some(panel) = next_hosts.get(&group.id).copied() else {
+                continue;
+            };
+            let host_changed = previous_hosts.get(&group.id).copied() != Some(panel);
+            let host_lost = unavailable_panels.contains(&panel);
+            if host_changed || host_lost {
+                self.pending_window_chain_alignment.insert(group.id);
+            }
+        }
         for panel in unavailable_panels {
             self.release_panel_window(panel, cx);
         }
@@ -2511,6 +2524,15 @@ impl FloatingWindowManager {
             .filter(|panel| !self.registry.windows.contains_key(panel))
             .copied()
             .collect::<Vec<_>>();
+        for group in &groups {
+            if self.window_chains.is_chained(group.id)
+                && next_hosts
+                    .get(&group.id)
+                    .is_some_and(|panel| missing_panels.contains(panel))
+            {
+                self.pending_window_chain_alignment.insert(group.id);
+            }
+        }
         for (index, panel) in missing_panels.into_iter().enumerate() {
             let Some(location) = panel_locations.get(&panel).copied() else {
                 continue;
