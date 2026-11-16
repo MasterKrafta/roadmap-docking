@@ -3400,7 +3400,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::FloatingTop,
+                        zone: DropZone::Top,
                     }
         })
         .expect("a Floating composition must expose the top of the Main stack");
