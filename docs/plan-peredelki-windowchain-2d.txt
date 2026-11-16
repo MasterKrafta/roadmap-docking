@@ -667,7 +667,7 @@ crates/dock-gpui/src/floating_manager.rs
 - native_resize_right_edge_delta() дополнена расчётом bottom-edge delta.
 - Геометрия вычисляет только связную восточную область от прямых Right-соседей
   и южные ветви от прямых Below-соседей. Фильтрация выполняется в физических
-  координатах по DWM-visible right edge и client top каждого HWND.
+  координатах по client-right/client-left и client-top каждого HWND.
 - При угловом Resize X/Y-offset объединяются перед изменением bounds; повторные
   или конфликтующие команды одному FloatingGroup не создаются.
 - После primary Core Resize используется фактически принятый Core bounds,
