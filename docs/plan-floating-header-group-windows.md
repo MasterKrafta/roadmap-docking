@@ -353,34 +353,40 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 4. Переработать геометрию WindowGrid
 
-<Статус: частично реализован 16 ноября 2026 г.; базовая геометрия и переход графа на реальные Header/Group завершены, перемещение и Resize остаются открытыми.>
+<Статус: частично реализован 16 ноября 2026 г.; базовая геометрия и граф реальных Header/Group завершены, остаётся подключить перемещение и Resize к отдельным HWND.>
 
-Файлы: `window_chain.rs`, `window_chain_geometry.rs`, `floating_manager.rs` и unit-тесты геометрии.
+Файлы: `window_chain.rs`, `window_chain_geometry.rs`, `floating_manager.rs`, `components/floating.rs` и тесты геометрии/топологии.
 
 Уже реализовано:
 
 - Удалён старый vertical overlap на высоту CompositionHeader. Вертикальные соседи стыкуются по client top/bottom с отдельными native insets и DPI каждого HWND.
 - Добавлен общий перевод Core client geometry в native outer bounds. Учитываются физический origin исходного Floating окна, локальный логический origin Column/Group, client insets и DPI целевого HWND.
 - `reconcile_part_windows` пересчитывает native bounds при изменении Core geometry, DPI и invalidation внешних bounds.
-- WindowGrid теперь перестраивается из реальных Core members: горизонтальная цепочка Header по Column и вертикальная цепочка Group под каждым Header.
-- Внешние связи между прежними `FloatingComposition` переносятся на граничные Header/Group members. Pending reconnect links и anchors также мигрируют на новые идентификаторы.
+- WindowGrid перестраивается из реальных Core members: горизонтальная цепочка Header по Column и вертикальная цепочка Group под каждым Header.
+- Внешние связи прежних `FloatingComposition` переносятся на граничные Header/Group members. Pending reconnect links и anchors тоже мигрируют на новые идентификаторы.
 - Удаление Header/Group проходит через typed pruning; straight-through reconnect проверяется по реальным native bounds и frame geometry.
 - Отложенное выравнивание читает bounds каждого HWND отдельно. В Core применяется только единый translation всей Floating Composition; несовместимые независимые смещения не записываются.
-- Z-order строится по typed Header/Group графу. Добавлены тесты для дробного DPI, стыковки без overlap, транзакционной пересборки графа и топологии двух колонок.
+- Z-order строится по typed Header/Group графу. Добавлены тесты для дробного DPI, стыковки без overlap, транзакционной пересборки графа, двух колонок и переноса внешней связи между композициями.
 
 Осталось:
 
-- Реализовать перемещение Header вместе со всеми Group своей Column. Сейчас новые part HWND намеренно созданы без native move hooks.
-- Реализовать согласованное изменение ширины колонки: Header и все её Group должны менять ширину вместе.
-- Реализовать вертикальный Resize отдельной Group: менять её высоту и положение нижних Group, не двигая Header и не изменяя высоту соседних Group.
-- После введения этих операций обновить граф/геометрию при переносе Column между Floating compositions и при изменении порядка Group.
+- Подключить перемещение Header вместе со всеми Group своей Column. Сейчас новые part HWND намеренно созданы без native move hooks.
+- Подключить согласованное изменение ширины Column: Header и все её Group должны менять ширину вместе.
+- Подключить вертикальный Resize отдельной Group: менять её высоту и положение нижних Group, не двигая Header и не изменяя высоту соседних Group.
+- После введения этих операций согласовать поведение при переносе Column между Floating compositions и изменении порядка Group.
+
+Переиспользуемые Core-команды уже существуют:
+
+- `ResizeGroups` меняет вертикальные ratios соседних Group в одной Column с учётом минимумов и collapsed-состояния.
+- `ResizeSplitColumnBoundary` меняет ширину соседних Column внутри Floating Split(X).
+- GPUI уже содержит `input_resize.rs` и `SplitterView`. Новые Core-команды и отдельная формула ratio для Floating не нужны; требуется подключить существующие команды к hit-зонам отдельных Header/Group окон.
 
 Размеры и поведение:
 
 - Ширина Header и всех Group одной Column должна совпадать.
 - Вертикальный Resize Group меняет высоту только этой Group; нижние Group сдвигаются на разницу высот.
 - Header остаётся на месте при вертикальном Resize или перестановке Group.
-- Пока согласованный Resize не реализован, conflicting resize edges новых part HWND остаются отключёнными, чтобы отдельные окна не меняли размеры независимо.
+- Пока согласованный Resize не подключён, conflicting resize edges новых part HWND остаются отключёнными, чтобы отдельные окна не меняли размеры независимо.
 
 Критерий: Header остаётся неподвижным при вертикальной вставке/Resize Group; Group не перекрываются; окна одной Column сохраняют общую ширину и корректно стыкуются при дробном DPI.
 
