@@ -309,22 +309,31 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 2. Разделить Floating-рендеринг на Header и Group
 
-Файлы: components/floating.rs, dock-components/composition_header.rs, dock-components/group.rs, dock-components/composition.rs; при необходимости отдельные host-модули в components/.
+<Статус: root-host представления реализованы 16 ноября 2026 г.; локальные проверки ожидают пользователя.>
 
-1. Создать root host для Header window и root host для Group window. Можно использовать общий host с типизированной ролью, если это не усложняет обработчики.
-2. Header host отображает только CompositionHeader одной Column.
-3. Group host отображает ровно одну Group и принадлежащие ей PanelView.
-4. Переиспользовать существующие рендереры CompositionHeader и DockGroupView, не копировать их визуальную логику.
-5. В Floating перестать рендерить полный набор колонок/групп через один FloatingHost.
-6. Main оставить на текущем composition.rs: не создавать отдельные HWND для Header/Group в Main.
+Файл: `crates/dock-gpui/src/components/floating.rs`.
 
-Критерий: одна тестовая Floating Column отображается как одно окно Header и отдельные окна всех её Group; вкладки и содержимое видны ровно по одному разу.
+Что сделано:
+
+1. Добавлен типизированный `FloatingPartKind`: `Header { column }` или `Group { column, group }`.
+2. Добавлен общий `FloatingPartHost` с отдельными конструкторами для Header и Group. Один host монтирует только один указанный Core-элемент.
+3. Header-host получает геометрию одной Column и переиспользует `DockCompositionView::render_header` → `CompositionHeader`.
+4. Group-host проверяет принадлежность Group указанной Column, переводит её геометрию в локальные координаты окна и переиспользует `DockGroupView::render_core` и `PanelHost`.
+5. Для Group сохранены общий кеш PanelView, `PanelTransferPresentation` и контекстное меню. Переносимые вкладки исключаются из списка монтируемых PanelView так же, как в существующем FloatingHost.
+6. Main не менялся и продолжает рендерить Composition через текущий `composition.rs`.
+7. Добавлен unit-тест преобразования геометрии Group в локальные координаты отдельного окна.
+
+Граница этапа: `FloatingWindowManager` пока использует прежний полно-композиционный `FloatingHost`. Новый `FloatingPartHost` подготовлен, но постоянные Header/Group HWND и переключение реестра будут подключены на этапе 3. Так рендеринг отделён от жизненного цикла нативных окон.
+
+Критерий этапа 2: каждый Header-host способен отрисовать только шапку одной Column, а каждый Group-host — только одну Group и её активный PanelView в локальных координатах. Сквозное появление отдельных HWND для одной тестовой Column проверяется после подключения reconcile на этапе 3.
 
 ### Этап 3. Создание и согласование окон через reconcile
 
-Файлы: floating_manager.rs, host-модули и тесты менеджера.
+Файлы: `floating_manager.rs`, host-модули и тесты менеджера.
 
 1. Переписать сбор желаемых окон: для каждой Floating Column — Header; для каждой Floating Group — Group.
+2. Перевести постоянный реестр с временной схемы PanelId-host на типизированные `WindowGridMember::Header` и `WindowGridMember::Group`; оставить `FloatingComposition` только на переходный период.
+3. Создавать недостающие HWND скрытыми, назначать owner, получать native frame/DPI, размещать и только затем показывать.
 2. Создавать недостающие HWND скрытыми, назначать owner, получать native frame/DPI, размещать и только затем показывать.
 3. Существующие окна сохранять, пока их Column/Group NodeId жив и роль не изменилась.
 4. Удалять окна, чьи Core Column/Group больше не существуют.
