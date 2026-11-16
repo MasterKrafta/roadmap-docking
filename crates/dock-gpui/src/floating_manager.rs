@@ -1428,7 +1428,7 @@ impl FloatingWindowManager {
         pointer: Point,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.window_chains.is_chained(window_grid_member(group))
+        if self.window_chains.is_chained(window_grid_member(group)) {
             return false;
         }
         self.begin_existing_window_move(group, pointer, cx)
