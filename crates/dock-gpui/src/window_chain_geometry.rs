@@ -599,10 +599,13 @@ pub(crate) fn shift_window_grid_after_resize(
         }
     }
 
-    let client_right = bounds[resized_index].1.origin.x
+    let resized_client_right = bounds[resized_index].1.origin.x
         + frames[resized_index].outer_width
         - frames[resized_index].client_right_inset;
-    if !client_right.is_finite() {
+    // Neighbours still sit on the pre-resize edge. Recover that edge from the
+    // accepted Core boundary delta before selecting the east-side region.
+    let previous_client_right = resized_client_right - right_edge_delta;
+    if !previous_client_right.is_finite() {
         return None;
     }
     let east_region = collect_window_grid_region(
@@ -612,7 +615,7 @@ pub(crate) fn shift_window_grid_after_resize(
         |member| {
             let index = indices[&member];
             let client_left = bounds[index].1.origin.x + frames[index].client_left_inset;
-            client_left.is_finite() && client_left >= client_right - 1.5
+            client_left.is_finite() && client_left >= previous_client_right - 1.5
         },
     );
 
@@ -1301,13 +1304,13 @@ mod native_resize_grid_geometry_tests {
         let (_ids, ids) = groups(4);
         let [a, b, c, d] = ids.as_slice() else { panic!("four groups"); };
         let bounds = vec![
-            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*a, rect(0.0, 0.0, 124.0, 80.0)),
             (*b, rect(100.0, 0.0, 50.0, 40.0)),
             (*c, rect(0.0, 70.0, 100.0, 40.0)),
             (*d, rect(100.0, 30.0, 50.0, 50.0)),
         ];
         let frames = vec![
-            frame(100.0, 80.0, 1.0),
+            frame(124.0, 80.0, 1.0),
             frame(50.0, 40.0, 1.0),
             frame(100.0, 40.0, 1.0),
             frame(50.0, 50.0, 1.0),
@@ -1332,13 +1335,13 @@ mod native_resize_grid_geometry_tests {
         let (_ids, ids) = groups(4);
         let [a, b, c, d] = ids.as_slice() else { panic!("four groups"); };
         let bounds = vec![
-            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*a, rect(0.0, 0.0, 120.0, 80.0)),
             (*b, rect(110.0, 0.0, 50.0, 40.0)),
             (*c, rect(-2.0, 70.0, 100.0, 40.0)),
             (*d, rect(110.0, 35.0, 50.0, 50.0)),
         ];
         let frames = vec![
-            frame_with_insets(100.0, 80.0, 10.0, 10.0, 5.0, 5.0, 2.0, 4.0),
+            frame_with_insets(120.0, 80.0, 10.0, 10.0, 5.0, 5.0, 2.0, 4.0),
             frame_with_insets(50.0, 40.0, 14.0, 6.0, 5.0, 5.0, 6.0, 4.0),
             frame_with_insets(100.0, 40.0, 12.0, 8.0, 5.0, 5.0, 2.0, 4.0),
             frame_with_insets(50.0, 50.0, 14.0, 6.0, 5.0, 5.0, 1.0, 4.0),
@@ -1396,14 +1399,14 @@ mod native_resize_grid_geometry_tests {
         let (_ids, ids) = groups(5);
         let [a, b, c, d, e] = ids.as_slice() else { panic!("five groups"); };
         let bounds = vec![
-            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*a, rect(0.0, 0.0, 112.0, 100.0)),
             (*b, rect(100.0, 0.0, 50.0, 40.0)),
             (*c, rect(0.0, 70.0, 100.0, 40.0)),
             (*d, rect(100.0, 30.0, 50.0, 50.0)),
             (*e, rect(0.0, 120.0, 100.0, 40.0)),
         ];
         let frames = vec![
-            frame(100.0, 80.0, 1.0),
+            frame(112.0, 100.0, 1.0),
             frame(50.0, 40.0, 1.0),
             frame(100.0, 40.0, 1.0),
             frame(50.0, 50.0, 1.0),
@@ -1423,6 +1426,33 @@ mod native_resize_grid_geometry_tests {
         assert_eq!(shifted[3].1.origin, Point::new(112.0, 30.0));
         assert_eq!(shifted[4].1.origin, Point::new(0.0, 140.0));
         assert_eq!(shifted[3].1.size, Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn resizing_middle_window_moves_only_the_eastern_members() {
+        let (_ids, ids) = groups(3);
+        let [a, b, c] = ids.as_slice() else { panic!("three groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 70.0, 40.0)),
+            (*c, rect(150.0, 0.0, 80.0, 40.0)),
+        ];
+        let frames = vec![
+            frame(100.0, 80.0, 1.0),
+            frame(70.0, 40.0, 1.0),
+            frame(80.0, 40.0, 1.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*b, *c, WindowGridDirection::Right),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *b, 20.0, 0.0)
+            .expect("valid middle member resize");
+        assert_eq!(shifted[0].1.origin, Point::new(0.0, 0.0));
+        assert_eq!(shifted[1].1.origin, Point::new(100.0, 0.0));
+        assert_eq!(shifted[2].1.origin, Point::new(170.0, 0.0));
+        assert_eq!(shifted[2].1.size, Size::new(80.0, 40.0));
     }
 
     #[test]
@@ -1453,12 +1483,12 @@ mod native_resize_grid_geometry_tests {
         let (_ids, ids) = groups(3);
         let [a, b, c] = ids.as_slice() else { panic!("three groups"); };
         let bounds = vec![
-            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*a, rect(0.0, 0.0, 115.0, 80.0)),
             (*b, rect(100.0, 0.0, 50.0, 40.0)),
             (*c, rect(200.0, 0.0, 30.0, 40.0)),
         ];
         let frames = vec![
-            frame(100.0, 80.0, 1.0),
+            frame(115.0, 80.0, 1.0),
             frame(50.0, 40.0, 2.0),
             frame(30.0, 40.0, 1.0),
         ];
