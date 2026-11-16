@@ -748,8 +748,8 @@ mod tests {
 
         assert!(grid.has_neighbor_on_side(c, WindowGridDirection::Above));
         assert!(grid.has_neighbor_on_side(c, WindowGridDirection::Right));
-        assert!(!grid.has_neighbor_on_side(d, WindowGridDirection::Left));
-        assert!(grid.has_neighbor_on_side(d, WindowGridDirection::Left) == false);
+        assert!(grid.has_neighbor_on_side(d, WindowGridDirection::Left));
+        assert!(!grid.has_neighbor_on_side(d, WindowGridDirection::Above));
     }
 
     #[test]
