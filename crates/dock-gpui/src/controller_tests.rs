@@ -523,21 +523,36 @@ fn metric_replacement_is_rejected_during_an_active_drag() {
 }
 
 #[test]
-fn metric_replacement_is_rejected_during_native_os_resize() {
+fn metric_replacement_is_rejected_throughout_native_os_resize() {
     let mut controller = controller();
-    assert!(controller.begin_native_resize_transaction());
+    assert!(controller.begin_native_resize_session());
 
     let next_metrics = DockMetrics {
         column_header_height: 18.0,
         ..controller.metrics()
     };
+    assert!(
+        matches!(
+            controller.set_metrics(next_metrics),
+            Err(DockControllerConfigError::ActiveInteraction)
+        ),
+        "metrics are blocked as soon as the OS sizing loop starts",
+    );
+    assert_eq!(controller.metrics_revision, 0);
+
+    assert!(controller.begin_native_resize_transaction());
     assert!(matches!(
         controller.set_metrics(next_metrics),
         Err(DockControllerConfigError::ActiveInteraction)
     ));
-    assert_eq!(controller.metrics_revision, 0);
 
     controller.finish_native_resize_transaction();
+    assert!(matches!(
+        controller.set_metrics(next_metrics),
+        Err(DockControllerConfigError::ActiveInteraction)
+    ), "the guard remains active until WM_EXITSIZEMOVE");
+
+    controller.end_native_resize_session();
     assert!(controller.set_metrics(next_metrics).unwrap());
     assert_eq!(controller.metrics_revision, 1);
 }
