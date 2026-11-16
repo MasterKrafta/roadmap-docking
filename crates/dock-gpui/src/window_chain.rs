@@ -335,6 +335,46 @@ pub(crate) struct WindowGridRegistry {
 }
 
 impl WindowGridRegistry {
+    /// Returns every directed edge once, including all currently connected grids.
+    pub(crate) fn all_links(&self) -> Vec<WindowGridLink> {
+        let mut emitted_grids = HashSet::new();
+        let mut links = Vec::new();
+        for grid_id in self.grid_by_group.values() {
+            if !emitted_grids.insert(*grid_id) {
+                continue;
+            }
+            if let Some(grid) = self.grids.get(grid_id) {
+                links.extend(grid.links.iter().copied());
+            }
+        }
+        links
+    }
+
+    /// Rebuilds the registry transactionally from a complete set of directed edges.
+    ///
+    /// Each input edge must connect two distinct components at the point it is
+    /// inserted; cycles and duplicate identities are rejected without changing
+    /// the current registry.
+    pub(crate) fn replace_all_links(&mut self, links: &[WindowGridLink]) -> bool {
+        let mut next = Self::default();
+        let mut seen = HashSet::new();
+
+        for link in links {
+            if !seen.insert(*link) {
+                continue;
+            }
+            if !next.link_to_side(link.from, link.to, link.direction) {
+                return false;
+            }
+        }
+
+        if !next.is_valid() {
+            return false;
+        }
+        *self = next;
+        true
+    }
+
     pub(crate) fn members_for(&self, group: WindowGridMember) -> Vec<WindowGridMember> {
         self.grid_by_group
             .get(&group)
@@ -861,6 +901,56 @@ mod tests {
         assert!(grid.has_neighbor_on_side(c, WindowGridDirection::Right));
         assert!(grid.has_neighbor_on_side(d, WindowGridDirection::Left));
         assert!(!grid.has_neighbor_on_side(d, WindowGridDirection::Above));
+    }
+
+    #[test]
+    fn replace_all_links_builds_typed_header_and_group_topology_transactionally() {
+        let [header_a, group_a1, group_a2, header_b, group_b] = members(5);
+        let links = [
+            WindowGridLink {
+                from: header_a,
+                to: group_a1,
+                direction: WindowGridDirection::Below,
+            },
+            WindowGridLink {
+                from: group_a1,
+                to: group_a2,
+                direction: WindowGridDirection::Below,
+            },
+            WindowGridLink {
+                from: header_a,
+                to: header_b,
+                direction: WindowGridDirection::Right,
+            },
+            WindowGridLink {
+                from: header_b,
+                to: group_b,
+                direction: WindowGridDirection::Below,
+            },
+        ];
+        let mut registry = WindowGridRegistry::default();
+
+        assert!(registry.replace_all_links(&links));
+        assert_eq!(
+            registry.members_for(header_a),
+            vec![header_a, group_a1, group_a2, header_b, group_b],
+        );
+        assert_eq!(registry.all_links().len(), links.len());
+
+        let original = registry.clone();
+        let cyclic = [
+            links[0],
+            links[1],
+            links[2],
+            links[3],
+            WindowGridLink {
+                from: group_b,
+                to: header_a,
+                direction: WindowGridDirection::Right,
+            },
+        ];
+        assert!(!registry.replace_all_links(&cyclic));
+        assert_eq!(registry, original);
     }
 
     #[test]
