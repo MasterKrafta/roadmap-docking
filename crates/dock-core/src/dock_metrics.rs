@@ -323,8 +323,7 @@ impl Default for DockMetrics {
             min_group_height: 80.0,
             collapsed_group_height: 28.0,
             column_header_height: 32.0,
-            // These two heights were not specified by the roadmap excerpt;
-            // 28 px is a provisional placeholder for each.
+            // These defaults support Core-only callers; GPUI overrides them from ThemeMetrics.
             header_height: 28.0,
             tab_strip_height: 28.0,
             group_control_button_width: 28.0,
