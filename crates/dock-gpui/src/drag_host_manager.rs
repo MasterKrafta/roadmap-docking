@@ -1515,12 +1515,19 @@ impl DragHostManager {
             }
         }
 
+        let Some(expected_groups) = self.pending_handoff_groups(primary_target_group) else {
+            return true;
+        };
         let target_shown = self
             .floating_manager
             .as_ref()
             .is_some_and(|manager| {
                 manager.update(cx, |manager, manager_cx| {
-                    manager.show_handoff_target(primary_target_group, manager_cx)
+                    manager.show_handoff_target(
+                        primary_target_group,
+                        &expected_groups,
+                        manager_cx,
+                    )
                 })
             });
         !target_shown
