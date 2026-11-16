@@ -1,4 +1,4 @@
-use super::{DockController, DockEvent, ResolverCacheKey};
+use super::{DockController, DockControllerConfigError, DockEvent, ResolverCacheKey};
 use crate::drag_host::{DragHostId, DragSourceHost};
 use dock_core::{
     CommandError, DockCommand, DockMetrics, DragDropAction, DragHandle, DragPayload, DragState,
@@ -465,6 +465,61 @@ fn metric_replacement_invalidates_geometry_and_advances_metric_revision() {
 
     controller.geometry().unwrap();
     assert!(controller.cached_geometry_is_current());
+}
+
+#[test]
+fn metric_replacement_emits_one_revision_event_and_is_idempotent() {
+    let mut controller = controller();
+    controller.geometry().unwrap();
+    let initial_revision = controller.metrics_revision;
+    let metrics = DockMetrics {
+        column_header_height: 18.0,
+        ..controller.metrics()
+    };
+
+    assert!(controller.set_metrics(metrics).unwrap());
+    assert_eq!(controller.metrics_revision, initial_revision + 1);
+    assert!(matches!(
+        controller.pending_events.back(),
+        Some(DockEvent::MetricsChanged { revision }) if *revision == initial_revision + 1
+    ));
+
+    assert!(!controller.set_metrics(metrics).unwrap());
+    assert_eq!(controller.metrics_revision, initial_revision + 1);
+    assert!(matches!(
+        controller.pending_events.back(),
+        Some(DockEvent::MetricsChanged { revision }) if *revision == initial_revision + 1
+    ));
+}
+
+#[test]
+fn metric_replacement_is_rejected_during_an_active_drag() {
+    let mut controller = controller();
+    controller
+        .begin_content_drag_interaction(
+            DragPayload::Panel {
+                panel: PanelId::null(),
+            },
+            DragHandle::PanelTab,
+            Point::new(20.0, 20.0),
+            DragSourceHost::Main,
+            WindowId::from(74),
+        )
+        .expect("content drag should start");
+
+    let next_metrics = DockMetrics {
+        column_header_height: 18.0,
+        ..controller.metrics()
+    };
+    assert!(matches!(
+        controller.set_metrics(next_metrics),
+        Err(DockControllerConfigError::ActiveInteraction)
+    ));
+    assert_eq!(
+        controller.metrics().column_header_height,
+        DockMetrics::default().column_header_height
+    );
+    assert_eq!(controller.metrics_revision, 0);
 }
 
 #[test]
