@@ -4183,10 +4183,18 @@ impl FloatingWindowManager {
             }
         }
 
-        // Prune before rebuilding the desired internal Column/Group links.
-        // This lets WindowGrid preserve valid external links and produce
-        // straight-through candidates when a real native member disappears.
-        let live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
+        // Retain legacy FloatingComposition graph endpoints for this pass so
+        // their external links can be migrated to real Header/Group boundaries.
+        // Stale typed members are still pruned first, allowing WindowGrid to
+        // produce straight-through candidates before the Core topology is rebuilt.
+        let mut live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
+        for link in self.window_chains.all_links() {
+            for member in [link.from, link.to] {
+                if matches!(member, WindowGridMember::FloatingComposition(_)) {
+                    live_members.insert(member);
+                }
+            }
+        }
         let prune_result = self.window_chains.retain_members(&live_members);
         let stale_alignment_anchors = self
             .pending_window_chain_alignment
