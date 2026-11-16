@@ -685,6 +685,90 @@ impl FloatingWindowManager {
         }
     }
 
+    fn floating_part_boundary_member_for_group(
+        &self,
+        group: FloatingGroupId,
+        side: WindowGridDirection,
+    ) -> Option<WindowGridMember> {
+        let members = self.part_members_by_group.get(&group)?;
+        let first_header = members
+            .iter()
+            .find(|member| matches!(member, WindowGridMember::Header(_)))
+            .copied();
+        let last_header = members
+            .iter()
+            .rev()
+            .find(|member| matches!(member, WindowGridMember::Header(_)))
+            .copied();
+        let first_group = members
+            .iter()
+            .find(|member| matches!(member, WindowGridMember::Group(_)))
+            .copied();
+        let last_group = members
+            .iter()
+            .rev()
+            .find(|member| matches!(member, WindowGridMember::Group(_)))
+            .copied();
+
+        match side {
+            WindowGridDirection::Left => first_header.or(first_group),
+            WindowGridDirection::Right => last_header.or(last_group),
+            WindowGridDirection::Above => first_header.or(first_group),
+            WindowGridDirection::Below => last_group.or(last_header),
+        }
+    }
+
+    fn migrate_window_grid_link(
+        &self,
+        link: WindowGridLink,
+    ) -> Option<WindowGridLink> {
+        let from = match link.from {
+            WindowGridMember::FloatingComposition(group) => {
+                self.floating_part_boundary_member_for_group(group, link.direction)?
+            }
+            member => self.floating_group_for_member(member).map(|_| member)?,
+        };
+        let to = match link.to {
+            WindowGridMember::FloatingComposition(group) => self
+                .floating_part_boundary_member_for_group(group, link.direction.opposite())?,
+            member => self.floating_group_for_member(member).map(|_| member)?,
+        };
+        (from != to).then_some(WindowGridLink {
+            from,
+            to,
+            direction: link.direction,
+        })
+    }
+
+    fn migrate_pending_window_grid_state(&mut self) {
+        let pending_links = std::mem::take(&mut self.pending_window_grid_reconnections);
+        for link in pending_links {
+            if let Some(link) = self.migrate_window_grid_link(link)
+                && !self.pending_window_grid_reconnections.contains(&link)
+            {
+                self.pending_window_grid_reconnections.push(link);
+            }
+        }
+
+        let pending_anchors =
+            std::mem::take(&mut self.pending_window_chain_alignment);
+        for anchor in pending_anchors {
+            let migrated = match anchor {
+                WindowGridMember::FloatingComposition(group) => {
+                    self.part_members_by_group
+                        .contains_key(&group)
+                        .then(|| self.grid_anchor_member_for_group(group))
+                }
+                member => self.floating_group_for_member(member).map(|_| member),
+            };
+            if let Some(anchor) = migrated
+                && self.window_chains.is_chained(anchor)
+            {
+                self.pending_window_chain_alignment.insert(anchor);
+            }
+        }
+    }
+
     fn grid_anchor_member_for_group(&self, group: FloatingGroupId) -> WindowGridMember {
         self.part_members_by_group
             .get(&group)
@@ -2620,7 +2704,9 @@ impl FloatingWindowManager {
             tracing::debug!(removed_chain_members, "removed stale WindowGrid members");
         }
         for candidate in prune_result.reconnect_candidates {
-            if !self.pending_window_grid_reconnections.contains(&candidate) {
+            if let Some(candidate) = self.migrate_window_grid_link(candidate)
+                && !self.pending_window_grid_reconnections.contains(&candidate)
+            {
                 self.pending_window_grid_reconnections.push(candidate);
             }
         }
@@ -4208,7 +4294,11 @@ impl FloatingWindowManager {
         self.pending_window_chain_alignment
             .extend(prune_result.components_to_align.iter().copied());
 
+        // Pending requests may still carry legacy composition identities from
+        // register_window_chain or a previous prune. Rebuild first, then migrate
+        // those identities to the current Header/Group boundary members.
         self.rebuild_floating_part_window_grid(&desired);
+        self.migrate_pending_window_grid_state();
         let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
         self.pending_window_grid_reconnections
             .retain(|candidate| !rebuilt_links.contains(candidate));
