@@ -40,12 +40,16 @@ pub struct DockColumnView;
 impl DockColumnView {
     /// Renders one Group occupying all available space below the Column header.
     pub fn one_group(theme: Theme) -> impl IntoElement {
-        Self::render_groups("column-one-group", 1, DockMetrics::default(), theme)
+        let metrics = crate::dock_metrics_from_theme(theme.metrics)
+            .expect("DockTheme must provide valid DockMetrics");
+        Self::render_groups("column-one-group", 1, metrics, theme)
     }
 
     /// Renders two Groups stacked vertically with equal available height.
     pub fn two_groups(theme: Theme) -> impl IntoElement {
-        Self::render_groups("column-two-groups", 2, DockMetrics::default(), theme)
+        let metrics = crate::dock_metrics_from_theme(theme.metrics)
+            .expect("DockTheme must provide valid DockMetrics");
+        Self::render_groups("column-two-groups", 2, metrics, theme)
     }
 
     /// Renders a live Column with exactly one active tab and its panel view.
