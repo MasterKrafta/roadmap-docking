@@ -1035,15 +1035,12 @@ impl FloatingWindowManager {
                             manager.schedule_reconcile(manager_cx);
                         }
                         DockEvent::MetricsChanged { .. } => {
-                            // A changed CompositionHeader height affects every vertical
-                            // seam in an existing WindowGrid. Keep each Core composition
-                            // independent and queue one stable anchor per connected grid.
+                            // Updated metrics change every Header/Group client
+                            // rectangle. Queue one real member per connected WindowGrid.
                             let mut anchors = HashSet::new();
-                            for group in manager.host_registry.floating_groups.keys().copied() {
-                                let members = manager.window_chains.members_for(window_grid_member(group));
-                                if let Some(anchor) = members.first().copied()
-                                    && members.len() > 1
-                                {
+                            for group in manager.part_members_by_group.keys().copied() {
+                                let anchor = manager.grid_anchor_member_for_group(group);
+                                if manager.window_chains.members_for(anchor).len() > 1 {
                                     anchors.insert(anchor);
                                 }
                             }
@@ -4073,7 +4070,6 @@ impl FloatingWindowManager {
                 &transferred_panels,
             )
         });
-        self.rebuild_floating_part_window_grid(&desired);
         let desired_members = desired
             .iter()
             .map(|spec| spec.member)
