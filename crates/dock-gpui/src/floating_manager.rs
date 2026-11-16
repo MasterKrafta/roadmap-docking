@@ -3130,14 +3130,14 @@ impl FloatingWindowManager {
                 }) {
                     Ok(()) => {
                         let _ = manager.update(app, |manager, _| {
-                            manager.pending_window_chain_alignment.remove(&window_grid_member(anchor));
+                            manager.pending_window_chain_alignment.remove(&anchor);
                         });
                     }
                     Err(error) => {
                         tracing::debug!(
                             ?anchor,
                             %error,
-                            "could not commit initial native-frame alignment for the Floating WindowChain"
+                            "could not commit initial native-frame alignment for the Floating WindowGrid"
                         );
                     }
                 }
@@ -3153,11 +3153,11 @@ impl FloatingWindowManager {
     fn collect_pending_window_chain_corrections(
         &mut self,
         cx: &mut Context<Self>,
-    ) -> Vec<(FloatingGroupId, Vec<(FloatingGroupId, Point)>)> {
+    ) -> Vec<(WindowGridMember, Vec<(FloatingGroupId, Point)>)> {
         let anchors = self.pending_window_chain_alignment.iter().copied().collect::<Vec<_>>();
         let mut pending = Vec::new();
         for anchor in anchors {
-            let Some(anchor_group) = anchor.floating_group() else {
+            let Some(anchor_group) = self.floating_group_for_member(anchor) else {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             };
@@ -3165,6 +3165,7 @@ impl FloatingWindowManager {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             }
+
             let members = self.window_chains.members_for(anchor);
             if members.len() < 2 {
                 self.pending_window_chain_alignment.remove(&anchor);
@@ -3172,38 +3173,108 @@ impl FloatingWindowManager {
             }
             if !members.iter().all(|member| {
                 self.panel_window_for_grid_member(*member).is_some_and(|entry| {
-                    entry.visibility == PanelWindowVisibility::Visible && entry.native_window.is_some()
+                    entry.visibility == PanelWindowVisibility::Visible
+                        && entry.native_window.is_some()
                 })
             }) {
                 continue;
             }
-            let Some(member_bounds) = self.controller.update(cx, |controller, _| {
-                members.iter().map(|member| {
-                    let group = member.floating_group()?;
-                    controller.layout().floating_group(group).map(|floating| (*member, floating.bounds))
-                }).collect::<Option<Vec<_>>>()
-            }) else {
+
+            // The graph now describes individual native HWNDs, not Core
+            // FloatingGroups. Read each member's actual client size and outer
+            // origin instead of reusing the composition's shared Core bounds.
+            let Some(member_bounds) = self.native_bounds_for_grid_members(&members) else {
                 continue;
             };
-            let Some(links) = self.window_chains.links_for(anchor).map(|links| links.to_vec()) else {
+            let Some(links) = self.window_chains.links_for(anchor).map(|links| links.to_vec())
+            else {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
             };
-            let Some(aligned_bounds) = self.arrange_window_grid_bounds(member_bounds.clone(), &links, anchor, cx) else {
-                tracing::debug!(?anchor, "native frame measurements are not ready for Floating WindowGrid alignment");
+            let Some(aligned_bounds) =
+                self.arrange_window_grid_bounds(member_bounds.clone(), &links, anchor, cx)
+            else {
+                tracing::debug!(
+                    ?anchor,
+                    "native frame measurements are not ready for Floating WindowGrid alignment"
+                );
                 continue;
             };
-            let corrections = aligned_bounds.iter().filter_map(|(member, aligned)| {
-                let group = member.floating_group()?;
-                let original = member_bounds.iter().find(|(candidate, _)| candidate == member)
-                    .map(|(_, bounds)| *bounds)?;
-                (original.origin != aligned.origin).then_some((group, aligned.origin))
-            }).collect::<Vec<_>>();
+
+            // Internal Header/Group links are already described by Core local
+            // geometry. External links may translate a whole Core composition,
+            // but all members belonging to that composition must agree on one
+            // common translation; otherwise Core cannot represent the result.
+            let mut translations = HashMap::<FloatingGroupId, Point>::new();
+            let mut inconsistent = false;
+            for (member, aligned) in &aligned_bounds {
+                let Some(group) = self.floating_group_for_member(*member) else {
+                    inconsistent = true;
+                    break;
+                };
+                let Some(original) = member_bounds
+                    .iter()
+                    .find(|(candidate, _)| candidate == member)
+                    .map(|(_, bounds)| *bounds)
+                else {
+                    inconsistent = true;
+                    break;
+                };
+                let delta = Point::new(
+                    aligned.origin.x - original.origin.x,
+                    aligned.origin.y - original.origin.y,
+                );
+                if delta == Point::ZERO {
+                    continue;
+                }
+                if let Some(previous) = translations.insert(group, delta)
+                    && (previous.x - delta.x).abs() > 0.5
+                        || translations.get(&group).is_some_and(|previous| {
+                            (previous.y - delta.y).abs() > 0.5
+                        })
+                {
+                    inconsistent = true;
+                    break;
+                }
+            }
+            if inconsistent {
+                tracing::warn!(
+                    ?anchor,
+                    "WindowGrid alignment would require independent positions inside one Core FloatingGroup"
+                );
+                self.pending_window_chain_alignment.remove(&anchor);
+                continue;
+            }
+
+            let current_origins = self.controller.update(cx, |controller, _| {
+                translations
+                    .keys()
+                    .map(|group| {
+                        controller
+                            .layout()
+                            .floating_group(*group)
+                            .map(|floating| (*group, floating.bounds.origin))
+                    })
+                    .collect::<Option<HashMap<_, _>>>()
+            });
+            let Some(current_origins) = current_origins else {
+                continue;
+            };
+            let corrections = translations
+                .into_iter()
+                .filter_map(|(group, delta)| {
+                    let origin = current_origins.get(&group).copied()?;
+                    let next = Point::new(origin.x + delta.x, origin.y + delta.y);
+                    (next != origin).then_some((group, next))
+                })
+                .collect::<Vec<_>>();
+
             if corrections.is_empty() {
                 self.pending_window_chain_alignment.remove(&anchor);
             } else {
-                pending.push((anchor_group, corrections));
+                pending.push((anchor, corrections));
             }
+            let _ = anchor_group;
         }
         pending
     }
