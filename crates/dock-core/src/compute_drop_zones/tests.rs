@@ -1217,7 +1217,7 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
                 &metrics,
             )
             .unwrap(),
-        Some(DropTarget::GroupEdge { group: float_group, zone: DropZone::Top })
+        Some(DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingTop })
     );
 }
 
@@ -3573,7 +3573,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::Top,
+                        zone: DropZone::FloatingTop,
                     }
         })
         .expect("a Floating composition must expose the top edge of another Floating window");
