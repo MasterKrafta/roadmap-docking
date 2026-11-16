@@ -374,7 +374,23 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 5. Подключить три маршрута переноса и временный DragHost
 
+<Статус: частично реализован 16 ноября 2026 г.; общий pointer pipeline подключён к Floating Group HWND.>
+
 Файлы: drag_host_manager.rs, input_drag.rs, floating_manager.rs, components/floating.rs и тесты маршрутизации.
+
+Уже реализовано:
+
+- Обработчики мыши FloatingHost вынесены в общий render_floating_pointer_input; legacy host продолжает использовать тот же pipeline.
+- FloatingPartHost::Group использует общий pipeline для tab/group drag, capture, DragHost handoff, Escape и отмены при потере фокуса.
+- Локальная позиция указателя Group HWND переводится в координаты Core Composition через origin соответствующей Group.
+- DragSourceHost сохраняет точную идентичность Header/Group HWND. Координаты FreeArea и проверка окна под курсором используют именно исходный part-host.
+- Drop между окнами, принадлежащими одной Floating Composition, остаётся Core Drop. WindowGrid-side insertion применяется только к другой Floating Composition.
+
+Осталось:
+
+- Подключить Header input и перемещение только своей Column stack; его нельзя направлять через старый whole-composition move.
+- Завершить и локально проверить все три маршрута переноса, возврат Main → временный Floating → Main и особый drag простой Main Composition.
+- После проверки отметить этап завершённым.
 
 1. Main → Floating: использовать текущий DragHost; после принятого Drop создать/обновить Header и Group окна и выполнить handoff.
 2. Floating → Floating: тот же DragHost и общий target resolver; обновить Core Layout и набор окон источника/цели.
