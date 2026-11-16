@@ -3439,7 +3439,7 @@ impl FloatingWindowManager {
                 .into_iter()
                 .filter(|panel| group_panels.contains(panel))
                 .collect::<Vec<_>>();
-            return (!local_required.is_empty()).then_some(local_required);
+            return Some(local_required);
         }
 
         let host_panel = self.host_registry.panel_for_group(group)?;
