@@ -831,7 +831,7 @@ crates/dock-gpui/src/floating_manager.rs
 ЭТАП 9. МЕТРИКИ И ФОРМУЛЫ — РЕАЛИЗОВАНО В КОДЕ
 
 Реализация:
-1. ThemeMetrics.column_header_height — единый источник высоты общей
+1. ThemeMetrics.composition_header_height — единый источник высоты общей
    CompositionHeader над Main/Floating Composition.
 2. ThemeMetrics.group_header_height и ThemeMetrics.tab_strip_height остаются
    отдельными метриками Group и полосы вкладок.
@@ -869,7 +869,7 @@ crates/dock-gpui/src/floating_manager.rs
 
 Локальная сборка и unit-тесты ещё не запущены в окружении пользователя.
 Ручная приёмка этапа:
-1. Изменить ThemeMetrics.column_header_height на 12, 20 и 32 px; проверить
+1. Изменить ThemeMetrics.composition_header_height на 12, 20 и 32 px; проверить
    отрисовку общей шапки и резервируемое пространство Column в Main/Floating.
 2. Создать вертикальные связи Above и Below для каждого значения; не должно
    быть зазора между перекрываемыми client-областями.
