@@ -281,26 +281,26 @@ Core Layout остаётся владельцем структуры Composition
 
 <Статус: реализован в коде 16 ноября 2026 г.; локальные проверки ожидают пользователя.>
 
-Файлы: \`window_chain.rs\`, \`window_chain_geometry.rs\`, \`floating_manager.rs\` и связанные unit-тесты.
+Файлы: `window_chain.rs`, `window_chain_geometry.rs`, `floating_manager.rs` и связанные unit-тесты.
 
 Что сделано:
 
-1. Введён типизированный \`WindowGridMember\`:
-   - \`FloatingComposition(FloatingGroupId)\` — переходная идентичность для текущей архитектуры с одним HWND на Floating Composition;
-   - \`Header(Column NodeId)\` — отдельный будущий HWND шапки Column;
-   - \`Group(Group NodeId)\` — отдельный будущий HWND конкретной Group.
-2. \`WindowGridLink\`, внутренний граф, индексы Registry и результаты pruning переведены с \`FloatingGroupId\` на \`WindowGridMember\`.
-3. \`retain_groups\` обобщён и переименован в \`retain_members\`: очистка графа принимает множество живых оконных участников, а не только Core FloatingGroup.
-4. Чистая геометрия и native Z-order используют \`WindowGridMember\`. Алгоритмы соседства, направлений, последовательных ветвей, расчёта frame/client bounds, DPI, Resize и Z-order сохранены; геометрическое поведение пока не менялось.
-5. \`FloatingWindowManager\` использует один переходный адаптер \`FloatingGroupId → FloatingComposition(FloatingGroupId)\`. Все его текущие операции WindowGrid работают с типизированными ключами.
-6. Для перехода обратно к Core-операциям добавлено явное преобразование bounds из членов WindowGrid в пары \`(FloatingGroupId, Rect)\`. Core Layout и его идентификаторы не менялись.
-7. Текущий реестр HWND по-прежнему разрешает только \`FloatingComposition\` через \`CompositionHostRegistry → PanelWindowRegistry\`. \`Header\` и \`Group\` уже имеют независимую идентичность в графе, но их нативные host-окна ещё не создаются — это следующий этап.
+1. Введён типизированный `WindowGridMember`:
+   - `FloatingComposition(FloatingGroupId)` — переходная идентичность для текущей архитектуры с одним HWND на Floating Composition;
+   - `Header(Column NodeId)` — отдельный будущий HWND шапки Column;
+   - `Group(Group NodeId)` — отдельный будущий HWND конкретной Group.
+2. `WindowGridLink`, внутренний граф, индексы Registry и результаты pruning переведены с `FloatingGroupId` на `WindowGridMember`.
+3. `retain_groups` обобщён и переименован в `retain_members`: очистка графа принимает множество живых оконных участников, а не только Core FloatingGroup.
+4. Чистая геометрия и native Z-order используют `WindowGridMember`. Алгоритмы соседства, направлений, последовательных ветвей, расчёта frame/client bounds, DPI, Resize и Z-order сохранены; геометрическое поведение пока не менялось.
+5. `FloatingWindowManager` использует один переходный адаптер `FloatingGroupId → FloatingComposition(FloatingGroupId)`. Все его текущие операции WindowGrid работают с типизированными ключами.
+6. Для перехода обратно к Core-операциям добавлено явное преобразование bounds из членов WindowGrid в пары `(FloatingGroupId, Rect)`. Core Layout и его идентификаторы не менялись.
+7. Текущий реестр HWND по-прежнему разрешает только `FloatingComposition` через `CompositionHostRegistry → PanelWindowRegistry`. `Header` и `Group` уже имеют независимую идентичность в графе, но их нативные host-окна ещё не создаются — это следующий этап.
 8. Добавлен unit-тест, который помещает Header, Group и legacy Composition в один WindowGrid и проверяет, что это три разные идентичности.
 
 Критерий этапа:
 
 - WindowGrid больше не привязан к Core FloatingGroupId как к единственному типу участника.
-- Текущие Floating-окна продолжают представляться переходным \`FloatingComposition(id)\`.
+- Текущие Floating-окна продолжают представляться переходным `FloatingComposition(id)`.
 - Header и Group могут иметь собственные ключи без фиктивных Core FloatingGroupId.
 - Все существующие алгоритмы графа и чистой геометрии работают с новым ключом.
 - Рендеринг, создание HWND, DropZone и семантика Core-команд этим этапом не менялись.
