@@ -445,8 +445,7 @@ impl FloatingWindowManager {
 
     /// Returns every WindowGrid member in a stable native front-to-back order.
     /// An unlinked Floating window is represented as a one-member grid.
-    #[allow(dead_code)]
-    pub(crate) fn window_chain_members(
+    pub(crate) fn window_grid_members_in_native_order(
         &self,
         group: FloatingGroupId,
     ) -> Vec<FloatingGroupId> {
@@ -1438,7 +1437,7 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let mut move_windows = Vec::new();
-        for member in self.window_chain_members(group) {
+        for member in self.window_grid_members_in_native_order(group) {
             let Some(member_entry) = self.panel_window_for_group(member) else {
                 return false;
             };
@@ -2917,7 +2916,7 @@ impl FloatingWindowManager {
             // Native activation restores this same front-to-back order by raising
             // its members in reverse, regardless of which HWND receives focus.
             let chain_windows = self
-                .window_chain_members(group_id)
+                .window_grid_members_in_native_order(group_id)
                 .into_iter()
                 .filter_map(|member| self.panel_window_for_group(member)?.native_window)
                 .collect::<Vec<_>>();
