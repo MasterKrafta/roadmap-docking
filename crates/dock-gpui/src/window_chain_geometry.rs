@@ -1413,9 +1413,14 @@ mod native_resize_grid_geometry_tests {
         assert_eq!(native_resize_right_edge_delta(before, actual, 1.5), Some(60.0));
         assert_eq!(native_resize_bottom_edge_delta(before, actual, 1.5), Some(45.0));
 
-        let left_top = rect(160.0, 70.0, 260.0, 180.0);
+        let left_top = rect(160.0, 70.0, 260.0, 280.0 / 1.5);
         assert_eq!(native_resize_right_edge_delta(before, left_top, 1.5), Some(0.0));
-        assert_eq!(native_resize_bottom_edge_delta(before, left_top, 1.5), Some(0.0));
+        assert!(
+            native_resize_bottom_edge_delta(before, left_top, 1.5)
+                .expect("valid scale")
+                .abs()
+                < 0.01
+        );
     }
 }
 
