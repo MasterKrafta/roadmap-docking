@@ -2523,6 +2523,53 @@ mod floating_window_chain_target_tests {
     }
 
     #[test]
+    fn floating_side_drop_into_main_keeps_core_docking() {
+        use slotmap::SlotMap;
+
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let source_group = floating_ids.insert(());
+        let group = NodeId::null();
+        for (zone, _) in [
+            (DropZone::Left, WindowGridDirection::Left),
+            (DropZone::Right, WindowGridDirection::Right),
+            (DropZone::Top, WindowGridDirection::Above),
+            (DropZone::Bottom, WindowGridDirection::Below),
+        ] {
+            let target = Some(DropTarget::GroupEdge { group, zone });
+            assert_eq!(
+                floating_window_chain_target(
+                    DragSourceHost::FloatingPart {
+                        group: source_group,
+                        part: DockWindowPart::Group { group },
+                    },
+                    Some(DragHandle::GroupGrip),
+                    target,
+                    Some(DockWindowRole::Main),
+                ),
+                None,
+                "a Floating → Main {zone:?} drop must stay on the Core route",
+            );
+        }
+    }
+
+    #[test]
+    fn main_side_drop_into_main_never_creates_a_window_grid_join() {
+        let group = NodeId::null();
+        for zone in [DropZone::Left, DropZone::Right, DropZone::Top, DropZone::Bottom] {
+            assert_eq!(
+                floating_window_chain_target(
+                    DragSourceHost::Main,
+                    Some(DragHandle::DockAreaHeader),
+                    Some(DropTarget::GroupEdge { group, zone }),
+                    Some(DockWindowRole::Main),
+                ),
+                None,
+                "a Main → Main {zone:?} drop must stay on the Core route",
+            );
+        }
+    }
+
+    #[test]
     fn drops_into_a_different_floating_composition_still_join_window_grid() {
         use slotmap::SlotMap;
 
