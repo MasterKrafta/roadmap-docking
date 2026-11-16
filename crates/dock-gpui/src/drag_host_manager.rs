@@ -1323,26 +1323,59 @@ impl DragHostManager {
         let window = active.window.clone();
 
         let required_panels_by_group = self.controller.update(cx, |controller, _| {
-            let handle = controller
-                .drag()
-                .host_session()
-                .map(|session| session.handle())
-                .unwrap_or(dock_core::DragHandle::PanelTab);
-            // GroupGrip DragHost presents only the active tab. Inactive tabs remain
-            // cached and are not mounted by the temporary transport window.
-            let required_panels = if handle == dock_core::DragHandle::GroupGrip {
-                panels.first().copied().into_iter().collect::<Vec<_>>()
-            } else {
-                panels.clone()
-            };
+            let layout = controller.layout();
+            let transferred = panels.iter().copied().collect::<HashSet<_>>();
+            let affected_groups = layout
+                .nodes()
+                .filter_map(|(group, node)| {
+                    let dock_core::Node::Tabs(tabs) = node else {
+                        return None;
+                    };
+                    tabs.children
+                        .iter()
+                        .any(|child| {
+                            matches!(
+                                layout.node(*child),
+                                Some(dock_core::Node::Panel(panel))
+                                    if transferred.contains(&panel.panel_id)
+                            )
+                        })
+                        .then_some(group)
+                })
+                .collect::<HashSet<_>>();
+            let metrics = controller.metrics();
             let mut by_group = HashMap::<FloatingGroupId, Vec<PanelId>>::new();
-            for panel in required_panels {
-                if let Some(group) = floating_group_for_panel(controller.layout(), panel) {
-                    by_group.entry(group).or_default().push(panel);
+
+            // Each destination GroupHost mounts only its current active PanelView.
+            // Require those actual views, not inactive tabs that stay in the shared cache.
+            for group_node in affected_groups {
+                let active_panel = match layout.node(group_node) {
+                    Some(dock_core::Node::Tabs(tabs)) => tabs
+                        .active_child()
+                        .and_then(|child| match layout.node(child) {
+                            Some(dock_core::Node::Panel(panel)) => Some(panel.panel_id),
+                            _ => None,
+                        }),
+                    _ => None,
+                };
+                let Some(active_panel) = active_panel else {
+                    continue;
+                };
+                let Some(floating_group) = floating_group_for_panel(layout, active_panel) else {
+                    continue;
+                };
+                let visible = layout
+                    .compute_floating_rects(floating_group, &metrics)
+                    .ok()
+                    .is_some_and(|rects| {
+                        rects.panels.iter().any(|rect| rect.panel == active_panel)
+                    });
+                if visible {
+                    by_group
+                        .entry(floating_group)
+                        .or_default()
+                        .push(active_panel);
                 }
-            }
-            if by_group.is_empty() && !panels.is_empty() {
-                by_group.insert(target_group, panels.clone());
             }
             by_group
         });
@@ -1468,6 +1501,16 @@ impl DragHostManager {
                     manager.show_handoff_target(primary_target_group, manager_cx)
                 })
             });
+        if target_shown
+            && self.active.as_ref().is_some_and(|active| {
+                active.handoff.as_ref().is_some_and(|handoff| {
+                    handoff.required_panels_by_group.is_empty()
+                })
+            })
+        {
+            self.complete_floating_handoff(primary_target_group, &[], cx);
+            return false;
+        }
         !target_shown
     }
 
@@ -1496,18 +1539,23 @@ impl DragHostManager {
             let Some(handoff) = active.handoff.as_mut() else {
                 return;
             };
-            let Some(required_for_group) = handoff.required_panels_by_group.get(&target_group)
-            else {
-                return;
-            };
             if !handoff.source_released {
                 return;
             }
-
-            for panel in rendered_panels {
-                if required_for_group.contains(panel) {
-                    handoff.rendered_panels.insert(*panel);
+            let required_for_group = handoff
+                .required_panels_by_group
+                .get(&target_group)
+                .cloned();
+            if let Some(required_for_group) = required_for_group {
+                for panel in rendered_panels {
+                    if required_for_group.contains(panel) {
+                        handoff.rendered_panels.insert(*panel);
+                    }
                 }
+            } else if !handoff.required_panels_by_group.is_empty()
+                || handoff.primary_target_group != target_group
+            {
+                return;
             }
 
             let complete = handoff
