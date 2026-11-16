@@ -831,7 +831,8 @@ crates/ui/src/theme/theme_metrics.rs
 - Не переписывать уже работающий horizontal WindowChain заново; сначала
   сохранить его тестами и затем обобщить его операции.
 - Не смешивать целое окно и внутренний Panel/Group drop.
-- Не менять Core sizing и ThemeMetrics одновременно с начальной реализацией  двумерных связей.
+- Не менять Core sizing и ThemeMetrics одновременно с начальной реализацией
+  двумерных связей.
 - Не расширять platform API заранее, если текущие set_left_resize_enabled()
   и set_top_resize_enabled() уже решают управление общими границами.
 - Не запускать cargo build/test/clippy от агента. Проверки выполняет пользователь
