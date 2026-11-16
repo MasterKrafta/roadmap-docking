@@ -1178,12 +1178,12 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingTop
             && zone.target
-                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Top }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingTop }
     }));
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingBottom
             && zone.target
-                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Bottom }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingBottom }
     }));
 
     let center = zones.iter().find(|zone| zone.zone == DropZone::FloatingCenter).unwrap();
@@ -1291,7 +1291,7 @@ fn floating_top_zone_tracks_the_actual_header_for_column_and_tabs_roots() {
                     && zone.target
                         == DropTarget::GroupEdge {
                             group: first_group.group,
-                            zone: DropZone::Top,
+                            zone: DropZone::FloatingTop,
                         }
             })
             .expect("the Floating header should expose its lower top-drop band");
@@ -1421,7 +1421,7 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
             .find(|entry| {
                 entry.zone == zone
                     && entry.target
-                        == DropTarget::GroupEdge { group: expected_group, zone: edge }
+                        == DropTarget::GroupEdge { group: expected_group, zone }
             })
             .expect("each horizontal branch should have its own floating edge target");
         let point = Point::new(x, edge_zone.rect.origin.y + edge_zone.rect.size.height / 2.0);
@@ -1434,7 +1434,7 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
                     &metrics,
                 )
                 .unwrap(),
-            Some(DropTarget::GroupEdge { group: expected_group, zone: edge })
+            Some(DropTarget::GroupEdge { group: expected_group, zone })
         );
     }
 
@@ -3398,7 +3398,7 @@ fn floating_column_composition_exposes_main_group_vertical_drop_zones() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::Top,
+                        zone: DropZone::FloatingTop,
                     }
         })
         .expect("a Floating composition must expose the top of the Main stack");
@@ -4234,7 +4234,7 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::Top,
+                        zone: DropZone::FloatingTop,
                     }
         })
         .expect("a single-group Main composition must expose the Floating top edge");
@@ -4856,7 +4856,7 @@ fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
         zone.target
             == DropTarget::GroupEdge {
                 group: target_top,
-                zone: DropZone::Top,
+                zone: DropZone::FloatingTop,
             }
             && zone.zone == DropZone::FloatingTop
     }));
