@@ -919,11 +919,30 @@ impl FloatingWindowManager {
             self.controller_subscription = Some(cx.subscribe(
                 &controller,
                 |manager, _, event: &DockEvent, manager_cx| {
-                    if matches!(event, DockEvent::LayoutChanged { .. }) {
-                        // LayoutChanged can be emitted from inside a FloatingHost
-                        // update. Reconcile calls WindowHandle::update on registered
-                        // hosts, so always defer it until the active host update unwinds.
-                        manager.schedule_reconcile(manager_cx);
+                    match event {
+                        DockEvent::LayoutChanged { .. } => {
+                            // LayoutChanged can be emitted from inside a FloatingHost
+                            // update. Reconcile calls WindowHandle::update on registered
+                            // hosts, so always defer it until the active host update unwinds.
+                            manager.schedule_reconcile(manager_cx);
+                        }
+                        DockEvent::MetricsChanged { .. } => {
+                            // A changed CompositionHeader height affects every vertical
+                            // seam in an existing WindowGrid. Keep each Core composition
+                            // independent and queue one stable anchor per connected grid.
+                            let mut anchors = HashSet::new();
+                            for group in manager.host_registry.floating_groups.keys().copied() {
+                                let members = manager.window_chains.members_for(group);
+                                if let Some(anchor) = members.first().copied()
+                                    && members.len() > 1
+                                {
+                                    anchors.insert(anchor);
+                                }
+                            }
+                            manager.pending_window_chain_alignment.extend(anchors);
+                            manager.schedule_reconcile(manager_cx);
+                        }
+                        _ => {}
                     }
                 },
             ));
