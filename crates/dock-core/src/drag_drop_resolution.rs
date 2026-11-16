@@ -1664,8 +1664,24 @@ fn simple_floating_capture_docks_as_one_column_in_both_directions() {
             &metrics,
         )
         .unwrap();
-    assert_eq!(zones, main_group_zones);
-    assert_eq!(zones, main_panel_zones);
+    // Content handles may tear a Group or Panel out of a simple Floating
+    // composition into a new window. Capturing the whole composition retains
+    // its native title/capture semantics, so only those content handles add FreeArea.
+    let main_group_zones_without_free_area = main_group_zones
+        .iter()
+        .filter(|zone| zone.target != DropTarget::FreeArea)
+        .copied()
+        .collect::<Vec<_>>();
+    let main_panel_zones_without_free_area = main_panel_zones
+        .iter()
+        .filter(|zone| zone.target != DropTarget::FreeArea)
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(zones, main_group_zones_without_free_area);
+    assert_eq!(zones, main_panel_zones_without_free_area);
+    assert!(!zones.iter().any(|zone| zone.target == DropTarget::FreeArea));
+    assert!(main_group_zones.iter().any(|zone| zone.target == DropTarget::FreeArea));
+    assert!(main_panel_zones.iter().any(|zone| zone.target == DropTarget::FreeArea));
 
     let mut main_layout = layout.clone();
     main_layout
