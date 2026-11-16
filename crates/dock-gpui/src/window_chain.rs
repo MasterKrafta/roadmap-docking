@@ -524,6 +524,27 @@ impl WindowGridRegistry {
         self.grids.get(grid_id)?.direction_between(from, to)
     }
 
+    /// Returns whether this window has a direct neighbour on the requested side.
+    ///
+    /// Resize-edge ownership is local to each node: a window may have a west
+    /// neighbour even when it is not the first item in the grid's stable order.
+    pub(crate) fn has_neighbor_on_side(
+        &self,
+        group: FloatingGroupId,
+        side: WindowGridDirection,
+    ) -> bool {
+        self.links_for(group).is_some_and(|links| {
+            links.iter().any(|link| {
+                let relative = if link.from == group {
+                    link.direction
+                } else {
+                    link.direction.opposite()
+                };
+                relative == side
+            })
+        })
+    }
+
     fn is_valid(&self) -> bool {
         let mut indexed_members = HashSet::new();
 
@@ -705,6 +726,30 @@ mod tests {
         assert!(!grid.link_sequence_to_side(a, &[b, c], WindowGridDirection::Below));
         assert_eq!(grid.members_for(a), before.members_for(a));
         assert_eq!(grid.links_for(a), before.links_for(a));
+    }
+
+    #[test]
+    fn resize_edge_ownership_uses_direct_neighbours_not_member_order() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_to_side(a, b, WindowGridDirection::Right));
+        assert!(grid.link_to_side(a, c, WindowGridDirection::Below));
+        assert!(grid.link_to_side(c, d, WindowGridDirection::Right));
+
+        assert!(!grid.has_neighbor_on_side(a, WindowGridDirection::Left));
+        assert!(!grid.has_neighbor_on_side(a, WindowGridDirection::Above));
+        assert!(grid.has_neighbor_on_side(a, WindowGridDirection::Right));
+        assert!(grid.has_neighbor_on_side(a, WindowGridDirection::Below));
+
+        assert!(grid.has_neighbor_on_side(b, WindowGridDirection::Left));
+        assert!(!grid.has_neighbor_on_side(b, WindowGridDirection::Above));
+        assert!(!grid.has_neighbor_on_side(b, WindowGridDirection::Right));
+
+        assert!(grid.has_neighbor_on_side(c, WindowGridDirection::Above));
+        assert!(grid.has_neighbor_on_side(c, WindowGridDirection::Right));
+        assert!(!grid.has_neighbor_on_side(d, WindowGridDirection::Left));
+        assert!(grid.has_neighbor_on_side(d, WindowGridDirection::Left) == false);
     }
 
     #[test]
