@@ -5460,7 +5460,7 @@ mod floating_part_topology_tests {
         let mut registry = WindowGridRegistry::default();
         assert!(registry.replace_all_links(&links));
         assert_eq!(registry.members_for(header_a).len(), 6);
-        assert!(registry.is_valid());
+        assert_eq!(registry.all_links().len(), 5);
     }
 
     #[test]
