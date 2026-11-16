@@ -4049,7 +4049,7 @@ impl FloatingWindowManager {
     fn rebuild_floating_part_window_grid(
         &mut self,
         desired: &[FloatingPartWindowSnapshot],
-    ) {
+    ) -> bool {
         let previous_links = self.window_chains.all_links();
         let mut owners = HashMap::<WindowGridMember, FloatingGroupId>::new();
         for spec in desired {
@@ -4118,15 +4118,12 @@ impl FloatingWindowManager {
         });
 
         if self.window_chains.replace_all_links(&links) {
-            // Any previously queued edge that is already present in the rebuilt
-            // Core topology is no longer a reconnection candidate.
-            let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
-            self.pending_window_grid_reconnections
-                .retain(|candidate| !rebuilt_links.contains(candidate));
+            true
         } else {
             tracing::warn!(
                 "could not rebuild WindowGrid from the current Floating Header/Group topology"
             );
+            false
         }
     }
 
@@ -4294,11 +4291,12 @@ impl FloatingWindowManager {
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
         // those identities to the current Header/Group boundary members.
-        self.rebuild_floating_part_window_grid(&desired);
-        self.migrate_pending_window_grid_state();
-        let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
-        self.pending_window_grid_reconnections
-            .retain(|candidate| !rebuilt_links.contains(candidate));
+        if self.rebuild_floating_part_window_grid(&desired) {
+            self.migrate_pending_window_grid_state();
+            let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
+            self.pending_window_grid_reconnections
+                .retain(|candidate| !rebuilt_links.contains(candidate));
+        }
 
         prune_result
     }
