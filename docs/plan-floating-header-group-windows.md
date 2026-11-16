@@ -353,11 +353,11 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 4. Переработать геометрию WindowGrid
 
-<Статус: частично реализован 16 ноября 2026 г.; базовая геометрия и граф реальных Header/Group завершены, остаётся подключить перемещение и Resize к отдельным HWND.>
+<Статус: базовая геометрия и typed WindowGrid реализованы 16 ноября 2026 г.>
 
 Файлы: `window_chain.rs`, `window_chain_geometry.rs`, `floating_manager.rs`, `components/floating.rs` и тесты геометрии/топологии.
 
-Уже реализовано:
+Реализовано:
 
 - Удалён старый vertical overlap на высоту CompositionHeader. Вертикальные соседи стыкуются по client top/bottom с отдельными native insets и DPI каждого HWND.
 - Добавлен общий перевод Core client geometry в native outer bounds. Учитываются физический origin исходного Floating окна, локальный логический origin Column/Group, client insets и DPI целевого HWND.
@@ -368,27 +368,9 @@ Core Layout остаётся владельцем структуры Composition
 - Отложенное выравнивание читает bounds каждого HWND отдельно. В Core применяется только единый translation всей Floating Composition; несовместимые независимые смещения не записываются.
 - Z-order строится по typed Header/Group графу. Добавлены тесты для дробного DPI, стыковки без overlap, транзакционной пересборки графа, двух колонок и переноса внешней связи между композициями.
 
-Осталось:
+Граница этапа: отдельные HWND пока намеренно созданы без native move/resize hooks. Перемещение Header вместе с Column stack подключается на этапе 5; согласованный Resize — на этапе 6. Геометрия и Core ratios уже поддерживают пересчёт после изменения Layout, поэтому новые Core-команды или параллельная модель размеров не требуются.
 
-- Подключить перемещение Header вместе со всеми Group своей Column. Сейчас новые part HWND намеренно созданы без native move hooks.
-- Подключить согласованное изменение ширины Column: Header и все её Group должны менять ширину вместе.
-- Подключить вертикальный Resize отдельной Group: менять её высоту и положение нижних Group, не двигая Header и не изменяя высоту соседних Group.
-- После введения этих операций согласовать поведение при переносе Column между Floating compositions и изменении порядка Group.
-
-Переиспользуемые Core-команды уже существуют:
-
-- `ResizeGroups` меняет вертикальные ratios соседних Group в одной Column с учётом минимумов и collapsed-состояния.
-- `ResizeSplitColumnBoundary` меняет ширину соседних Column внутри Floating Split(X).
-- GPUI уже содержит `input_resize.rs` и `SplitterView`. Новые Core-команды и отдельная формула ratio для Floating не нужны; требуется подключить существующие команды к hit-зонам отдельных Header/Group окон.
-
-Размеры и поведение:
-
-- Ширина Header и всех Group одной Column должна совпадать.
-- Вертикальный Resize Group меняет высоту только этой Group; нижние Group сдвигаются на разницу высот.
-- Header остаётся на месте при вертикальном Resize или перестановке Group.
-- Пока согласованный Resize не подключён, conflicting resize edges новых part HWND остаются отключёнными, чтобы отдельные окна не меняли размеры независимо.
-
-Критерий: Header остаётся неподвижным при вертикальной вставке/Resize Group; Group не перекрываются; окна одной Column сохраняют общую ширину и корректно стыкуются при дробном DPI.
+Критерий: Header/Group окна размещаются по Core-порядку, не перекрываются, сохраняют общую ширину Column и корректно стыкуются по client edges при дробном DPI.
 
 ### Этап 5. Подключить три маршрута переноса и временный DragHost
 
@@ -401,6 +383,8 @@ Core Layout остаётся владельцем структуры Composition
 5. Перетаскивание простой Main Composition за Header должно создавать Floating-представление из двух окон: Header + Group с исходной вкладкой.
 6. Перетаскивание существующего Floating Header перемещает только его Column stack — Header и все Group этой колонки.
 7. Сохранить уже работающую семантику DropZone и общий mapping направления WindowGrid. Не добавлять вторую реализацию hit-test или Drop routing только для Main-origin.
+8. Переиспользовать существующий pointer pipeline `FloatingHost`: выделить общие части обработки мыши, capture и cancellation и подключить их к typed Header/Group hosts. Не копировать второй независимый набор mouse handlers.
+9. Передавать в общий pipeline роль и NodeId текущего part-host; источник/цель переводить через существующие методы FloatingWindowManager.
 
 Критерий: все три основных сценария и вариант возврата Main → временный Floating → Main проходят через один DragHost lifecycle и не теряют/не дублируют вкладки.
 
@@ -415,7 +399,9 @@ Core Layout остаётся владельцем структуры Composition
 5. Перемещение Header синхронно перемещает все HWND его Column stack одним физическим dx/dy.
 6. Resize сохраняет общую ширину Column и вертикальные стыки Group, не запускает циклическую синхронизацию.
 7. Учитывать host loss, внешнее закрытие HWND, повторный reconcile, DPI, Escape, отмену drag и Undo/Redo.
-8. Сохранение WindowGrid на диск не включать в этот этап.
+8. Для Resize переиспользовать `DockCommand::ResizeGroups`, `DockCommand::ResizeSplitColumnBoundary`, `input_resize.rs` и `SplitterView`. Не вводить отдельную модель ratios для Floating.
+9. Пока согласованный Resize нескольких HWND не подключён, не включать независимые native resize edges на Header/Group окнах.
+10. Сохранение WindowGrid на диск не включать в этот этап.
 
 Критерий: после любых перечисленных переходов нет пустых окон, stale-связей, дубликатов HWND и зависших временных DragHost.
 
