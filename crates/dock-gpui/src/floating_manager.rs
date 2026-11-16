@@ -2103,6 +2103,7 @@ impl FloatingWindowManager {
         source_host: DragSourceHost,
         source_window_id: Option<WindowId>,
         screen: PhysicalPoint,
+        cx: &mut Context<Self>,
     ) -> Option<Point> {
         match source_host {
             DragSourceHost::Main => {
@@ -2112,6 +2113,20 @@ impl FloatingWindowManager {
                 self.core_point_for_main(screen)
             }
             DragSourceHost::Floating { group } => {
+                if let Some((member, entry)) = self.registry.members.iter().find(|(_, entry)| {
+                    source_window_id.is_some_and(|id| id == entry.window_id)
+                }) {
+                    let native_window = entry.native_window?;
+                    return self.core_point_for_floating_member(
+                        *member,
+                        entry.host_group?,
+                        entry.window_id,
+                        native_window,
+                        screen,
+                        cx,
+                    );
+                }
+
                 let entry = self.panel_window_for_group(group)?;
                 if source_window_id.is_some_and(|id| id != entry.window_id) {
                     return None;
