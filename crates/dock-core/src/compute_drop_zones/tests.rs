@@ -2687,7 +2687,7 @@ fn floating_stack_exposes_outer_edges_for_another_floating_windowgrid() {
         1,
     );
 
-    let mut layout = builder.build();
+    let layout = builder.build();
     let rects = layout.compute_floating_rects(target_float, &metrics).unwrap();
     let source = DropSource::Composition { root: source_stack };
     let zones = layout.compute_drop_zones(source, &rects, &metrics).unwrap();
@@ -3626,6 +3626,17 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                     }
         })
         .expect("a whole Floating composition must expose its outer bottom edge for WindowGrid");
+    let last_bottom = zones
+        .iter()
+        .find(|zone| {
+            zone.zone == DropZone::Bottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: second_group,
+                        zone: DropZone::Bottom,
+                    }
+        })
+        .expect("the second Group must expose the final internal bottom edge above the third Group");
     assert!(
         !zones.iter().any(|zone| {
             zone.zone == DropZone::ColumnEnd

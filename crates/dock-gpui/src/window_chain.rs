@@ -700,7 +700,7 @@ impl WindowGridRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{WindowGridDirection, WindowGridMember, WindowGridRegistry};
+    use super::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
     use dock_core::{FloatingGroupId, NodeId};
     use slotmap::SlotMap;
     use std::collections::HashSet;

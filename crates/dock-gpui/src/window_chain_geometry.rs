@@ -808,7 +808,7 @@ pub(crate) fn window_grid_members_in_native_z_order(
 
 #[cfg(test)]
 mod contiguous_window_chain_bounds_tests {
-    use super::{NativeFrameGeometry, arrange_contiguous_window_chain_bounds};
+    use super::{NativeFrameGeometry, WindowGridMember, arrange_contiguous_window_chain_bounds};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
 
@@ -1941,7 +1941,7 @@ mod native_z_order_tests {
 
 #[cfg(test)]
 mod moving_window_width_tests {
-    use super::match_moving_window_width_to_target;
+    use super::{match_moving_window_width_to_target, WindowGridMember};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::SlotMap;
 
