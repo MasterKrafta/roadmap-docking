@@ -496,6 +496,65 @@ pub(crate) fn shift_window_chain_after_resize(
     Some(bounds)
 }
 
+/// Returns the native Z priority from front to back for one WindowGrid.
+///
+/// A left neighbor stays in front of its right neighbor so their shared resize
+/// edge remains reachable. An upper window stays in front of the lower window
+/// so its HWND physically covers the lower CompositionHeader.
+pub(crate) fn floating_grid_members_in_native_front_to_back(
+    members: &[FloatingGroupId],
+    links: &[WindowGridLink],
+) -> Option<Vec<FloatingGroupId>> {
+    let member_set = members.iter().copied().collect::<HashSet<_>>();
+    if member_set.len() != members.len() {
+        return None;
+    }
+
+    let mut outgoing = HashMap::<FloatingGroupId, Vec<FloatingGroupId>>::new();
+    let mut indegree = members
+        .iter()
+        .copied()
+        .map(|member| (member, 0usize))
+        .collect::<HashMap<_, _>>();
+
+    for link in links {
+        let (front, back) = match link.direction {
+            WindowGridDirection::Left => (link.to, link.from),
+            WindowGridDirection::Right => (link.from, link.to),
+            WindowGridDirection::Above => (link.to, link.from),
+            WindowGridDirection::Below => (link.from, link.to),
+        };
+        if front == back || !member_set.contains(&front) || !member_set.contains(&back) {
+            return None;
+        }
+
+        outgoing.entry(front).or_default().push(back);
+        let degree = indegree.get_mut(&back)?;
+        *degree = degree.checked_add(1)?;
+    }
+
+    // Stable Kahn ordering: when multiple windows have no precedence
+    // constraint, preserve the grid's established member order.
+    let mut remaining = members.to_vec();
+    let mut ordered = Vec::with_capacity(members.len());
+    while !remaining.is_empty() {
+        let next_index = remaining
+            .iter()
+            .position(|member| indegree.get(member) == Some(&0))?;
+        let front = remaining.remove(next_index);
+        ordered.push(front);
+
+        if let Some(neighbours) = outgoing.get(&front) {
+            for neighbour in neighbours {
+                let degree = indegree.get_mut(neighbour)?;
+                *degree = degree.checked_sub(1)?;
+            }
+        }
+    }
+
+    Some(ordered)
+}
+
 /// Produces a deterministic back-to-front order while keeping each connected
 /// component adjacent in the native Z stack.
 pub(crate) fn floating_groups_in_native_z_order(
@@ -521,6 +580,12 @@ pub(crate) fn floating_groups_in_native_z_order(
             continue;
         }
 
+        let links = grids.links_for(*group_id).unwrap_or_default();
+        let mut back_to_front =
+            floating_grid_members_in_native_front_to_back(&block, links)
+                .unwrap_or_else(|| block.clone());
+        back_to_front.reverse();
+
         let block_z_order = block
             .iter()
             .filter_map(|member| {
@@ -533,17 +598,13 @@ pub(crate) fn floating_groups_in_native_z_order(
             .unwrap_or(*group_z_order);
 
         emitted.extend(block.iter().copied());
-        blocks.push((block_z_order, block));
+        blocks.push((block_z_order, back_to_front));
     }
 
     blocks.sort_by_key(|(z_order, _)| *z_order);
     blocks
         .into_iter()
-        .flat_map(|(_, mut members)| {
-            // HWND_TOP is applied back-to-front: the left/top member is raised last.
-            members.reverse();
-            members
-        })
+        .flat_map(|(_, members)| members)
         .collect()
 }
 
@@ -1076,10 +1137,63 @@ mod native_resize_chain_geometry_tests {
 
 #[cfg(test)]
 mod native_z_order_tests {
-    use super::floating_groups_in_native_z_order;
-    use crate::window_chain::WindowGridRegistry;
+    use super::{
+        floating_grid_members_in_native_front_to_back,
+        floating_groups_in_native_z_order,
+    };
+    use crate::window_chain::{WindowGridDirection, WindowGridRegistry};
     use dock_core::FloatingGroupId;
     use slotmap::SlotMap;
+
+    #[test]
+    fn each_join_direction_places_the_covering_or_edge_owner_in_front() {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let [a, b] = [ids.insert(()), ids.insert(())];
+        let cases = [
+            (WindowGridDirection::Left, vec![b, a]),
+            (WindowGridDirection::Right, vec![a, b]),
+            (WindowGridDirection::Above, vec![b, a]),
+            (WindowGridDirection::Below, vec![a, b]),
+        ];
+
+        for (direction, expected_front_to_back) in cases {
+            let mut grids = WindowGridRegistry::default();
+            assert!(grids.link_to_side(a, b, direction));
+            let members = grids.members_for(a);
+            let links = grids.links_for(a).expect("a joined grid has links");
+
+            assert_eq!(
+                floating_grid_members_in_native_front_to_back(&members, links),
+                Some(expected_front_to_back.clone())
+            );
+            assert_eq!(
+                floating_groups_in_native_z_order(&[(a, 1), (b, 2)], &grids),
+                expected_front_to_back.into_iter().rev().collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn t_shaped_grid_obeys_all_vertical_and_horizontal_z_constraints() {
+        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let [a, b, c, d] = [ids.insert(()), ids.insert(()), ids.insert(()), ids.insert(())];
+        let mut grids = WindowGridRegistry::default();
+
+        assert!(grids.link_to_side(a, b, WindowGridDirection::Above));
+        assert!(grids.link_to_side(a, c, WindowGridDirection::Right));
+        assert!(grids.link_to_side(c, d, WindowGridDirection::Below));
+
+        let members = grids.members_for(a);
+        let links = grids.links_for(a).expect("the T-shaped grid has links");
+        assert_eq!(
+            floating_grid_members_in_native_front_to_back(&members, links),
+            Some(vec![b, a, c, d])
+        );
+        assert_eq!(
+            floating_groups_in_native_z_order(&[(a, 1), (b, 2), (c, 3), (d, 4)], &grids),
+            vec![d, c, a, b]
+        );
+    }
 
     #[test]
     fn grid_members_are_kept_adjacent_in_native_z_order() {
