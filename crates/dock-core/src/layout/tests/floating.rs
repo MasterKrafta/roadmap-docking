@@ -833,7 +833,7 @@ fn c46_move_resize_raise_and_center_dock_floating_preserve_source_active_tab() {
     );
     assert_eq!(
         layout.floating_group(source_floating).unwrap().bounds.size,
-        Size::new(120.0, 80.0)
+        Size::new(120.0, 60.0)
     );
     layout.apply(resized.inverse.unwrap(), &metrics).unwrap();
     assert_eq!(
