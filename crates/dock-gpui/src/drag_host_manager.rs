@@ -2524,9 +2524,11 @@ mod floating_window_chain_target_tests {
 
     #[test]
     fn drops_into_a_different_floating_composition_still_join_window_grid() {
-        let source_group = FloatingGroupId::null();
-        let target_group = FloatingGroupId::null();
-        let moving_group = FloatingGroupId::null();
+        use slotmap::SlotMap;
+
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let moving_group = floating_ids.insert(());
+        let target_group = floating_ids.insert(());
         let group = NodeId::null();
         let left = Some(DropTarget::GroupEdge {
             group,
@@ -2548,7 +2550,6 @@ mod floating_window_chain_target_tests {
             ),
             Some((target_group, WindowGridDirection::Left)),
         );
-        assert_ne!(source_group, target_group);
     }
 
     #[test]
