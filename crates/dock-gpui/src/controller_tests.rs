@@ -523,6 +523,26 @@ fn metric_replacement_is_rejected_during_an_active_drag() {
 }
 
 #[test]
+fn metric_replacement_is_rejected_during_native_os_resize() {
+    let mut controller = controller();
+    assert!(controller.begin_native_resize_transaction());
+
+    let next_metrics = DockMetrics {
+        column_header_height: 18.0,
+        ..controller.metrics()
+    };
+    assert!(matches!(
+        controller.set_metrics(next_metrics),
+        Err(DockControllerConfigError::ActiveInteraction)
+    ));
+    assert_eq!(controller.metrics_revision, 0);
+
+    controller.finish_native_resize_transaction();
+    assert!(controller.set_metrics(next_metrics).unwrap());
+    assert_eq!(controller.metrics_revision, 1);
+}
+
+#[test]
 fn invalid_metric_replacement_leaves_controller_unchanged() {
     let mut controller = controller();
     controller.geometry().unwrap();
