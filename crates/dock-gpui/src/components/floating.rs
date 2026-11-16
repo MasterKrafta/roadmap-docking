@@ -487,6 +487,379 @@ fn floating_host_snapshot(
     }))
 }
 
+
+/// Identity of a permanent Floating window that renders exactly one Core member.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FloatingPartKind {
+    Header { column: NodeId },
+    Group { column: NodeId, group: NodeId },
+}
+
+/// Root view for one detached Header or Group window.
+///
+/// The existing FloatingHost remains the transitional full-composition host
+/// until FloatingWindowManager switches its registry in the next stage.
+#[allow(dead_code)]
+pub(crate) struct FloatingPartHost {
+    controller: Entity<DockController>,
+    floating_group: FloatingGroupId,
+    part: FloatingPartKind,
+    theme: Theme,
+    controller_observed: bool,
+    open_context_menu: Option<FloatingHostOpenMenu>,
+}
+
+#[allow(dead_code)]
+impl FloatingPartHost {
+    pub(crate) fn new_header(
+        controller: Entity<DockController>,
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        theme: Theme,
+    ) -> Self {
+        Self::new(
+            controller,
+            floating_group,
+            FloatingPartKind::Header { column },
+            theme,
+        )
+    }
+
+    pub(crate) fn new_group(
+        controller: Entity<DockController>,
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        group: NodeId,
+        theme: Theme,
+    ) -> Self {
+        Self::new(
+            controller,
+            floating_group,
+            FloatingPartKind::Group { column, group },
+            theme,
+        )
+    }
+
+    fn new(
+        controller: Entity<DockController>,
+        floating_group: FloatingGroupId,
+        part: FloatingPartKind,
+        theme: Theme,
+    ) -> Self {
+        Self {
+            controller,
+            floating_group,
+            part,
+            theme,
+            controller_observed: false,
+            open_context_menu: None,
+        }
+    }
+}
+
+impl Render for FloatingPartHost {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.controller_observed {
+            cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
+                .detach();
+            self.controller_observed = true;
+        }
+
+        let window_id = window.window_handle().window_id();
+        if matches!(self.part, FloatingPartKind::Group { .. }) {
+            self.controller.update(cx, |controller, panel_cx| {
+                controller.ensure_panel_views(window, panel_cx);
+            });
+        }
+
+        let snapshot = self.controller.update(cx, |controller, _| {
+            floating_host_snapshot(controller, window_id, self.floating_group)
+        });
+        let snapshot = match snapshot {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => return div().id("empty-floating-part").size_full(),
+            Err(error) => {
+                tracing::warn!(
+                    ?self.part,
+                    %error,
+                    "floating part host could not obtain Core geometry"
+                );
+                return div().id("invalid-floating-part").size_full();
+            }
+        };
+
+        let root = div()
+            .id(format!("floating-part-host-root-{:?}", self.part))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.panel_surface_background));
+
+        match self.part {
+            FloatingPartKind::Header { column } => {
+                let Some(column_rect) = snapshot
+                    .rects
+                    .columns
+                    .iter()
+                    .find(|candidate| candidate.column == column)
+                else {
+                    return root;
+                };
+                let header_rect = Rect::new(
+                    Point::ZERO,
+                    dock_core::Size::new(
+                        column_rect.rect.size.width,
+                        snapshot.metrics.column_header_height,
+                    ),
+                );
+                let local_column = ColumnRect {
+                    column,
+                    rect: header_rect,
+                };
+                root.child(DockCompositionView::render_header(
+                    format!("floating-column-header-{:?}", column),
+                    header_rect,
+                    &[local_column],
+                    snapshot.metrics,
+                    self.theme,
+                ))
+            }
+            FloatingPartKind::Group { column, group } => {
+                self.render_group(window, cx, root, &snapshot, column, group)
+            }
+        }
+    }
+}
+
+impl FloatingPartHost {
+    fn render_group(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        mut root: gpui::Div,
+        snapshot: &FloatingHostSnapshot,
+        column: NodeId,
+        group_id: NodeId,
+    ) -> impl IntoElement {
+        let Some(group_rect) = snapshot
+            .rects
+            .groups
+            .iter()
+            .find(|candidate| candidate.group == group_id)
+            .copied()
+        else {
+            return root;
+        };
+        let Some(strip) = snapshot
+            .rects
+            .tab_strips
+            .iter()
+            .find(|candidate| candidate.group == group_id)
+            .copied()
+        else {
+            return root;
+        };
+        let Some(mut presentations) = snapshot.group_presentations.get(&group_id).cloned() else {
+            return root;
+        };
+
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(window.window_handle().window_id())
+        });
+        let transfer = PanelTransferPresentation::new(
+            &snapshot.group_presentations,
+            &transferred_panels,
+        );
+        transfer.apply_to_group_presentations(
+            &mut std::collections::HashMap::from([(group_id, presentations.clone())]),
+        );
+        if let Some(updated) = snapshot
+            .group_presentations
+            .get(&group_id)
+            .cloned()
+        {
+            presentations = updated;
+        }
+
+        let dragged_group = self.controller.update(cx, |controller, _| {
+            controller.dragged_group_from(window.window_handle().window_id())
+        });
+        let local_group = GroupRect {
+            group: group_id,
+            rect: Rect::new(Point::ZERO, group_rect.rect.size),
+        };
+        if dragged_group == Some(group_id)
+            || transfer.groups_without_visible_tabs.contains(&group_id)
+        {
+            return root.child(DockGroupView::render_placeholder(
+                local_group,
+                Point::ZERO,
+                snapshot.metrics,
+                self.theme,
+            ));
+        }
+
+        let Some(local_strip) = Some(dock_core::TabStripRect {
+            group: group_id,
+            rect: floating_part_local_rect(strip.rect, group_rect.rect.origin),
+        }) else {
+            return root;
+        };
+        let visible_headers = transfer.visible_tab_headers(
+            &snapshot.rects.tab_headers,
+            &snapshot.rects.tab_strips,
+            &snapshot.rects.tab_overflows,
+            &snapshot.group_presentations,
+            &snapshot
+                .column_groups
+                .values()
+                .flat_map(|groups| groups.iter().copied())
+                .collect(),
+            snapshot.metrics,
+        );
+        let local_headers = visible_headers
+            .into_iter()
+            .filter(|header| header.group == group_id)
+            .map(|header| dock_core::TabHeaderRect {
+                group: group_id,
+                panel: header.panel,
+                index: header.index,
+                rect: floating_part_local_rect(header.rect, group_rect.rect.origin),
+            })
+            .collect::<Vec<_>>();
+        let local_overflow = snapshot
+            .rects
+            .tab_overflows
+            .iter()
+            .find(|overflow| overflow.group == group_id)
+            .cloned()
+            .map(|mut overflow| {
+                overflow.button_rect =
+                    floating_part_local_rect(overflow.button_rect, group_rect.rect.origin);
+                overflow
+            });
+
+        let toggle_host = cx.entity().downgrade();
+        let toggle_context_menu: GroupMenuToggle = Rc::new(move |target, anchor, app| {
+            if let Some(host) = toggle_host.upgrade() {
+                host.update(app, |host, host_cx| {
+                    host.open_context_menu = if host
+                        .open_context_menu
+                        .as_ref()
+                        .is_some_and(|open| open.target == target)
+                    {
+                        None
+                    } else {
+                        Some(FloatingHostOpenMenu {
+                            target,
+                            anchor,
+                            open_submenu: None,
+                        })
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
+
+        let group_ids = [group_id];
+        let active_panels =
+            active_panels_for_groups(group_ids, &snapshot.group_presentations, dragged_group);
+        let panel_rects = transfer
+            .panel_rects_with_active_replacements(&snapshot.rects.panels)
+            .into_iter()
+            .filter(|panel| active_panels.contains(&panel.panel))
+            .map(|panel| {
+                let local = dock_core::PanelRect {
+                    panel: panel.panel,
+                    rect: floating_part_local_rect(panel.rect, group_rect.rect.origin),
+                };
+                let view = self.controller.update(cx, |controller, panel_cx| {
+                    controller.panel_view(panel.panel, window, panel_cx)
+                });
+                (local, view)
+            })
+            .collect::<Vec<_>>();
+
+        root = root
+            .child(DockGroupView::render_core(
+                Some(column),
+                local_group,
+                local_strip,
+                &local_headers,
+                local_overflow,
+                &presentations,
+                Point::ZERO,
+                snapshot.metrics,
+                0.0,
+                self.controller.clone(),
+                self.theme,
+                toggle_context_menu,
+            ))
+            .child(PanelHost::render(panel_rects, Point::ZERO, self.theme));
+
+        if let Some(open) = self.open_context_menu.as_ref()
+            && context_menu_target_exists(
+                open.target,
+                &snapshot.group_presentations,
+                &snapshot.column_ids,
+                Some(&snapshot.rects),
+            )
+        {
+            let dismiss_host = cx.entity().downgrade();
+            let dismiss_context_menu: ContextMenuDismiss = Rc::new(move |app| {
+                if let Some(host) = dismiss_host.upgrade() {
+                    host.update(app, |host, host_cx| {
+                        host.open_context_menu = None;
+                        host_cx.notify();
+                    });
+                }
+            });
+            let submenu_host = cx.entity().downgrade();
+            let toggle_context_submenu: ContextMenuSubmenuToggle = Rc::new(move |index, app| {
+                if let Some(host) = submenu_host.upgrade() {
+                    host.update(app, |host, host_cx| {
+                        if let Some(open) = host.open_context_menu.as_mut() {
+                            open.open_submenu = index;
+                            host_cx.notify();
+                        }
+                    });
+                }
+            });
+            let entries = build_context_menu_entries(
+                open.target,
+                &snapshot.rects,
+                &snapshot.group_presentations,
+                &snapshot.column_modes,
+                self.controller.clone(),
+                false,
+            );
+            if !entries.is_empty() {
+                root = root.child(ContextMenu::render(
+                    "floating-group-context-menu",
+                    Rect::new(Point::ZERO, group_rect.rect.size),
+                    open.anchor,
+                    &entries,
+                    open.open_submenu,
+                    ContextMenuCallbacks {
+                        on_submenu: toggle_context_submenu,
+                        on_dismiss: dismiss_context_menu,
+                    },
+                    self.theme,
+                ));
+            }
+        }
+
+        root
+    }
+}
+
+fn floating_part_local_rect(rect: Rect, origin: Point) -> Rect {
+    Rect::new(
+        Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
+        rect.size,
+    )
+}
+
 /// Root GPUI view for exactly one Core floating composition.
 ///
 /// The host owns presentation-only state (scroll handles and a transient
