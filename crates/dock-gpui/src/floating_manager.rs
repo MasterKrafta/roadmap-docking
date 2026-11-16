@@ -2727,22 +2727,31 @@ impl FloatingWindowManager {
         }
         self.host_registry.floating_groups = active_hosts.clone();
 
+        // First show/configure any replacement native hosts using the current
+        // graph. Newly-created PanelWindows start hidden, so their frame metrics
+        // are not eligible for reconnection validation until this pass finishes.
+        self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
+
         // Reconnect a straight-through pair only after its surviving native
-        // hosts are available and the proposed complete grid passes geometry
+        // hosts are visible and the proposed complete grid passes geometry
         // validation. A temporarily unavailable host leaves the candidate
         // queued for the next reconciliation pass.
+        let mut reconnected_grid = false;
         let reconnect_candidates = std::mem::take(&mut self.pending_window_grid_reconnections);
         for candidate in reconnect_candidates {
             if !live_groups.contains(&candidate.from) || !live_groups.contains(&candidate.to) {
                 continue;
             }
             match self.try_reconnect_pruned_window_grid(candidate, cx) {
-                Some(true) => tracing::debug!(
-                    from = ?candidate.from,
-                    to = ?candidate.to,
-                    direction = ?candidate.direction,
-                    "reconnected surviving WindowGrid members after removal"
-                ),
+                Some(true) => {
+                    reconnected_grid = true;
+                    tracing::debug!(
+                        from = ?candidate.from,
+                        to = ?candidate.to,
+                        direction = ?candidate.direction,
+                        "reconnected surviving WindowGrid members after removal"
+                    );
+                }
                 Some(false) => tracing::debug!(
                     from = ?candidate.from,
                     to = ?candidate.to,
@@ -2753,7 +2762,11 @@ impl FloatingWindowManager {
             }
         }
 
-        self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
+        // The first pass made native handles visible; a successful graph change
+        // requires applying the updated direction-aware Z-order a second time.
+        if reconnected_grid {
+            self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
+        }
         self.schedule_pending_window_chain_alignment(cx);
 
         for (panel, entry) in &mut self.registry.windows {
