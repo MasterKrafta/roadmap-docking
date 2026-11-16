@@ -1,12 +1,11 @@
 use dock_core::{
-    ComputeRectsError, DockMetrics, DropSource, FloatingGroupId, GeometryError, HitResult,
-    LayoutRects, Point, Rect,
+    ComputeRectsError, DropSource, FloatingGroupId, GeometryError, HitResult, LayoutRects, Point,
+    Rect,
 };
 use gpui::WindowId;
 
 use super::{
-    DockController, DockControllerConfigError, FloatingGeometryCache, FloatingRectCacheKey,
-    RectCacheKey, ResolverCacheKey,
+    DockController, FloatingGeometryCache, FloatingRectCacheKey, RectCacheKey, ResolverCacheKey,
 };
 
 impl DockController {
@@ -236,33 +235,6 @@ impl DockController {
         self.viewport = viewport;
         self.rects_key = None;
         self.drag.clear_resolver();
-        Ok(true)
-    }
-
-    /// Replaces metrics atomically. Existing layout must remain valid under them.
-    pub fn set_metrics(&mut self, metrics: DockMetrics) -> Result<bool, DockControllerConfigError> {
-        metrics
-            .validate()
-            .map_err(DockControllerConfigError::InvalidMetrics)?;
-        if self.metrics == metrics {
-            return Ok(false);
-        }
-        if let Err(error) = self.cancel_pointer_interaction() {
-            tracing::warn!(%error, "could not cancel dock interaction before metrics change");
-        }
-        self.layout
-            .validate(&metrics)
-            .map_err(DockControllerConfigError::InvalidLayout)?;
-        let next_revision = self
-            .metrics_revision
-            .checked_add(1)
-            .ok_or(DockControllerConfigError::MetricsRevisionOverflow)?;
-        let drag = super::DragController::new(&metrics)?;
-        self.metrics = metrics;
-        self.metrics_revision = next_revision;
-        self.drag = drag;
-        self.rects_key = None;
-        self.floating_rects.clear();
         Ok(true)
     }
 
