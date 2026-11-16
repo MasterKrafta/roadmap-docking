@@ -1538,6 +1538,31 @@ impl DragHostManager {
         handoff.required_panels_by_group.get(&target_group).cloned()
     }
 
+    /// Returns every FloatingGroup whose permanent Group hosts belong to this
+    /// released transfer. A DockArea tear-off may need several destinations.
+    pub(crate) fn pending_handoff_groups(
+        &self,
+        primary_target_group: FloatingGroupId,
+    ) -> Option<Vec<FloatingGroupId>> {
+        let active = self.active.as_ref()?;
+        let handoff = active.handoff.as_ref()?;
+        if !handoff.source_released
+            || handoff.primary_target_group != primary_target_group
+        {
+            return None;
+        }
+
+        let mut groups = handoff
+            .required_panels_by_group
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        if !groups.contains(&primary_target_group) {
+            groups.push(primary_target_group);
+        }
+        Some(groups)
+    }
+
     pub(crate) fn complete_floating_handoff(
         &mut self,
         target_group: FloatingGroupId,

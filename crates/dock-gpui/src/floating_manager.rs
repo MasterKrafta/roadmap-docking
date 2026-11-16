@@ -3783,22 +3783,48 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         cx: &mut Context<Self>,
     ) -> bool {
-        // A DockArea tear-off can create several FloatingGroups. All their
-        // Group windows remain hidden until the single DragHost releases its
-        // source PanelViews, so reveal every hidden Group member together.
+        // Reuse the active handoff's destination set. It contains one group for
+        // a tab tear-off and every destination for a multi-group DockArea tear-off.
+        let Some(drag_host) = self
+            .drag_host_manager
+            .as_ref()
+            .and_then(|manager| manager.upgrade())
+        else {
+            return false;
+        };
+        let Some(expected_groups) = drag_host
+            .update(cx, |manager, _| manager.pending_handoff_groups(group))
+            .ok()
+            .flatten()
+        else {
+            return false;
+        };
+        let expected_groups = expected_groups.into_iter().collect::<HashSet<_>>();
+        if expected_groups.is_empty() {
+            return false;
+        }
+
+        // LayoutChanged reconciliation is deferred to avoid entity re-entry.
+        // At handoff time the DragHost has released its PanelViews, so reconcile
+        // now to ensure the destination Group HWNDs exist before showing them.
+        self.reconcile(cx);
+
         let group_windows = self
             .registry
             .members
             .iter()
             .filter(|(member, entry)| {
                 matches!(member, WindowGridMember::Group(_))
-                    && entry.host_group.is_some()
+                    && entry.host_group.is_some_and(|owner| expected_groups.contains(&owner))
             })
-            .map(|(member, entry)| (*member, entry.window, entry.native_window, entry.visibility))
+            .map(|(member, entry)| {
+                (*member, entry.host_group, entry.window, entry.native_window, entry.visibility)
+            })
             .collect::<Vec<_>>();
-        let mut ready_group_windows = 0usize;
+        let has_typed_group_windows = !group_windows.is_empty();
+        let mut ready_groups = HashSet::new();
 
-        for (member, window, native_window, visibility) in group_windows {
+        for (member, owner, window, native_window, visibility) in group_windows {
             let Some(native_window) = native_window else {
                 continue;
             };
@@ -3827,14 +3853,23 @@ impl FloatingWindowManager {
                 );
                 continue;
             }
-            ready_group_windows += 1;
+            if let Some(owner) = owner {
+                ready_groups.insert(owner);
+            }
         }
 
-        if ready_group_windows > 0 {
-            cx.notify();
-            return true;
+        if has_typed_group_windows {
+            let all_destinations_ready = expected_groups
+                .iter()
+                .all(|expected| ready_groups.contains(expected));
+            if all_destinations_ready {
+                cx.notify();
+                return true;
+            }
+            return false;
         }
 
+        // Compatibility path for the transitional legacy single-window host.
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
         };
