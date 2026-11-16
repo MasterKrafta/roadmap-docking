@@ -3781,23 +3781,12 @@ impl FloatingWindowManager {
     pub(crate) fn show_handoff_target(
         &mut self,
         group: FloatingGroupId,
+        expected_groups: &[FloatingGroupId],
         cx: &mut Context<Self>,
     ) -> bool {
-        // Reuse the active handoff's destination set. It contains one group for
-        // a tab tear-off and every destination for a multi-group DockArea tear-off.
-        let Some(drag_host) = self
-            .drag_host_manager
-            .as_ref()
-            .and_then(|manager| manager.upgrade())
-        else {
-            return false;
-        };
-        let Some(expected_groups) = drag_host
-            .update(cx, |manager, _| manager.pending_handoff_groups(group))
-        else {
-            return false;
-        };
-        let expected_groups = expected_groups.into_iter().collect::<HashSet<_>>();
+        // DragHostManager supplies this snapshot before updating FloatingWindowManager.
+        // Do not re-enter DragHostManager here: it is already handling the release.
+        let expected_groups = expected_groups.iter().copied().collect::<HashSet<_>>();
         if expected_groups.is_empty() {
             return false;
         }
