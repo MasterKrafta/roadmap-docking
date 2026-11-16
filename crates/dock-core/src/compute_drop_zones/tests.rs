@@ -3613,17 +3613,41 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                 }
     }), "the single-group composition must expose the same per-Group top edge as a Group drag");
 
-    let last_bottom = zones
+    let outer_bottom = zones
         .iter()
         .find(|zone| {
+            zone.zone == DropZone::FloatingBottom
+                && zone.target
+                    == DropTarget::GroupEdge {
+                        group: third_group,
+                        zone: DropZone::FloatingBottom,
+                    }
+        })
+        .expect("a whole Floating composition must expose its outer bottom edge for WindowGrid");
+    assert!(
+        !zones.iter().any(|zone| {
             zone.zone == DropZone::ColumnEnd
                 && zone.target
                     == DropTarget::ColumnSlot {
                         column: target_column,
                         index: 3,
                     }
+        }),
+        "a whole Floating composition must not expose the legacy Core ColumnEnd target"
+    );
+    let outer_bottom_point = Point::new(
+        outer_bottom.rect.origin.x + outer_bottom.rect.size.width * 0.5,
+        outer_bottom.rect.origin.y + outer_bottom.rect.size.height * 0.5,
+    );
+    assert_eq!(
+        layout
+            .resolve_drop(outer_bottom_point, source, &rects, &metrics)
+            .unwrap(),
+        Some(DropTarget::GroupEdge {
+            group: third_group,
+            zone: DropZone::FloatingBottom,
         })
-        .expect("a whole multi-group Column must expose the append-to-end target");
+    );
 
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::Left
