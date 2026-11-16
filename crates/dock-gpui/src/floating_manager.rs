@@ -3043,34 +3043,19 @@ impl FloatingWindowManager {
         }) {
             return None;
         }
-        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
-            members.iter().map(|member| {
-                let group = member.floating_group()?;
-                controller.layout().floating_group(group).map(|floating| (*member, floating.bounds))
-            }).collect::<Option<Vec<_>>>()
-        }) else {
-            return Some(false);
+        let Some(member_bounds) = self.native_bounds_for_grid_members(&members) else {
+            return None;
         };
         let Some(links) = next_chains.links_for(candidate.from).map(|links| links.to_vec()) else {
             return Some(false);
         };
-        let Some(frames) = self.frame_geometries_for_bounds(&member_bounds) else {
-            return None;
-        };
-        let header_height = self.controller.update(cx, |controller, _| controller.metrics().column_header_height);
-        if arrange_grid_geometry_bounds(member_bounds, &frames, &links, candidate.from, header_height).is_none() {
+        if self
+            .arrange_window_grid_bounds(member_bounds, &links, candidate.from, cx)
+            .is_none()
+        {
             return Some(false);
         }
         self.window_chains = next_chains;
-        for member in &members {
-            if let Some(group) = member.floating_group()
-                && let Some(panel) = self.host_registry.panel_for_group(group)
-                && let Some(mut entry) = self.registry.windows.remove(&panel)
-            {
-                self.sync_native_resize_edge_policy(&mut entry, group);
-                self.registry.windows.insert(panel, entry);
-            }
-        }
         for member in members {
             self.pending_window_chain_alignment.remove(&member);
         }
