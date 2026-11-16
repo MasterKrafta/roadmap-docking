@@ -1381,6 +1381,29 @@ mod native_resize_grid_geometry_tests {
     }
 
     #[test]
+    fn resizing_terminal_window_does_not_move_any_other_member() {
+        let (_ids, ids) = groups(2);
+        let [a, b] = ids.as_slice() else { panic!("two groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 50.0, 40.0)),
+        ];
+        let frames = vec![frame(100.0, 80.0, 1.0), frame(50.0, 40.0, 1.0)];
+        let links = vec![link(*a, *b, WindowGridDirection::Right)];
+
+        let shifted = shift_window_grid_after_resize(
+            bounds.clone(),
+            &frames,
+            &links,
+            *b,
+            40.0,
+            25.0,
+        )
+        .expect("terminal member remains a valid grid");
+        assert_eq!(shifted, bounds);
+    }
+
+    #[test]
     fn mixed_dpi_grid_members_shift_by_the_same_physical_delta() {
         let (_ids, ids) = groups(3);
         let [a, b, c] = ids.as_slice() else { panic!("three groups"); };
