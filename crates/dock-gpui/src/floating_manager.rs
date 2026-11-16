@@ -3157,10 +3157,10 @@ impl FloatingWindowManager {
         let anchors = self.pending_window_chain_alignment.iter().copied().collect::<Vec<_>>();
         let mut pending = Vec::new();
         for anchor in anchors {
-            let Some(anchor_group) = self.floating_group_for_member(anchor) else {
+            if self.floating_group_for_member(anchor).is_none() {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
-            };
+            }
             if !self.window_chains.is_chained(anchor) {
                 self.pending_window_chain_alignment.remove(&anchor);
                 continue;
@@ -3227,14 +3227,18 @@ impl FloatingWindowManager {
                 if delta == Point::ZERO {
                     continue;
                 }
-                if let Some(previous) = translations.insert(group, delta)
-                    && (previous.x - delta.x).abs() > 0.5
-                        || translations.get(&group).is_some_and(|previous| {
-                            (previous.y - delta.y).abs() > 0.5
-                        })
-                {
-                    inconsistent = true;
-                    break;
+                match translations.get(&group).copied() {
+                    Some(previous)
+                        if (previous.x - delta.x).abs() > 0.5
+                            || (previous.y - delta.y).abs() > 0.5 =>
+                    {
+                        inconsistent = true;
+                        break;
+                    }
+                    Some(_) => {}
+                    None => {
+                        translations.insert(group, delta);
+                    }
                 }
             }
             if inconsistent {
@@ -3274,7 +3278,6 @@ impl FloatingWindowManager {
             } else {
                 pending.push((anchor, corrections));
             }
-            let _ = anchor_group;
         }
         pending
     }
