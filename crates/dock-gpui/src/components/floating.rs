@@ -2696,3 +2696,22 @@ mod floating_dock_area_header_hit_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod floating_part_host_geometry_tests {
+    use super::floating_part_local_rect;
+    use dock_core::{Point, Rect, Size};
+
+    #[test]
+    fn detached_group_geometry_is_rebased_to_the_window_origin() {
+        let local = floating_part_local_rect(
+            Rect::new(Point::new(180.0, 96.0), Size::new(420.0, 260.0)),
+            Point::new(180.0, 96.0),
+        );
+
+        assert_eq!(
+            local,
+            Rect::new(Point::ZERO, Size::new(420.0, 260.0)),
+        );
+    }
+}
