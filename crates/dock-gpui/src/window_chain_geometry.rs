@@ -1136,7 +1136,7 @@ mod window_grid_bounds_tests {
 
         assert!(
             arrange_window_grid_bounds(
-                vec![original[0], original[0]],
+                vec![original[0].clone(), original[0].clone()],
                 &[frames[0], frames[0]],
                 &[],
                 a,
