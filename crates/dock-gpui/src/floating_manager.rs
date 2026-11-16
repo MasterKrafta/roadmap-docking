@@ -29,7 +29,8 @@ use crate::{
         match_moving_window_width_to_target,
         floating_grid_members_in_native_front_to_back,
         floating_groups_in_native_z_order as grid_floating_groups_in_native_z_order,
-        native_resize_right_edge_delta, shift_window_chain_after_resize,
+        native_resize_right_edge_delta, native_resize_bottom_edge_delta,
+        shift_window_grid_after_resize,
     },
 };
 
@@ -1286,7 +1287,28 @@ impl FloatingWindowManager {
             },
             None => DockCommand::ResizeFloatingBounds { group, bounds },
         };
-        let chain_members = self.window_chains.members_for(group);
+        let grid_links = self.window_chains.links_for(group).unwrap_or_default().to_vec();
+        let grid_geometry = if grid_links.is_empty() {
+            None
+        } else {
+            let members = self.window_chains.members_for(group);
+            let bounds = self.controller.update(cx, |controller, _| {
+                members
+                    .iter()
+                    .map(|member| {
+                        controller
+                            .layout()
+                            .floating_group(*member)
+                            .map(|floating| (*member, floating.bounds))
+                    })
+                    .collect::<Option<Vec<_>>>()
+            });
+            bounds.and_then(|bounds| {
+                self.frame_geometries_for_bounds(&bounds)
+                    .map(|frames| (bounds, frames))
+            })
+        };
+
         self.controller.update(cx, |controller, controller_cx| {
             let primary_result = controller.dispatch(command);
             match primary_result {
@@ -1295,44 +1317,104 @@ impl FloatingWindowManager {
                         .layout()
                         .floating_group(group)
                         .map(|floating| floating.bounds);
-                    if let Some(actual_bounds) = actual_bounds
-                        && let Some(right_edge_delta) = native_resize_right_edge_delta(
+                    if let Some(actual_bounds) = actual_bounds {
+                        let right_edge_delta = native_resize_right_edge_delta(
                             current_bounds,
                             actual_bounds,
                             scale_factor,
                         )
-                        && right_edge_delta.abs() > 0.01
-                    {
-                        let chain_bounds = chain_members
-                            .iter()
-                            .map(|member| {
-                                controller
-                                    .layout()
-                                    .floating_group(*member)
-                                    .map(|floating| (*member, floating.bounds))
-                            })
-                            .collect::<Option<Vec<_>>>();
-                        if let Some(chain_bounds) = chain_bounds
-                            && let Some(shifted_bounds) = shift_window_chain_after_resize(
-                                chain_bounds,
-                                group,
-                                right_edge_delta,
-                            )
-                        {
-                            let neighbor_commands = shifted_bounds
-                                .into_iter()
-                                .skip_while(|(member, _)| *member != group)
-                                .skip(1)
-                                .map(|(member, bounds)| DockCommand::ResizeFloatingBounds {
-                                    group: member,
-                                    bounds,
-                                })
-                                .collect::<Vec<_>>();
-                            if let Err(error) = controller.dispatch_sequence(neighbor_commands) {
+                        .unwrap_or(0.0);
+                        let bottom_edge_delta = native_resize_bottom_edge_delta(
+                            current_bounds,
+                            actual_bounds,
+                            scale_factor,
+                        )
+                        .unwrap_or(0.0);
+
+                        if right_edge_delta.abs() > 0.01 || bottom_edge_delta.abs() > 0.01 {
+                            if let Some((grid_bounds, grid_frames)) = grid_geometry.as_ref() {
+                                let actual_grid_bounds = grid_bounds
+                                    .iter()
+                                    .map(|(member, _)| {
+                                        let member_bounds = if *member == group {
+                                            Some(actual_bounds)
+                                        } else {
+                                            controller
+                                                .layout()
+                                                .floating_group(*member)
+                                                .map(|floating| floating.bounds)
+                                        };
+                                        member_bounds.map(|bounds| (*member, bounds))
+                                    })
+                                    .collect::<Option<Vec<_>>>();
+                                let actual_grid_frames = grid_bounds
+                                    .iter()
+                                    .zip(grid_frames.iter())
+                                    .map(|((member, _), frame)| {
+                                        if *member == group {
+                                            frame.with_logical_client_size(actual_bounds.size)
+                                        } else {
+                                            Some(*frame)
+                                        }
+                                    })
+                                    .collect::<Option<Vec<_>>>();
+
+                                if let (Some(actual_grid_bounds), Some(actual_grid_frames)) =
+                                    (actual_grid_bounds, actual_grid_frames)
+                                {
+                                    if let Some(shifted_bounds) = shift_window_grid_after_resize(
+                                        actual_grid_bounds,
+                                        &actual_grid_frames,
+                                        &grid_links,
+                                        group,
+                                        right_edge_delta,
+                                        bottom_edge_delta,
+                                    ) {
+                                        let neighbour_commands = shifted_bounds
+                                            .into_iter()
+                                            .filter_map(|(member, member_bounds)| {
+                                                if member == group {
+                                                    return None;
+                                                }
+                                                let current = controller
+                                                    .layout()
+                                                    .floating_group(member)?
+                                                    .bounds;
+                                                (current != member_bounds).then_some(
+                                                    DockCommand::ResizeFloatingBounds {
+                                                        group: member,
+                                                        bounds: member_bounds,
+                                                    },
+                                                )
+                                            })
+                                            .collect::<Vec<_>>();
+                                        if !neighbour_commands.is_empty() {
+                                            if let Err(error) =
+                                                controller.dispatch_sequence(neighbour_commands)
+                                            {
+                                                tracing::warn!(
+                                                    ?group,
+                                                    %error,
+                                                    "could not reflow the affected WindowGrid region after native Resize"
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        tracing::warn!(
+                                            ?group,
+                                            "could not calculate the affected WindowGrid region after native Resize"
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        ?group,
+                                        "could not read all Core bounds or frame metrics for WindowGrid Resize"
+                                    );
+                                }
+                            } else if !grid_links.is_empty() {
                                 tracing::warn!(
                                     ?group,
-                                    %error,
-                                    "could not shift later Window Chain members after native Resize"
+                                    "could not measure native geometry for WindowGrid Resize"
                                 );
                             }
                         }
@@ -1345,8 +1427,8 @@ impl FloatingWindowManager {
                 ),
             }
 
-            // The current resize and every dependent neighbour shift stay inside
-            // the same open native-resize history transaction and one event flush.
+            // The primary Resize and all dependent neighbour moves stay inside
+            // the same native-resize history transaction and one event flush.
             controller.flush_events(controller_cx);
             controller_cx.notify();
         });
@@ -3551,9 +3633,12 @@ impl FloatingWindowManager {
             return;
         }
 
-        let members = self.window_chains.members_for(group);
-        let desired_left_enabled = members.first() == Some(&group);
-        let desired_top_enabled = members.len() <= 1;
+        let desired_left_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(group, WindowGridDirection::Left);
+        let desired_top_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(group, WindowGridDirection::Above);
 
         if entry.native_left_resize_enabled != Some(desired_left_enabled) {
             match self
