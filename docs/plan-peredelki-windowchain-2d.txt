@@ -125,8 +125,10 @@
   каждую существующую WindowGrid, запускает reconcile и повторное выравнивание
   по актуальной высоте CompositionHeader; штатная синхронизация повторно
   применяет Z-order и native resize constraints.
-- Начальная конфигурация встроенного приложения и статические preview Column
-  используют тот же GPUI-конвертер ThemeMetrics -> DockMetrics.
+- Начальная конфигурация встроенного приложения, первичная синхронизация DockHost
+  и статические preview Column используют тот же GPUI-конвертер
+  ThemeMetrics -> DockMetrics. DockHost применяет тему один раз, чтобы не затирать
+  последующие явные обновления через DockController::set_metrics().
 - Тесты WindowGrid больше не передают фиксированные 32 px: базовая высота
   берётся из DockMetrics, отдельно проверяются Above/Below при 12, 20 и текущем
   значении метрики с дробным DPI и разными native inset. Добавлены проверки
@@ -852,8 +854,10 @@ crates/dock-gpui/src/floating_manager.rs
 7. FloatingWindowManager получает MetricsChanged, ставит существующие
    WindowGrid на повторное выравнивание и выполняет reconcile. Повторный
    reconcile применяет актуальные native bounds, Z-order и resize constraints.
-8. Встроенный запуск и preview Composition используют тот же конвертер, чтобы
-   не оставлять альтернативную пару Theme/Dock значений.
+8. Встроенный запуск, первичная синхронизация DockHost и preview Composition
+   используют тот же конвертер. DockHost применяет исходную тему один раз;
+   дальнейшее изменение метрик выполняется через DockController::set_metrics(),
+   иначе render перезаписывал бы явное обновление сохранённым theme snapshot.
 
 Автоматическое покрытие:
 - независимое преобразование CompositionHeader / Group header / Tab strip;
