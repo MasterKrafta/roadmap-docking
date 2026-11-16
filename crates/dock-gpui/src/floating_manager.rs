@@ -856,9 +856,9 @@ impl FloatingWindowManager {
                 |manager, _, event: &DockEvent, manager_cx| {
                     match event {
                         DockEvent::LayoutChanged { .. } => {
-                            // LayoutChanged can be emitted from inside a FloatingHost
-                            // update. Reconcile calls WindowHandle::update on registered
-                            // hosts, so always defer it until the active host update unwinds.
+                            // LayoutChanged can be emitted from inside a Floating part
+                            // host update. Reconcile updates native hosts, so always defer
+                            // it until the active GPUI host update unwinds.
                             manager.schedule_reconcile(manager_cx);
                         }
                         DockEvent::MetricsChanged { .. } => {
@@ -1908,7 +1908,7 @@ impl FloatingWindowManager {
         })
     }
 
-    /// Returns true when the cursor is over a registered FloatingHost above MainHost.
+    /// Returns true when the cursor is over a managed Floating Header/Group or legacy host.
     pub(crate) fn cursor_over_floating_window_from_main(&self) -> bool {
         let Some(main) = self.main_native_window else {
             return false;
@@ -2333,9 +2333,9 @@ impl FloatingWindowManager {
 
     /// Runs host reconciliation after the active GPUI update has unwound.
     ///
-    /// Floating-to-Floating Core drops can change which persistent window hosts
-    /// a composition. Updating that FloatingHost synchronously from the controller
-    /// LayoutChanged subscription can re-enter the same GPUI entity.
+    /// Floating Core drops can change the set of permanent Header/Group hosts.
+    /// Updating those hosts synchronously from the controller LayoutChanged
+    /// subscription can re-enter the same GPUI entity.
     fn schedule_reconcile(&mut self, cx: &mut Context<Self>) {
         if self.reconcile_scheduled {
             return;
@@ -3028,9 +3028,9 @@ impl FloatingWindowManager {
                 let Some(entry) = self.registry.windows.get_mut(&panel) else {
                     continue;
                 };
-                // A newly-created FloatingHost for a transferred composition stays
-                // hidden until DragHost has rendered its empty placeholder and
-                // released the cached AnyViews. Already-visible hosts remain visible.
+                // Legacy PanelId-host path: a transferred composition stays hidden
+                // until DragHost has rendered its empty placeholder and released the
+                // cached AnyViews. Permanent typed Group hosts use reconcile_part_windows.
                 if entry.visibility == PanelWindowVisibility::Hidden
                     && group.panels.iter().any(|panel| transferred_panels.contains(panel))
                 {
