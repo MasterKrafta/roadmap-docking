@@ -66,7 +66,7 @@ Core Layout остаётся владельцем структуры Composition
 - **Header window** — постоянное окно шапки Floating Column.
 - **Group window** — постоянное окно одной Floating Group.
 
-При подтверждённом Drop в Floating DragHost передаёт содержимое постоянному Group window. Нужно переиспользовать существующий механизм handoff и возможность принять DragHost как host, когда это безопасно. Не допускать одновременного монтирования одного AnyView в двух окнах.
+При подтверждённом Drop в Floating DragHost передаёт содержимое постоянному Group window. Если это безопасно, существующий HWND DragHost можно переиспользовать как Group window через механизм adoption; иначе нужен двухфазный handoff в созданное Group window. В обоих случаях Header создаётся отдельно. Не допускать одновременного монтирования одного AnyView в двух окнах.
 
 Если Drop завершился в Main или жест отменён, временный DragHost закрывается, а постоянные Floating Header/Group окна не создаются.
 
@@ -184,15 +184,98 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 0. Зафиксировать контракты и текущие переходы
 
-Файлы: только документация на этом этапе.
+<Статус: выполнен 16 ноября 2026 г.>
 
-1. Сопоставить реальные пути Main/Floating/DragHost и подтверждённые команды Core.
-2. Зафиксировать, какие DropZone создают новую Group, какие добавляют Tab, а какие создают новую Column.
-3. Определить mapping Column NodeId → Header window и Group NodeId → Group window.
-4. Зафиксировать обработку пустой Column, отмены жеста, Escape, Undo/Redo и handoff.
-5. Не менять поведение и не трогать DropZone.
+Цель этапа — не менять поведение, а зафиксировать реальный путь одного жеста от источника до окончательного Drop.
 
-Результат: понятная карта создания/удаления каждого окна и его владельца.
+#### 0.1. Начало жеста и временный DragHost
+
+1. input_drag.rs::begin_drag_at передаёт в DockController исходные DragPayload, DragHandle, DragSourceHost и WindowId. Core сохраняет семантический источник; DragHostId не заменяет его.
+2. До прохождения drag threshold постоянные окна не создаются.
+3. После перехода в Dragging UI вызывает один из существующих адаптеров:
+   - begin_panel_drag_host для PanelTab/FlyoutPanel;
+   - begin_group_drag_host для GroupGrip;
+   - begin_dock_area_drag_host для DockAreaHeader.
+4. Эти адаптеры используют DragHostManager::open_panel_at_cursor, open_panel_tab_at_cursor, open_group_at_cursor или open_dock_area_at_cursor. Все они сходятся в open_at_cursor_with_content.
+5. DragHostManager создаёт одно временное native-окно, подключает его к DragHostSession, передаёт ему существующие cached PanelView и ждёт, пока исходное окно отрисует placeholder. Только после detachment источника временное окно показывается.
+6. Для Main-origin PanelTab и GroupGrip включён promote_on_float. Для tab/group жестов резервируется высота CompositionHeader внутри временного DragHost; для DockArea drag эта высота отдельно не резервируется. Это старое поведение DragHost, не правило будущей постоянной геометрии Header/Group.
+7. Для Floating-origin PanelTab/GroupGrip используется тот же DragHost lifecycle. В текущем коде promote_on_float для этих источников выключен: исходный Floating host обычно остаётся постоянным, а DragHost передаёт содержимое через handoff.
+8. Перестановка вкладки внутри той же Floating TabStrip остаётся отдельным локальным сценарием finish_floating_tab_drag и не обязана создавать DragHost, пока жест остаётся внутри исходного TabStrip.
+
+#### 0.2. Определение цели во время перетаскивания
+
+1. DragHost отслеживает окно под курсором и хранит target вместе с target role.
+2. Для Main вызывается Main drop resolver; для Floating — resolver, подготовленный для конкретных WindowId и FloatingGroupId.
+3. Если под курсором нет управляемого Dock-окна, целевой зоной становится FreeArea. Для DockArea drag отдельное правило также рассматривает некоторые внешние окна как FreeArea.
+4. Обычные цели внутри Main/Floating передаются Core без подмены: например, Tabs/GroupTabs, GroupEdge, ColumnSlot или MainColumn.
+5. Для PanelTab, GroupGrip и DockAreaHeader, сброшенных на поддерживаемую внешнюю грань Floating, floating_window_chain_target вычисляет направление WindowGrid. В этом случае finish_active_drag намеренно заменяет Core request target на FreeArea: сначала создаётся самостоятельная Core FloatingGroup, затем её native-окно присоединяется к целевой WindowGrid.
+6. Единое преобразование направления сейчас находится в floating_window_chain_direction:
+   - Left → Left;
+   - Right → Right;
+   - Top/FloatingTop → Above;
+   - Bottom/FloatingBottom → Below.
+7. Drop в TabStrip/append-зону не является WindowGrid side-drop: он остаётся обычным переносом Panel в существующую Group, если Core принимает target.
+
+#### 0.3. Что именно делает Core при Drop
+
+- PanelTab → FreeArea: Float над узлом Panel; в Photoshop profile floating_root_for_node оборачивает Panel в Tabs, а затем в Column.
+- GroupGrip → FreeArea: Float над существующим Tabs/Group; в Photoshop profile Tabs оборачивается в Column.
+- DockAreaHeader → FreeArea: для Photoshop profile используется FloatMainAreaColumns. Горизонтальный Main Split(X) преобразуется в отдельные Core FloatingGroup по одной на каждую Column; возвращается упорядоченный список FloatingGroupId.
+- Простая композиция 1 Column / 1 Group / 1 Tab распознаётся через simple_composition_root_for_drag_request. Для PanelTab, GroupGrip и DockAreaHeader Core использует Column как общий смысловой корень. При FreeArea создаётся Floating именно из Column, а не из случайного дочернего узла.
+- PanelTab → Tabs/Group append: MovePanel; PanelTab не может передать целую Group через GroupTabs.
+- GroupGrip → GroupTabs: MergeGroup.
+- GroupGrip → GroupEdge: SplitGroup.
+- GroupGrip → ColumnSlot/RailSlot: MoveGroup.
+- PanelTab → собственная Top/Bottom-граница может отделить вкладку в соседнюю Group только если в исходной Group остаётся другая вкладка; иначе такой self-drop не должен создавать пустую Group.
+- При Floating → Main эти же операции направлены в Main target resolver. После успешной мутации Panel/Group больше не принадлежат исходной Floating Composition; reconcile должен удалить только ставшие пустыми Floating-элементы.
+
+#### 0.4. Что делает DragHostManager после отпускания мыши
+
+1. finish_active_drag получает один DragDropRequest из pointer_up и вызывает Layout::resolve_drag_drop.
+2. Core возвращает NoOp либо одну DockCommand. GPUI выполняет одну dispatch/dispatch_in; DragHostManager извлекает созданные FloatingGroupId из CommandValue.
+3. Если Drop выполнен в Main, новая FloatingGroup не создаётся. Main получает обновлённый Layout, временный DragHost закрывается. Для Main-origin transfer с promote_on_float события LayoutChanged сначала удерживаются, затем публикуются перед закрытием временного окна.
+4. Если Drop выполнен в FreeArea, создаётся новая Core FloatingGroup.
+5. Если Drop выполнен на внешнюю сторону Floating и сработал chain_join, Core также создаёт новую FloatingGroup через FreeArea, после чего FloatingWindowManager добавляет её в WindowGrid.
+6. Для Main-origin tab/group DragHost может быть принят FloatingWindowManager как persistent host, если восстановление native frame и adoption успешны. Иначе используется двухфазный handoff: DragHost перестаёт монтировать PanelView, целевой host должен отрисовать его, после чего временный DragHost освобождается.
+7. Main → временный Floating → Main — это тот же путь, что и обычный Drop в Main: DragHost существует во время жеста, но после успешного Main Drop закрывается; постоянные Floating-окна не должны появляться.
+8. Если операция отменена или не создала ожидаемую FloatingGroup для FreeArea/chain_join, DragHost закрывается, а исходный Layout должен остаться целостным.
+
+#### 0.5. Что сейчас считается постоянным Floating-окном
+
+- FloatingGroupId в DockCore обозначает одну Floating Composition/DockArea, а не отдельное визуальное окно Header или Group.
+- DockWindowRole::Floating сейчас содержит один FloatingGroupId.
+- FloatingWindowManager::reconcile собирает Core FloatingGroup, выбирает один PanelId в качестве Composition host и создаёт/использует окно для этого host. Остальные PanelWindow могут оставаться скрытыми.
+- PanelWindowRegistry сейчас индексирует native entries через PanelId; CompositionHostRegistry выбирает host Panel для FloatingGroup.
+- FloatingHost и FloatingWindowContent рисуют все Column/Group данной Floating Composition в одном HWND. CompositionHeader добавляется туда же условно через hide_header.
+- WindowGridRegistry сейчас связывает FloatingGroupId. Поэтому один участник WindowGrid соответствует целой текущей Floating Composition, а не отдельной Header или Group.
+- window_chain_geometry.rs располагает вертикальных соседей с overlap на высоту CompositionHeader: верхний HWND перекрывает шапку нижнего. Это правило старой архитектуры и должно быть заменено.
+- В текущем WindowGrid уже есть проверенные алгоритмы направленных связей, порядка участников, native frame/client insets, DPI, Z-order, совместного перемещения, Resize и pruning. Их нужно адаптировать, а не переписывать без причины.
+
+#### 0.6. Контракт новой модели после аудита
+
+1. Core Composition → Column → Group → Tab остаётся единственной моделью содержимого. На этапе 0 Core не меняется.
+2. Для постоянных Floating windows вводится отдельная GPUI identity:
+   - Header(Column NodeId) — ровно одно окно шапки на Column;
+   - Group(Group NodeId) — ровно одно окно на Group.
+3. FloatingGroupId остаётся идентификатором Core Floating Composition/DockArea. Он связывает содержимое с Floating-контекстом, но не заменяет identity отдельных HWND.
+4. PanelId остаётся идентификатором вкладки/PanelView и не должен выбирать единственное окно всей Composition.
+5. DragHost остаётся временным окном транспорта. Он может быть принят как постоянное Group window после успешного Floating Drop, если это сохраняет существующий безопасный handoff; он не становится Header и не заменяет всю сетку.
+6. Каждая Column имеет отдельный Header в зарезервированном верхнем ряду. Её Group windows стоят ниже в Core-порядке, без перекрытия высоты Header.
+7. Добавление/перемещение Group меняет позиции окон Group её Column, но не позицию Header. Перетаскивание за Header перемещает Header вместе со всеми Group именно своей Column.
+8. Main остаётся одним главным HWND и продолжает собирать Composition через composition.rs. Отдельные Header/Group HWND относятся только к постоянному Floating-представлению.
+9. При простом Main Composition 1/1/1, перетаскиваемой за Header, переход в detached drag presentation должен сразу подготовить пару Header window + Group window. Если финальный Drop сделан в Floating, эта пара становится постоянной; если Drop вернулся в Main или жест отменён, временная пара освобождается без создания постоянной Floating-сетки.
+10. Для обычного Main-origin PanelTab drag используется временный Group/DragHost во время жеста. Постоянный Header создаётся только при успешном Floating Drop. Если Drop вернулся в Main, постоянные Header/Group windows не создаются.
+
+#### 0.7. Результат и границы этапа
+
+Этап 0 завершён на уровне архитектурного аудита и документации. Следующий этап может вводить identity WindowGridMember, но не должен одновременно переписывать рендеринг, геометрию и Drop routing.
+
+На этапе 0:
+- код и Core Layout не изменялись;
+- DropZone и существующая семантика DockCommand не менялись;
+- сборка и тесты не запускались;
+- Main → Main не входит в задачу;
+- оптимизация откладывается до завершения функциональной переделки.
 
 ### Этап 1. Ввести идентичность нативных окон
 
