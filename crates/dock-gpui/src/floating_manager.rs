@@ -569,11 +569,28 @@ fn previous_window_grid_link_is_external(
     previous_owners: &HashMap<WindowGridMember, FloatingGroupId>,
     current_owners: &HashMap<WindowGridMember, FloatingGroupId>,
 ) -> bool {
-    let from = previous_member_floating_group(link.from, previous_owners)
-        .or_else(|| current_owners.get(&link.from).copied());
-    let to = previous_member_floating_group(link.to, previous_owners)
-        .or_else(|| current_owners.get(&link.to).copied());
-    matches!((from, to), (Some(from), Some(to)) if from != to)
+    let previous_from = previous_member_floating_group(link.from, previous_owners);
+    let previous_to = previous_member_floating_group(link.to, previous_owners);
+    let current_from = current_member_floating_group(link.from, current_owners);
+    let current_to = current_member_floating_group(link.to, current_owners);
+    matches!(
+        (previous_from, previous_to, current_from, current_to),
+        (Some(previous_from), Some(previous_to), Some(current_from), Some(current_to))
+            if previous_from != previous_to && current_from != current_to
+    )
+}
+
+fn current_member_floating_group(
+    member: WindowGridMember,
+    current_owners: &HashMap<WindowGridMember, FloatingGroupId>,
+) -> Option<FloatingGroupId> {
+    match member {
+        WindowGridMember::FloatingComposition(group) => current_owners
+            .values()
+            .any(|owner| *owner == group)
+            .then_some(group),
+        WindowGridMember::Header(_) | WindowGridMember::Group(_) => current_owners.get(&member).copied(),
+    }
 }
 
 fn previous_member_floating_group(
@@ -4375,8 +4392,7 @@ impl FloatingWindowManager {
         entry.window.remove_window(cx);
     }
 
-    /// Replaces legacy composition-only graph nodes with the real Header/Group
-    /// members while preserving links between different Floating compositions.
+    /// Detaches one selected Column stack from every previous WindowGrid neighbour.
     fn detach_column_from_window_grid(
         &mut self,
         column: NodeId,
@@ -4403,6 +4419,8 @@ impl FloatingWindowManager {
             .retain(|member| !members_set.contains(member));
     }
 
+    /// Rebuilds internal Header/Group edges from Core and preserves only links
+    /// that were external both before and after the current Layout transition.
     fn rebuild_floating_part_window_grid(
         &mut self,
         desired: &[FloatingPartWindowSnapshot],
@@ -5819,8 +5837,12 @@ mod floating_part_window_grid_rebuild_tests {
             to: WindowGridMember::Header(second),
             direction: WindowGridDirection::Right,
         };
-        let owners = HashMap::from([(WindowGridMember::Header(first), floating), (WindowGridMember::Header(second), floating)]);
-        assert!(!previous_window_grid_link_is_external(link, &owners, &owners));
+        let previous = HashMap::from([(WindowGridMember::Header(first), floating), (WindowGridMember::Header(second), floating)]);
+        let current = HashMap::from([
+            (WindowGridMember::Header(first), groups.insert(())),
+            (WindowGridMember::Header(second), groups.insert(())),
+        ]);
+        assert!(!previous_window_grid_link_is_external(link, &previous, &current));
     }
 
     #[test]
@@ -5837,7 +5859,11 @@ mod floating_part_window_grid_rebuild_tests {
             direction: WindowGridDirection::Right,
         };
         let previous = HashMap::from([(WindowGridMember::Header(first), floating_a), (WindowGridMember::Header(second), floating_b)]);
-        assert!(previous_window_grid_link_is_external(link, &previous, &previous));
+        let current = HashMap::from([
+            (WindowGridMember::Header(first), floating_a),
+            (WindowGridMember::Header(second), floating_b),
+        ]);
+        assert!(previous_window_grid_link_is_external(link, &previous, &current));
     }
 }
 
