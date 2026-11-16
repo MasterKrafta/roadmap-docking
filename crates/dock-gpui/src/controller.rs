@@ -26,6 +26,10 @@ pub enum DockEvent {
     LayoutChanged {
         version: u64,
     },
+    /// Core geometry and cached hit-test snapshots use a new DockMetrics revision.
+    MetricsChanged {
+        revision: u64,
+    },
     PanelOpened {
         panel: PanelId,
         key: PanelKey,
@@ -96,6 +100,9 @@ pub enum DockControllerConfigError {
 
     #[error(transparent)]
     InvalidDragSession(#[from] DragSessionError),
+
+    #[error("dock metrics cannot change during an active pointer, native move, or DragHost transfer")]
+    ActiveInteraction,
 
     #[error("dock metrics revision overflow")]
     MetricsRevisionOverflow,
@@ -429,6 +436,52 @@ impl DockController {
 
     pub fn metrics(&self) -> DockMetrics {
         self.metrics
+    }
+
+    /// Replaces the Core layout metrics and invalidates every geometry snapshot.
+    ///
+    /// Metrics cannot change in the middle of an interaction or native history
+    /// transaction: pointer baselines and DragSession constraints were captured
+    /// against the previous values. The caller publishes the queued event after
+    /// this method returns.
+    pub fn update_metrics(
+        &mut self,
+        metrics: DockMetrics,
+    ) -> Result<bool, DockControllerConfigError> {
+        metrics
+            .validate()
+            .map_err(DockControllerConfigError::InvalidMetrics)?;
+        if self.metrics == metrics {
+            return Ok(false);
+        }
+        if self.has_active_pointer_interaction()
+            || self.native_window_move_transaction_active
+            || self.drag.host_session.is_some()
+        {
+            return Err(DockControllerConfigError::ActiveInteraction);
+        }
+        self.layout
+            .validate(&metrics)
+            .map_err(DockControllerConfigError::InvalidLayout)?;
+
+        let revision = self
+            .metrics_revision
+            .checked_add(1)
+            .ok_or(DockControllerConfigError::MetricsRevisionOverflow)?;
+        let drag = DragController::new(&metrics)?;
+
+        self.metrics = metrics;
+        self.metrics_revision = revision;
+        self.drag = drag;
+        self.interaction = None;
+        self.resize_frame = ResizeFrameThrottle::default();
+        self.rects = None;
+        self.rects_key = None;
+        self.floating_rects.clear();
+        self.pending_events
+            .push_back(DockEvent::MetricsChanged { revision });
+
+        Ok(true)
     }
 
     pub fn viewport(&self) -> Rect {
