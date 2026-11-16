@@ -5,9 +5,42 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use dock_core::FloatingGroupId;
+use dock_core::{FloatingGroupId, NodeId};
 
-/// The side on which `to` is located relative to `from`.
+/// Stable identity of one persistent native member in a Floating WindowGrid.
+///
+/// FloatingComposition is a compatibility bridge for the current one-window-per-
+/// composition implementation. New Floating hosts will use Header and Group, so
+/// a Core FloatingGroupId is no longer overloaded as the identity of every HWND.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum WindowGridMember {
+    FloatingComposition(FloatingGroupId),
+    Header(NodeId),
+    Group(NodeId),
+}
+
+impl WindowGridMember {
+    pub(crate) const fn floating_composition(group: FloatingGroupId) -> Self {
+        Self::FloatingComposition(group)
+    }
+
+    /// Returns the legacy Core FloatingGroup represented by this member.
+    /// Header and Group members will resolve through the dedicated host registry.
+    pub(crate) const fn floating_group(self) -> Option<FloatingGroupId> {
+        match self {
+            Self::FloatingComposition(group) => Some(group),
+            Self::Header(_) | Self::Group(_) => None,
+        }
+    }
+}
+
+impl From<FloatingGroupId> for WindowGridMember {
+    fn from(group: FloatingGroupId) -> Self {
+        Self::FloatingComposition(group)
+    }
+}
+
+/// The side occupied by the target member relative to the source member.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum WindowGridDirection {
     Left,
@@ -33,15 +66,15 @@ impl WindowGridDirection {
 /// the registry never stores both directions of the same connection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct WindowGridLink {
-    pub(crate) from: FloatingGroupId,
-    pub(crate) to: FloatingGroupId,
+    pub(crate) from: WindowGridMember,
+    pub(crate) to: WindowGridMember,
     pub(crate) direction: WindowGridDirection,
 }
 
 impl WindowGridLink {
     fn new(
-        from: FloatingGroupId,
-        to: FloatingGroupId,
+        from: WindowGridMember,
+        to: WindowGridMember,
         direction: WindowGridDirection,
     ) -> Option<Self> {
         (from != to).then_some(Self {
@@ -58,12 +91,12 @@ impl WindowGridLink {
 /// move and native Z-order operations. `links` carries the actual 2D topology.
 #[derive(Clone, Debug, Default)]
 struct WindowGrid {
-    members: Vec<FloatingGroupId>,
+    members: Vec<WindowGridMember>,
     links: Vec<WindowGridLink>,
 }
 
 impl WindowGrid {
-    fn single(group: FloatingGroupId) -> Self {
+    fn single(group: WindowGridMember) -> Self {
         Self {
             members: vec![group],
             links: Vec::new(),
@@ -72,8 +105,8 @@ impl WindowGrid {
 
     fn direction_between(
         &self,
-        from: FloatingGroupId,
-        to: FloatingGroupId,
+        from: WindowGridMember,
+        to: WindowGridMember,
     ) -> Option<WindowGridDirection> {
         self.links.iter().find_map(|link| {
             if link.from == from && link.to == to {
@@ -95,8 +128,8 @@ impl WindowGrid {
     fn boundary_member(
         &self,
         outward_side: WindowGridDirection,
-        preferred: FloatingGroupId,
-    ) -> Option<FloatingGroupId> {
+        preferred: WindowGridMember,
+    ) -> Option<WindowGridMember> {
         let candidates = self
             .members
             .iter()
@@ -129,7 +162,7 @@ impl WindowGrid {
     /// against the surviving windows' native geometry before it is committed.
     fn remove_member_inner(
         &mut self,
-        group: FloatingGroupId,
+        group: WindowGridMember,
         reconnect: bool,
     ) -> Option<WindowGridLink> {
         if !self.members.contains(&group) {
@@ -186,7 +219,7 @@ impl WindowGrid {
         replacement
     }
 
-    fn remove_member(&mut self, group: FloatingGroupId) -> bool {
+    fn remove_member(&mut self, group: WindowGridMember) -> bool {
         if !self.members.contains(&group) {
             return false;
         }
@@ -286,7 +319,7 @@ impl WindowGrid {
 pub(crate) struct WindowGridPruneResult {
     pub(crate) removed_members: usize,
     pub(crate) reconnect_candidates: Vec<WindowGridLink>,
-    pub(crate) components_to_align: Vec<FloatingGroupId>,
+    pub(crate) components_to_align: Vec<WindowGridMember>,
 }
 
 /// Registry of all linked Floating window components.
@@ -296,27 +329,27 @@ pub(crate) struct WindowGridPruneResult {
 /// WindowChainRegistry behavior while allowing each component to hold 2D links.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WindowGridRegistry {
-    grids: HashMap<FloatingGroupId, WindowGrid>,
-    grid_by_group: HashMap<FloatingGroupId, FloatingGroupId>,
+    grids: HashMap<WindowGridMember, WindowGrid>,
+    grid_by_group: HashMap<WindowGridMember, WindowGridMember>,
 }
 
 impl WindowGridRegistry {
-    pub(crate) fn members_for(&self, group: FloatingGroupId) -> Vec<FloatingGroupId> {
+    pub(crate) fn members_for(&self, group: WindowGridMember) -> Vec<WindowGridMember> {
         self.grid_by_group
             .get(&group)
             .and_then(|grid_id| self.grids.get(grid_id))
             .map_or_else(|| vec![group], |grid| grid.members.clone())
     }
 
-    pub(crate) fn is_chained(&self, group: FloatingGroupId) -> bool {
+    pub(crate) fn is_chained(&self, group: WindowGridMember) -> bool {
         self.grid_by_group.contains_key(&group)
     }
 
     /// Keeps the existing left/right insertion API for current callers.
     pub(crate) fn link_before(
         &mut self,
-        anchor: FloatingGroupId,
-        moving: FloatingGroupId,
+        anchor: WindowGridMember,
+        moving: WindowGridMember,
     ) -> bool {
         self.link_to_side(anchor, moving, WindowGridDirection::Left)
     }
@@ -324,8 +357,8 @@ impl WindowGridRegistry {
     /// Keeps the existing left/right insertion API for current callers.
     pub(crate) fn link_after(
         &mut self,
-        anchor: FloatingGroupId,
-        moving: FloatingGroupId,
+        anchor: WindowGridMember,
+        moving: WindowGridMember,
     ) -> bool {
         self.link_to_side(anchor, moving, WindowGridDirection::Right)
     }
@@ -340,8 +373,8 @@ impl WindowGridRegistry {
     #[allow(dead_code)] // Consumed by the four-direction Drop stage.
     pub(crate) fn link_to_side(
         &mut self,
-        anchor: FloatingGroupId,
-        moving: FloatingGroupId,
+        anchor: WindowGridMember,
+        moving: WindowGridMember,
         side: WindowGridDirection,
     ) -> bool {
         if anchor == moving {
@@ -436,8 +469,8 @@ impl WindowGridRegistry {
     /// the source sequence and destination grid unchanged.
     pub(crate) fn link_sequence_to_side(
         &mut self,
-        anchor: FloatingGroupId,
-        moving: &[FloatingGroupId],
+        anchor: WindowGridMember,
+        moving: &[WindowGridMember],
         side: WindowGridDirection,
     ) -> bool {
         if moving.is_empty() {
@@ -466,7 +499,7 @@ impl WindowGridRegistry {
         true
     }
 
-    pub(crate) fn remove_member(&mut self, group: FloatingGroupId) -> bool {
+    pub(crate) fn remove_member(&mut self, group: WindowGridMember) -> bool {
         let Some(mut grid) = self.take_grid_for(group) else {
             return false;
         };
@@ -482,9 +515,9 @@ impl WindowGridRegistry {
     ///
     /// Straight-through candidates are deliberately not linked yet: the manager
     /// must validate the proposed geometry against the surviving native windows.
-    pub(crate) fn retain_groups(
+    pub(crate) fn retain_members(
         &mut self,
-        live_groups: &HashSet<FloatingGroupId>,
+        live_members: &HashSet<WindowGridMember>,
     ) -> WindowGridPruneResult {
         let previous_grids = std::mem::take(&mut self.grids)
             .into_values()
@@ -498,7 +531,7 @@ impl WindowGridRegistry {
                 .members
                 .iter()
                 .copied()
-                .filter(|member| !live_groups.contains(member))
+                .filter(|member| !live_members.contains(member))
                 .collect::<Vec<_>>();
             result.removed_members += stale_members.len();
 
@@ -515,8 +548,8 @@ impl WindowGridRegistry {
             // native geometry validation in FloatingWindowManager.
             for candidate in temporary_reconnections {
                 grid.links.retain(|link| *link != candidate);
-                if live_groups.contains(&candidate.from)
-                    && live_groups.contains(&candidate.to)
+                if live_members.contains(&candidate.from)
+                    && live_members.contains(&candidate.to)
                     && !result.reconnect_candidates.contains(&candidate)
                 {
                     result.reconnect_candidates.push(candidate);
@@ -539,7 +572,7 @@ impl WindowGridRegistry {
     #[allow(dead_code)] // Consumed by geometry, Z-order, and lifecycle stages.
     pub(crate) fn links_for(
         &self,
-        group: FloatingGroupId,
+        group: WindowGridMember,
     ) -> Option<&[WindowGridLink]> {
         let grid_id = self.grid_by_group.get(&group)?;
         self.grids.get(grid_id).map(|grid| grid.links.as_slice())
@@ -549,8 +582,8 @@ impl WindowGridRegistry {
     #[allow(dead_code)] // Used by the geometry and four-direction Drop stages.
     pub(crate) fn direction_between(
         &self,
-        from: FloatingGroupId,
-        to: FloatingGroupId,
+        from: WindowGridMember,
+        to: WindowGridMember,
     ) -> Option<WindowGridDirection> {
         let grid_id = self.grid_by_group.get(&from)?;
         self.grids.get(grid_id)?.direction_between(from, to)
@@ -562,7 +595,7 @@ impl WindowGridRegistry {
     /// neighbour even when it is not the first item in the grid's stable order.
     pub(crate) fn has_neighbor_on_side(
         &self,
-        group: FloatingGroupId,
+        group: WindowGridMember,
         side: WindowGridDirection,
     ) -> bool {
         self.links_for(group).is_some_and(|links| {
@@ -602,7 +635,7 @@ impl WindowGridRegistry {
                 .all(|member| indexed_members.contains(member))
     }
 
-    fn take_grid_for(&mut self, group: FloatingGroupId) -> Option<WindowGrid> {
+    fn take_grid_for(&mut self, group: WindowGridMember) -> Option<WindowGrid> {
         let grid_id = self.grid_by_group.get(&group).copied()?;
         let grid = self.grids.remove(&grid_id)?;
         for member in &grid.members {
@@ -626,14 +659,35 @@ impl WindowGridRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{WindowGridDirection, WindowGridRegistry};
-    use dock_core::FloatingGroupId;
+    use super::{WindowGridDirection, WindowGridMember, WindowGridRegistry};
+    use dock_core::{FloatingGroupId, NodeId};
     use slotmap::SlotMap;
     use std::collections::HashSet;
 
-    fn groups(count: usize) -> Vec<FloatingGroupId> {
+    fn groups(count: usize) -> Vec<WindowGridMember> {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        (0..count).map(|_| ids.insert(())).collect()
+        (0..count)
+            .map(|_| WindowGridMember::FloatingComposition(ids.insert(())))
+            .collect()
+    }
+
+    #[test]
+    fn header_group_and_legacy_composition_have_distinct_member_identities() {
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let header = WindowGridMember::Header(node_ids.insert(()));
+        let group = WindowGridMember::Group(node_ids.insert(()));
+        let composition = WindowGridMember::FloatingComposition(floating_ids.insert(()));
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_after(header, group));
+        assert!(grid.link_after(group, composition));
+        assert_eq!(grid.members_for(header), vec![header, group, composition]);
+        assert_eq!(grid.direction_between(header, group), Some(WindowGridDirection::Right));
+        assert_eq!(header.floating_group(), None);
+        assert_eq!(group.floating_group(), None);
+        assert!(composition.floating_group().is_some());
+        assert!(grid.is_valid());
     }
 
     #[test]
@@ -878,7 +932,7 @@ mod tests {
         assert!(grid.link_after(c, d));
 
         let live = HashSet::from([a, c, d]);
-        let pruned = grid.retain_groups(&live);
+        let pruned = grid.retain_members(&live);
         assert_eq!(pruned.removed_members, 1);
         assert_eq!(
             pruned.reconnect_candidates,
@@ -893,7 +947,7 @@ mod tests {
         assert_eq!(grid.members_for(c), vec![c, d]);
         assert!(grid.is_valid());
 
-        let repeated = grid.retain_groups(&live);
+        let repeated = grid.retain_members(&live);
         assert_eq!(repeated.removed_members, 0);
         assert!(repeated.reconnect_candidates.is_empty());
         assert!(repeated.components_to_align.is_empty());
@@ -908,7 +962,7 @@ mod tests {
         assert!(grid.link_to_side(b, c, WindowGridDirection::Below));
 
         let live = HashSet::from([a, c]);
-        let pruned = grid.retain_groups(&live);
+        let pruned = grid.retain_members(&live);
         assert_eq!(
             pruned.reconnect_candidates,
             vec![super::WindowGridLink {
@@ -931,7 +985,7 @@ mod tests {
         assert!(grid.link_after(c, d));
 
         let live = HashSet::from([a, d]);
-        let pruned = grid.retain_groups(&live);
+        let pruned = grid.retain_members(&live);
         assert_eq!(pruned.removed_members, 2);
         assert_eq!(
             pruned.reconnect_candidates,
@@ -956,7 +1010,7 @@ mod tests {
         assert!(grid.link_to_side(c, d, WindowGridDirection::Right));
 
         let live = HashSet::from([a, c, d]);
-        let pruned = grid.retain_groups(&live);
+        let pruned = grid.retain_members(&live);
         assert_eq!(pruned.removed_members, 1);
         assert!(pruned.reconnect_candidates.is_empty());
         assert_eq!(pruned.components_to_align, vec![c]);
@@ -975,12 +1029,12 @@ mod tests {
         assert!(grid.link_after(b, c));
 
         let live = HashSet::from([c]);
-        let first = grid.retain_groups(&live);
+        let first = grid.retain_members(&live);
         assert_eq!(first.removed_members, 2);
         assert!(first.reconnect_candidates.is_empty());
         assert!(first.components_to_align.is_empty());
 
-        let second = grid.retain_groups(&live);
+        let second = grid.retain_members(&live);
         assert_eq!(second.removed_members, 0);
         assert!(second.reconnect_candidates.is_empty());
         assert_eq!(grid.members_for(c), vec![c]);
