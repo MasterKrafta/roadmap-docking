@@ -1425,13 +1425,14 @@ impl DragHostManager {
         id: DragHostId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((panels, placeholder_rendered, source_released)) = self
+        let Some((primary_target_group, panels, placeholder_rendered, source_released)) = self
             .active
             .as_ref()
             .filter(|active| active.id == id)
             .and_then(|active| {
                 let handoff = active.handoff.as_ref()?;
                 Some((
+                    handoff.primary_target_group,
                     active.panels.clone(),
                     handoff.source_placeholder_rendered,
                     handoff.source_released,
@@ -1464,7 +1465,7 @@ impl DragHostManager {
             .as_ref()
             .is_some_and(|manager| {
                 manager.update(cx, |manager, manager_cx| {
-                    manager.show_handoff_target(target_group, manager_cx)
+                    manager.show_handoff_target(primary_target_group, manager_cx)
                 })
             });
         !target_shown
