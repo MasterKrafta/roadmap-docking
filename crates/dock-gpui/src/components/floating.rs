@@ -621,9 +621,13 @@ impl Render for FloatingPartHost {
                     self.theme,
                 ))
             }
-            FloatingPartKind::Group { column, group } => {
-                self.render_group(window, cx, &snapshot, column, group)
-            }
+            FloatingPartKind::Group { column, group } => div()
+                .id(format!("floating-group-part-window-root-{:?}", group))
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .bg(rgb(self.theme.colors.panel_surface_background))
+                .child(self.render_group(window, cx, &snapshot, column, group)),
         }
     }
 }
