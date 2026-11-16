@@ -645,6 +645,13 @@ impl FloatingPartHost {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
+        if !snapshot
+            .column_groups
+            .get(&column)
+            .is_some_and(|groups| groups.contains(&group_id))
+        {
+            return root;
+        }
         let Some(group_rect) = snapshot
             .rects
             .groups
