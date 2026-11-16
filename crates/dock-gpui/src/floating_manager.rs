@@ -443,14 +443,17 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
-    /// Returns ordered members of a chain. An unlinked Floating window is
-    /// represented as a one-member chain for callers that move windows.
-    #[allow(dead_code)] // Consumed by the chain-wide move stage.
+    /// Returns every WindowGrid member in a stable native front-to-back order.
+    /// An unlinked Floating window is represented as a one-member grid.
+    #[allow(dead_code)]
     pub(crate) fn window_chain_members(
         &self,
         group: FloatingGroupId,
     ) -> Vec<FloatingGroupId> {
-        self.window_chains.members_for(group)
+        let members = self.window_chains.members_for(group);
+        let links = self.window_chains.links_for(group).unwrap_or_default();
+        floating_grid_members_in_native_front_to_back(&members, links)
+            .unwrap_or(members)
     }
 
     /// Inserts the moving window's complete chain immediately before the anchor.
@@ -1435,7 +1438,7 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let mut move_windows = Vec::new();
-        for member in self.window_chains.members_for(group) {
+        for member in self.window_chain_members(group) {
             let Some(member_entry) = self.panel_window_for_group(member) else {
                 return false;
             };
@@ -1940,6 +1943,7 @@ impl FloatingWindowManager {
                 state.group,
                 anchor,
                 direction,
+                &moving_windows,
                 cx,
             ),
             Some(NativeMoveTarget::MainDock {
@@ -2081,18 +2085,27 @@ impl FloatingWindowManager {
         moving: FloatingGroupId,
         anchor: FloatingGroupId,
         direction: WindowGridDirection,
+        moving_windows: &[NativeMoveWindow],
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
         let mut next_chains = self.window_chains.clone();
-        let linked = next_chains.link_to_side(anchor, moving, direction);
-        if !linked {
-            // Dropping inside the same chain does not redefine membership. Until
-            // chain-wide movement is enabled, restore the dragged member rather
-            // than leaving its neighbours detached from their stored order.
-            self.mark_group_native_bounds_dirty(moving);
-            self.cancel_controller_move(cx);
-            self.reconcile(cx);
-            return Ok(());
+        if next_chains.members_for(moving).contains(&anchor) {
+            // Dropping back onto the same WindowGrid keeps its topology but still
+            // commits the translated bounds of every HWND as one Undo step.
+            let bounds = self
+                .native_bounds_for_move_windows(moving_windows, cx)
+                .ok_or(dock_core::CommandError::InvalidTarget {
+                    reason: "could not read the final bounds of every window in the existing WindowGrid",
+                })?;
+            return self.controller.update(cx, |controller, controller_cx| {
+                controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
+            });
+        }
+
+        if !next_chains.link_to_side(anchor, moving, direction) {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "could not merge the source and target WindowGrids without an ambiguous connection",
+            });
         }
 
         let members = next_chains.members_for(anchor);
@@ -2901,14 +2914,10 @@ impl FloatingWindowManager {
                 native_window
             };
 
-            let chain_members = self.window_chains.members_for(group_id);
-            let chain_links = self.window_chains.links_for(group_id).unwrap_or_default();
             // Native activation restores this same front-to-back order by raising
             // its members in reverse, regardless of which HWND receives focus.
-            let chain_order =
-                floating_grid_members_in_native_front_to_back(&chain_members, chain_links)
-                    .unwrap_or(chain_members);
-            let chain_windows = chain_order
+            let chain_windows = self
+                .window_chain_members(group_id)
                 .into_iter()
                 .filter_map(|member| self.panel_window_for_group(member)?.native_window)
                 .collect::<Vec<_>>();
