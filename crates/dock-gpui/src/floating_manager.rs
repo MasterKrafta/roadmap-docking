@@ -1,6 +1,6 @@
-//! Runtime owner of native windows for floating dock compositions.
+//! Runtime owner of native windows for Floating Columns and Groups.
 //!
-//! Main-dock panels do not allocate native surfaces. A floating Column owns one
+//! Main-dock panels do not allocate native surfaces. A Floating Column owns one
 //! Header host and each Core Group owns one content host. The shared DockController
 //! remains the sole owner of Layout and panel views.
 
@@ -717,8 +717,8 @@ impl FloatingWindowManager {
             .collect()
     }
 
-    /// Returns every real Header/Group HWND in stable native front-to-back order.
-    /// Legacy FloatingComposition members are used only before part hosts exist.
+    /// Returns the connected real Header/Group HWNDs in native front-to-back order.
+    /// A standalone Floating Column still returns its own Header and Group windows.
     pub(crate) fn window_grid_members_in_native_order(
         &self,
         group: FloatingGroupId,
@@ -767,9 +767,9 @@ impl FloatingWindowManager {
 
     /// Registers the ordered Core result of one Main DockArea tear-off.
     ///
-    /// This method deliberately does not reconcile: DragHost must establish
-    /// the chain before its native HWND is adopted and reconciliation creates
-    /// the remaining persistent Floating windows.
+    /// This method deliberately does not reconcile: DragHost registers the
+    /// source-ordered Core result, then the next reconcile migrates those
+    /// temporary composition links to the permanent Header/Group members.
     pub(crate) fn register_window_chain(&mut self, groups: &[FloatingGroupId]) -> bool {
         if groups.is_empty() { return false; }
         if groups.len() == 1 { return true; }
@@ -981,8 +981,8 @@ impl FloatingWindowManager {
         })
     }
 
-    /// Computes a complete grid from native frame measurements and the current
-    /// CompositionHeader metric. The target anchor never moves during a Drop.
+    /// Computes a complete Header/Group grid from measured native frame and client
+    /// geometry. The target anchor never moves during an alignment operation.
     fn arrange_window_grid_bounds(
         &self,
         bounds: Vec<(WindowGridMember, Rect)>,
@@ -996,9 +996,9 @@ impl FloatingWindowManager {
 
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
-    /// The main HWND is retained as the native owner for each floating host.
-    /// The first reconciliation creates windows only for floating compositions
-    /// already present in the initial Layout.
+    /// The main HWND is retained as the native owner for every Floating
+    /// Header/Group host. The first reconciliation creates hosts for all
+    /// Floating Columns and their Core Groups.
     pub(crate) fn attach_main_window_for_drag_routing(&mut self, window: &mut Window) {
         self.host_registry.main_window_id = Some(window.window_handle().window_id());
 
@@ -3059,7 +3059,7 @@ impl FloatingWindowManager {
         Some(true)
     }
 
-    /// Defers initial WindowChain frame alignment until the current reconcile update ends.
+    /// Defers initial Header/Group frame alignment until the current reconcile update ends.
     ///
     /// Reading native frame geometry and then applying the correction in a separate
     /// controller update avoids re-entering this FloatingWindowManager through its
@@ -3115,7 +3115,7 @@ impl FloatingWindowManager {
         .detach();
     }
 
-    /// Calculates seam corrections while the native windows and their frames are available.
+    /// Calculates seam corrections while every native Header/Group frame is available.
     ///
     /// This stage only reads the controller. The resulting positions are applied later,
     /// after this manager update has unwound.
@@ -3251,12 +3251,8 @@ impl FloatingWindowManager {
         pending
     }
 
-    /// Applies Core's floating Z-order to native windows and stores each grid's
-    /// direction-aware front-to-back order for activation-time correction.
-    ///
-    /// Windows are raised from back to front without activation. Left and upper
-    /// members stay in front, preserving shared resize edges and physically
-    /// covering the CompositionHeader of every lower member.
+    /// Applies legacy PanelId-host Z-order. Permanent Header/Group HWNDs are
+    /// raised by synchronize_native_part_z_order using their typed graph.
     fn synchronize_native_z_order(
         &mut self,
         groups: &[FloatingGroupSnapshot],
