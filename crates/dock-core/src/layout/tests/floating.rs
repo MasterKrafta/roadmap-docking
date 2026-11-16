@@ -2919,7 +2919,7 @@ fn floating_preferred_height_sums_vertical_groups_in_its_own_window() {
             false,
         ),
     );
-    let (second_panel, second_node) = builder.panel(
+    let (_second_panel, second_node) = builder.panel(
         PanelKey::new("floating-stack-second").unwrap(),
         PanelConstraints::new(
             Size::new(120.0, 80.0),
