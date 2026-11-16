@@ -364,7 +364,7 @@ fn floating_panel_tab_can_split_between_groups_in_another_floating_window() {
         .resolve(point)
         .unwrap()
         .expect("the inter-Group Floating boundary must resolve");
-    assert_eq!(resolved.target, target);
+    assert_eq!(resolved, target);
 
     let request = DragDropRequest {
         payload: DragPayload::Panel { panel },
