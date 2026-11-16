@@ -24,7 +24,7 @@ pub fn dock_metrics_from_theme(
         drag_threshold: theme_metrics.drag_start_threshold,
         min_group_height: theme_metrics.min_group_height,
         collapsed_group_height: theme_metrics.collapsed_group_height,
-        column_header_height: theme_metrics.column_header_height,
+        column_header_height: theme_metrics.composition_header_height,
         header_height: theme_metrics.group_header_height,
         tab_strip_height: theme_metrics.tab_strip_height,
         group_control_button_width: theme_metrics.group_control_button_width,
@@ -43,7 +43,7 @@ mod tests {
     #[test]
     fn maps_composition_group_and_tab_heights_to_separate_core_metrics() {
         let mut theme = ui::ThemeMetrics::default();
-        theme.column_header_height = 18.0;
+        theme.composition_header_height = 18.0;
         theme.group_header_height = 22.0;
         theme.tab_strip_height = 12.0;
 
