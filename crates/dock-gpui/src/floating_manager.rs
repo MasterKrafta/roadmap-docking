@@ -3108,65 +3108,70 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         cx: &mut Context<Self>,
     ) -> bool {
-        if let Some(members) = self.part_members_by_group.get(&group).cloned() {
-            let mut shown_group_windows = 0usize;
-            for member in members
-                .into_iter()
-                .filter(|member| matches!(member, WindowGridMember::Group(_)))
-            {
-                let Some((window, native_window, visibility)) =
-                    self.registry.members.get(&member).and_then(|entry| {
-                        (entry.host_group == Some(group)).then_some((
-                            entry.window,
-                            entry.native_window?,
-                            entry.visibility,
-                        ))
-                    })
-                else {
-                    continue;
-                };
+        // A DockArea tear-off can create several FloatingGroups. All their
+        // Group windows remain hidden until the single DragHost releases its
+        // source PanelViews, so reveal every hidden Group member together.
+        let group_windows = self
+            .registry
+            .members
+            .iter()
+            .filter(|(member, entry)| {
+                matches!(member, WindowGridMember::Group(_))
+                    && entry.host_group.is_some()
+            })
+            .map(|(member, entry)| (*member, entry.window, entry.native_window, entry.visibility))
+            .collect::<Vec<_>>();
+        let mut ready_group_windows = 0usize;
 
-                if visibility == PanelWindowVisibility::Hidden {
-                    if let Err(error) = self.native_ops.show_no_activate(native_window) {
-                        tracing::warn!(
-                            ?group,
-                            ?member,
-                            %error,
-                            "could not show the Floating Group window during DragHost handoff"
-                        );
-                        continue;
-                    }
-                    if let Some(entry) = self.registry.members.get_mut(&member) {
-                        entry.visibility = PanelWindowVisibility::Visible;
-                    }
-                }
-
-                self.request_member_redraw(member);
-                if let Err(error) = window.notify_host(cx) {
+        for (member, window, native_window, visibility) in group_windows {
+            let Some(native_window) = native_window else {
+                continue;
+            };
+            if visibility == PanelWindowVisibility::Hidden {
+                if let Err(error) = self.native_ops.show_no_activate(native_window) {
                     tracing::warn!(
                         ?group,
                         ?member,
                         %error,
-                        "could not notify the Floating Group window after handoff"
+                        "could not show a Floating Group window during DragHost handoff"
                     );
                     continue;
                 }
-                shown_group_windows += 1;
+                if let Some(entry) = self.registry.members.get_mut(&member) {
+                    entry.visibility = PanelWindowVisibility::Visible;
+                }
             }
+
+            self.request_member_redraw(member);
+            if let Err(error) = window.notify_host(cx) {
+                tracing::warn!(
+                    ?group,
+                    ?member,
+                    %error,
+                    "could not notify a Floating Group window after DragHost handoff"
+                );
+                continue;
+            }
+            ready_group_windows += 1;
+        }
+
+        if ready_group_windows > 0 {
             cx.notify();
-            return shown_group_windows > 0;
+            return true;
         }
 
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
         };
-        let Some((window, native_window, already_visible)) = self.registry.windows.get(&panel).and_then(|entry| {
-            (entry.host_group == Some(group)).then_some((
-                entry.window,
-                entry.native_window?,
-                entry.visibility == PanelWindowVisibility::Visible,
-            ))
-        }) else {
+        let Some((window, native_window, already_visible)) =
+            self.registry.windows.get(&panel).and_then(|entry| {
+                (entry.host_group == Some(group)).then_some((
+                    entry.window,
+                    entry.native_window?,
+                    entry.visibility == PanelWindowVisibility::Visible,
+                ))
+            })
+        else {
             return false;
         };
         if !already_visible {
@@ -3175,7 +3180,7 @@ impl FloatingWindowManager {
                     ?group,
                     ?panel,
                     %error,
-                    "could not show the persistent FloatingHost during DragHost handoff"
+                    "could not show the legacy FloatingHost during DragHost handoff"
                 );
                 return false;
             }
@@ -3190,7 +3195,7 @@ impl FloatingWindowManager {
                 ?group,
                 ?panel,
                 %error,
-                "could not notify the FloatingHost after panel handoff"
+                "could not notify the legacy FloatingHost after panel handoff"
             );
             return false;
         }
@@ -3406,35 +3411,52 @@ impl FloatingWindowManager {
         window_id: WindowId,
         cx: &mut Context<Self>,
     ) -> Option<Vec<PanelId>> {
-        let part_host_is_ready = self
-            .part_members_by_group
-            .get(&group)?
-            .iter()
-            .filter(|member| matches!(member, WindowGridMember::Group(_)))
-            .any(|member| {
-                self.registry.members.get(member).is_some_and(|entry| {
-                    entry.window_id == window_id
+        let group_member = self.registry.members.iter().find_map(|(member, entry)| {
+            match member {
+                WindowGridMember::Group(group_node)
+                    if entry.window_id == window_id
                         && entry.host_group == Some(group)
-                        && entry.visibility == PanelWindowVisibility::Visible
-                })
-            });
-        if !part_host_is_ready {
-            let host_panel = self.host_registry.panel_for_group(group)?;
-            let entry = self.registry.windows.get(&host_panel)?;
-            if entry.window_id != window_id
-                || entry.host_group != Some(group)
-                || entry.visibility != PanelWindowVisibility::Visible
-            {
-                return None;
+                        && entry.visibility == PanelWindowVisibility::Visible =>
+                {
+                    Some(*group_node)
+                }
+                _ => None,
             }
+        });
+
+        if let Some(group_node) = group_member {
+            let group_panels = self.controller.update(cx, |controller, _| {
+                let mut panels = Vec::new();
+                let mut seen = HashSet::new();
+                collect_panel_order(controller.layout(), group_node, &mut panels, &mut seen);
+                panels
+            });
+            let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
+            let required = drag_host.update(cx, |manager, _| {
+                manager.pending_handoff_panels(group)
+            })?;
+            let local_required = required
+                .into_iter()
+                .filter(|panel| group_panels.contains(panel))
+                .collect::<Vec<_>>();
+            return (!local_required.is_empty()).then_some(local_required);
+        }
+
+        let host_panel = self.host_registry.panel_for_group(group)?;
+        let entry = self.registry.windows.get(&host_panel)?;
+        if entry.window_id != window_id
+            || entry.host_group != Some(group)
+            || entry.visibility != PanelWindowVisibility::Visible
+        {
+            return None;
         }
         let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
         drag_host.update(cx, |manager, _| manager.pending_handoff_panels(group))
     }
 
-    /// Called after the destination FloatingHost has completed a frame with
-    /// the transferred PanelViews mounted. Only then is the temporary DragHost
-    /// removed from the desktop.
+    /// Called after one Group host has rendered the transferred active PanelViews
+    /// that belong to its Core Group. DragHostManager closes only after every
+    /// required Group host across all detached FloatingGroups has rendered.
     pub(crate) fn notify_drag_host_handoff_rendered(
         &mut self,
         group: FloatingGroupId,
@@ -3442,20 +3464,18 @@ impl FloatingWindowManager {
         rendered_panels: &[PanelId],
         cx: &mut Context<Self>,
     ) {
-        let part_member = self
-            .part_members_by_group
-            .get(&group)
-            .into_iter()
-            .flatten()
-            .filter(|member| matches!(member, WindowGridMember::Group(_)))
-            .find(|member| {
-                self.registry.members.get(member).is_some_and(|entry| {
-                    entry.window_id == window_id
+        let part_member = self.registry.members.iter().find_map(|(member, entry)| {
+            match member {
+                WindowGridMember::Group(_)
+                    if entry.window_id == window_id
                         && entry.host_group == Some(group)
-                        && entry.visibility == PanelWindowVisibility::Visible
-                })
-            })
-            .copied();
+                        && entry.visibility == PanelWindowVisibility::Visible =>
+                {
+                    Some(*member)
+                }
+                _ => None,
+            }
+        });
 
         if part_member.is_none() {
             let Some(host_panel) = self.host_registry.panel_for_group(group) else {
