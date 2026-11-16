@@ -567,12 +567,13 @@ impl WindowGridRegistry {
     ) -> bool {
         self.links_for(group).is_some_and(|links| {
             links.iter().any(|link| {
-                let relative = if link.from == group {
-                    link.direction
+                if link.from == group {
+                    link.direction == side
+                } else if link.to == group {
+                    link.direction.opposite() == side
                 } else {
-                    link.direction.opposite()
-                };
-                relative == side
+                    false
+                }
             })
         })
     }
