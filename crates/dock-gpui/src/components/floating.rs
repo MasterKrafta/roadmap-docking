@@ -670,16 +670,12 @@ impl FloatingPartHost {
             &snapshot.group_presentations,
             &transferred_panels,
         );
-        transfer.apply_to_group_presentations(
-            &mut std::collections::HashMap::from([(group_id, presentations.clone())]),
-        );
-        if let Some(updated) = snapshot
-            .group_presentations
-            .get(&group_id)
-            .cloned()
-        {
-            presentations = updated;
-        }
+        let mut rendered_presentations = snapshot.group_presentations.clone();
+        transfer.apply_to_group_presentations(&mut rendered_presentations);
+        let Some(rendered_presentation) = rendered_presentations.get(&group_id) else {
+            return root;
+        };
+        presentations = rendered_presentation.clone();
 
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window.window_handle().window_id())
@@ -699,17 +695,15 @@ impl FloatingPartHost {
             ));
         }
 
-        let Some(local_strip) = Some(dock_core::TabStripRect {
+        let local_strip = dock_core::TabStripRect {
             group: group_id,
             rect: floating_part_local_rect(strip.rect, group_rect.rect.origin),
-        }) else {
-            return root;
         };
         let visible_headers = transfer.visible_tab_headers(
             &snapshot.rects.tab_headers,
             &snapshot.rects.tab_strips,
             &snapshot.rects.tab_overflows,
-            &snapshot.group_presentations,
+            &rendered_presentations,
             &snapshot
                 .column_groups
                 .values()
@@ -763,16 +757,16 @@ impl FloatingPartHost {
 
         let group_ids = [group_id];
         let active_panels =
-            active_panels_for_groups(group_ids, &snapshot.group_presentations, dragged_group);
+            active_panels_for_groups(group_ids, &rendered_presentations, dragged_group);
         let panel_rects = transfer
             .panel_rects_with_active_replacements(&snapshot.rects.panels)
             .into_iter()
             .filter(|panel| active_panels.contains(&panel.panel))
             .map(|panel| {
-                let local = dock_core::PanelRect {
-                    panel: panel.panel,
-                    rect: floating_part_local_rect(panel.rect, group_rect.rect.origin),
-                };
+                let local = dock_core::PanelRect::new(
+                    panel.panel,
+                    floating_part_local_rect(panel.rect, group_rect.rect.origin),
+                );
                 let view = self.controller.update(cx, |controller, panel_cx| {
                     controller.panel_view(panel.panel, window, panel_cx)
                 });
@@ -800,7 +794,7 @@ impl FloatingPartHost {
         if let Some(open) = self.open_context_menu.as_ref()
             && context_menu_target_exists(
                 open.target,
-                &snapshot.group_presentations,
+                &rendered_presentations,
                 &snapshot.column_ids,
                 Some(&snapshot.rects),
             )
@@ -828,7 +822,7 @@ impl FloatingPartHost {
             let entries = build_context_menu_entries(
                 open.target,
                 &snapshot.rects,
-                &snapshot.group_presentations,
+                &rendered_presentations,
                 &snapshot.column_modes,
                 self.controller.clone(),
                 false,
