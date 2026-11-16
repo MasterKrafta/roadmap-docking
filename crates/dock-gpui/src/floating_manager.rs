@@ -122,11 +122,10 @@ struct PanelWindowEntry {
     visibility: PanelWindowVisibility,
 }
 
-/// Native-window records keyed by the PanelId currently hosting a floating composition.
+/// Legacy native-window records keyed by a PanelId host.
 ///
-/// Main-dock panels have no native-window record. When a composition is floated,
-/// one of its panels is selected as the host until that composition is docked or
-/// the selected host panel leaves it.
+/// Permanent Floating Header/Group windows are stored separately in `members`;
+/// this map remains only for transitional PanelId-based host paths.
 #[derive(Default)]
 pub struct PanelWindowRegistry {
     /// Transitional PanelId entries are retained only for an active DragHost adoption.
@@ -229,8 +228,9 @@ impl PanelWindowRegistry {
     }
 }
 
-/// Maps each Core floating composition to the panel window created on demand
-/// to host it. The Main Dock is hosted by the one shared MainWindow.
+/// Legacy mapping from a Core Floating composition to its PanelId host.
+/// Permanent Floating windows no longer use this registry; Main still uses its
+/// single shared MainWindow.
 #[derive(Default)]
 pub struct CompositionHostRegistry {
     main_window_id: Option<WindowId>,
@@ -2779,9 +2779,9 @@ impl FloatingWindowManager {
             }
         }
 
-        // A composition host is handed to a surviving PanelWindow before the
-        // closed panel's own HWND is destroyed. The old host was detached above;
-        // the replacement has already been assigned and shown at this point.
+        // Legacy PanelId-host replacement path. The typed Header/Group registry
+        // owns permanent Floating windows; this remains for any transitional
+        // PanelId-host entry that may still be present.
         let removed_panels = self
             .registry
             .windows
@@ -3100,9 +3100,9 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Shows the persistent FloatingHost only after DragHost has stopped
-    /// mounting the transferred AnyViews. This prevents a newly-created host
-    /// from presenting an empty frame while DragHost still owns the content.
+    /// Shows permanent Group hosts only after DragHost has stopped mounting the
+    /// transferred AnyViews. This prevents an empty destination frame while the
+    /// temporary source window still owns the content.
     pub(crate) fn show_handoff_target(
         &mut self,
         group: FloatingGroupId,
@@ -3402,9 +3402,9 @@ impl FloatingWindowManager {
         )
     }
 
-    /// Returns the transferred panels whose destination FloatingHost is ready
-    /// to render. FloatingHost calls this from its render pass before scheduling
-    /// a next-frame handoff confirmation.
+    /// Returns the transferred active panels belonging to one ready Group host.
+    /// The host calls this during render before scheduling a next-frame handoff
+    /// confirmation.
     pub(crate) fn pending_drag_host_handoff_panels(
         &self,
         group: FloatingGroupId,
