@@ -22,7 +22,7 @@ use dock_core::{
 };
 
 use crate::{
-    components::{context_menu::GroupMenuToggle, FloatingHost, MainDockView, PanelHost},
+    components::{context_menu::GroupMenuToggle, MainDockView, PanelHost},
     dock_components::{
         collect_group_presentations, CollapseColumnButton, DockCompositionView,
         DockGroupView, GroupPresentation,
@@ -88,8 +88,8 @@ struct ActiveDragHost {
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
     free_area_bounds: Option<Rect>,
-    /// This DragHost can become the persistent native host of a detached composition.
-    can_adopt_floating_host: bool,
+    /// Defers layout publication until permanent Floating part windows are ready.
+    defer_layout_events_until_parts_ready: bool,
     /// Cursor position captured when the button is released before source detachment.
     pending_release_cursor: Option<platform::PhysicalPoint>,
     source_detach_subscription: Option<Subscription>,
@@ -255,8 +255,8 @@ impl DragHostManager {
 
     /// Opens DragHost with every cached PanelView belonging to the source Group.
     ///
-    /// The active tab is first so the same native window can be adopted as the
-    /// resulting Floating composition when the group is released over free space.
+    /// The active tab is first so the temporary transport window can present the
+    /// Group's visible content while its permanent Group host is prepared.
     pub fn open_group_at_cursor(
         &mut self,
         group: NodeId,
@@ -394,30 +394,12 @@ impl DragHostManager {
         };
         let theme = self.theme;
         let controller = self.controller.clone();
-        let floating_manager = self
-            .floating_manager
-            .as_ref()
-            .map(|manager| manager.downgrade());
-        // PanelTab and GroupGrip drags can promote this temporary HWND into
-        // their detached Floating composition regardless of the source host.
-        // DockArea drags keep the existing promotion path as well.
-        let can_adopt_floating_host =
+        let defer_layout_events_until_parts_ready =
             dock_area.is_some() || promote_on_float || reserve_composition_header;
         let surface_panel = panels.first().copied();
         let window = cx
             .open_window(options, move |_, app| {
-                app.new(|surface_cx| {
-                    let floating_host = if can_adopt_floating_host {
-                        floating_manager.map(|manager| {
-                            let controller = controller.clone();
-                            surface_cx.new(move |_| {
-                                FloatingHost::new_panel_window(controller, theme, manager)
-                            })
-                        })
-                    } else {
-                        None
-                    };
-                    DragHostSurface {
+                app.new(|_| DragHostSurface {
                         theme,
                         controller,
                         controller_observed: false,
@@ -431,10 +413,7 @@ impl DragHostManager {
                             0.0
                         },
                         drag_content_size: logical_size,
-                        handoff_placeholder: false,
-                        floating_host,
-                        floating_group_active: false,
-                    }
+                    handoff_placeholder: false,
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -613,7 +592,7 @@ impl DragHostManager {
             drop_target: None,
             target_role: None,
             free_area_bounds: None,
-            can_adopt_floating_host,
+            defer_layout_events_until_parts_ready,
             pending_release_cursor: None,
             source_detach_subscription: None,
             handoff: None,
@@ -1006,13 +985,14 @@ impl DragHostManager {
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
         let panel = active.panels.first().copied();
-        let can_adopt_floating_host = active.can_adopt_floating_host;
+        let defer_layout_events_until_parts_ready =
+            active.defer_layout_events_until_parts_ready;
         let drag_handle = self.controller.update(cx, |controller, _| {
             controller.drag().session().handle()
         });
         let chain_join =
             floating_window_chain_target(drag_handle, target, active.target_role);
-        let restored_free_area_bounds = if can_adopt_floating_host
+        let restored_free_area_bounds = if defer_layout_events_until_parts_ready
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
@@ -1079,9 +1059,9 @@ impl DragHostManager {
                     match action {
                         Ok(DragDropAction::NoOp) => {}
                         Ok(DragDropAction::Command(command)) => {
-                            let result = if can_adopt_floating_host {
-                                // Delay LayoutChanged publication until the current
-                                // DragHost has been registered as the Floating host.
+                            let result = if defer_layout_events_until_parts_ready {
+                                // Delay LayoutChanged publication until permanent
+                                // Header/Group hosts can reconcile the new Core layout.
                                 controller.dispatch(command)
                             } else {
                                 controller.dispatch_in(command, controller_cx)
@@ -1115,9 +1095,8 @@ impl DragHostManager {
             (true, created_groups)
         });
 
-        // Register the complete source-ordered chain before adopting the first
-        // DragHost HWND. Adoption calls reconcile(), which then creates one
-        // persistent native Floating window for each remaining FloatingGroup.
+        // Register the complete source-ordered chain before its separate
+        // Header/Group hosts are reconciled for every Core FloatingGroup.
         if finished && created_groups.len() > 1 && chain_join.is_none() {
             let registered = self.floating_manager.as_ref().is_some_and(|manager| {
                 manager.update(cx, |manager, _| {
@@ -1176,9 +1155,8 @@ impl DragHostManager {
             // temporary and always use the two-phase handoff; adopting its HWND as a
             // full-composition host would mount the same PanelViews in two windows.
             if let Some((anchor, direction)) = chain_join {
-                // Resolve the new Core FloatingGroup before linking its HWND.
-                // The DragHost is adopted above when possible; this handoff is
-                // the fallback when an existing persistent host must be retained.
+                // Resolve the new Core FloatingGroup before linking its WindowGrid
+                // members, then hand the transported PanelViews to their Group hosts.
                 self.flush_controller_events(cx);
                 self.join_created_groups_to_chain(
                     id,
@@ -1188,19 +1166,11 @@ impl DragHostManager {
                     cx,
                 );
 
-                if drag_handle == Some(DragHandle::DockAreaHeader) {
-                    if let Err(error) = self.close(id, cx) {
-                        tracing::warn!(
-                            ?id,
-                            %error,
-                            "could not close the DockArea DragHost after WindowGrid insertion"
-                        );
-                    }
-                } else if !self.begin_floating_handoff(id, target_group, foreground_at_release, cx) {
+                if !self.begin_floating_handoff(id, target_group, foreground_at_release, cx) {
                     tracing::warn!(
                         ?id,
                         ?target_group,
-                        "could not prepare the DragHost-to-FloatingHost handoff after WindowGrid insertion"
+                        "could not prepare the DragHost-to-Group-host handoff after WindowGrid insertion"
                     );
                     if let Err(error) = self.close(id, cx) {
                         tracing::warn!(?id, %error, "could not close DragHost after handoff setup failed");
@@ -1209,7 +1179,7 @@ impl DragHostManager {
                 return;
             }
 
-            if can_adopt_floating_host {
+            if defer_layout_events_until_parts_ready {
                 self.flush_controller_events(cx);
             }
 
@@ -1217,7 +1187,7 @@ impl DragHostManager {
                 tracing::warn!(
                     ?id,
                     ?target_group,
-                    "could not prepare the DragHost-to-FloatingHost handoff; closing DragHost"
+                    "could not prepare the DragHost-to-Group-host handoff; closing DragHost"
                 );
                 if let Err(error) = self.close(id, cx) {
                     tracing::warn!(?id, %error, "could not close DragHost after handoff setup failed");
@@ -1226,7 +1196,7 @@ impl DragHostManager {
             return;
         }
 
-        if can_adopt_floating_host {
+        if defer_layout_events_until_parts_ready {
             self.flush_controller_events(cx);
         }
         if let Err(error) = self.close(id, cx) {
@@ -1273,7 +1243,7 @@ impl DragHostManager {
         }
     }
 
-    /// Restores the native frame before a content DragHost becomes a persistent FloatingHost.
+    /// Restores the native frame before committing a content tear-off as a Floating composition.
     /// The same client rectangle stays on screen; only the outer frame changes.
     fn restore_active_window_frame(
         &mut self,
@@ -1456,8 +1426,8 @@ impl DragHostManager {
     }
 
     /// Releases the cached views only after the empty DragHost frame has rendered.
-    /// The persistent FloatingHost is shown in the same callback before the next
-    /// application frame, so it can mount the views without an empty visible frame.
+    /// The temporary DragHost releases its PanelViews only after rendering an empty
+    /// placeholder; permanent Group hosts are then shown before their next frame.
     fn try_release_handoff_source(
         &mut self,
         id: DragHostId,
@@ -1801,26 +1771,6 @@ pub(crate) struct DragHostSurface {
     composition_header_width: f32,
     drag_content_size: Size,
     handoff_placeholder: bool,
-    floating_host: Option<Entity<FloatingHost>>,
-    floating_group_active: bool,
-}
-
-impl DragHostSurface {
-    pub(crate) fn set_floating_group(
-        &mut self,
-        group: Option<FloatingGroupId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(host) = self.floating_host.as_ref() else {
-            return false;
-        };
-        host.update(cx, |host, _| host.set_host_group(group, window));
-        self.floating_group_active = group.is_some();
-        self.handoff_placeholder = false;
-        cx.notify();
-        true
-    }
 }
 
 struct DragGroupPresentation {
@@ -1894,12 +1844,6 @@ impl Render for DragHostSurface {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.window_background));
-
-        if self.floating_group_active
-            && let Some(host) = self.floating_host.as_ref()
-        {
-            return root.child(host.clone());
-        }
 
         if self.handoff_placeholder {
             return root;
