@@ -3198,6 +3198,55 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(members) = self.part_members_by_group.get(&group).cloned() {
+            let mut shown_group_windows = 0usize;
+            for member in members
+                .into_iter()
+                .filter(|member| matches!(member, WindowGridMember::Group(_)))
+            {
+                let Some((window, native_window, visibility)) =
+                    self.registry.members.get(&member).and_then(|entry| {
+                        (entry.host_group == Some(group)).then_some((
+                            entry.window,
+                            entry.native_window?,
+                            entry.visibility,
+                        ))
+                    })
+                else {
+                    continue;
+                };
+
+                if visibility == PanelWindowVisibility::Hidden {
+                    if let Err(error) = self.native_ops.show_no_activate(native_window) {
+                        tracing::warn!(
+                            ?group,
+                            ?member,
+                            %error,
+                            "could not show the Floating Group window during DragHost handoff"
+                        );
+                        continue;
+                    }
+                    if let Some(entry) = self.registry.members.get_mut(&member) {
+                        entry.visibility = PanelWindowVisibility::Visible;
+                    }
+                }
+
+                self.request_member_redraw(member);
+                if let Err(error) = window.notify_host(cx) {
+                    tracing::warn!(
+                        ?group,
+                        ?member,
+                        %error,
+                        "could not notify the Floating Group window after handoff"
+                    );
+                    continue;
+                }
+                shown_group_windows += 1;
+            }
+            cx.notify();
+            return shown_group_windows > 0;
+        }
+
         let Some(panel) = self.host_registry.panel_for_group(group) else {
             return false;
         };
@@ -3225,9 +3274,6 @@ impl FloatingWindowManager {
             }
         }
 
-        // Request a redraw now; foreground activation is deferred until
-        // DragHost has actually been closed, otherwise Windows can activate
-        // its owner (Main) again while destroying the owned DragHost.
         self.request_native_redraw(panel);
         if let Err(error) = window.notify_host(cx) {
             tracing::warn!(
@@ -3241,6 +3287,18 @@ impl FloatingWindowManager {
 
         cx.notify();
         true
+    }
+
+    fn request_member_redraw(&self, member: WindowGridMember) {
+        if let Some(native_window) = self
+            .registry
+            .members
+            .get(&member)
+            .and_then(|entry| entry.native_window)
+            && let Err(error) = self.native_ops.request_redraw(native_window)
+        {
+            tracing::debug!(?member, %error, "could not request a Floating member redraw");
+        }
     }
 
     /// Requests a native paint for the persistent window hosting this panel.
@@ -3344,16 +3402,29 @@ impl FloatingWindowManager {
         closing_drag_host: NativeWindowId,
         foreground_at_release: Option<NativeWindowId>,
     ) -> bool {
-        let Some(panel) = self.host_registry.panel_for_group(group) else {
-            return false;
-        };
-        let Some(entry) = self.registry.windows.get(&panel) else {
-            return false;
-        };
-        if entry.host_group != Some(group) || entry.visibility != PanelWindowVisibility::Visible {
-            return false;
-        }
-        let Some(native_window) = entry.native_window else {
+        let native_window = self
+            .part_members_by_group
+            .get(&group)
+            .into_iter()
+            .flatten()
+            .filter(|member| matches!(member, WindowGridMember::Group(_)))
+            .find_map(|member| {
+                self.registry.members.get(member).and_then(|entry| {
+                    (entry.host_group == Some(group)
+                        && entry.visibility == PanelWindowVisibility::Visible)
+                        .then_some(entry.native_window)
+                        .flatten()
+                })
+            })
+            .or_else(|| {
+                let panel = self.host_registry.panel_for_group(group)?;
+                let entry = self.registry.windows.get(&panel)?;
+                (entry.host_group == Some(group)
+                    && entry.visibility == PanelWindowVisibility::Visible)
+                    .then_some(entry.native_window)
+                    .flatten()
+            });
+        let Some(native_window) = native_window else {
             return false;
         };
 
@@ -3389,9 +3460,8 @@ impl FloatingWindowManager {
         if let Err(error) = self.native_ops.activate(native_window) {
             tracing::warn!(
                 ?group,
-                ?panel,
                 %error,
-                "could not activate FloatingHost after DragHost close"
+                "could not activate a Floating Group window after DragHost close"
             );
             return false;
         }
@@ -3411,13 +3481,27 @@ impl FloatingWindowManager {
         window_id: WindowId,
         cx: &mut Context<Self>,
     ) -> Option<Vec<PanelId>> {
-        let host_panel = self.host_registry.panel_for_group(group)?;
-        let entry = self.registry.windows.get(&host_panel)?;
-        if entry.window_id != window_id
-            || entry.host_group != Some(group)
-            || entry.visibility != PanelWindowVisibility::Visible
-        {
-            return None;
+        let part_host_is_ready = self
+            .part_members_by_group
+            .get(&group)?
+            .iter()
+            .filter(|member| matches!(member, WindowGridMember::Group(_)))
+            .any(|member| {
+                self.registry.members.get(member).is_some_and(|entry| {
+                    entry.window_id == window_id
+                        && entry.host_group == Some(group)
+                        && entry.visibility == PanelWindowVisibility::Visible
+                })
+            });
+        if !part_host_is_ready {
+            let host_panel = self.host_registry.panel_for_group(group)?;
+            let entry = self.registry.windows.get(&host_panel)?;
+            if entry.window_id != window_id
+                || entry.host_group != Some(group)
+                || entry.visibility != PanelWindowVisibility::Visible
+            {
+                return None;
+            }
         }
         let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
         drag_host.update(cx, |manager, _| manager.pending_handoff_panels(group))
@@ -3433,17 +3517,34 @@ impl FloatingWindowManager {
         rendered_panels: &[PanelId],
         cx: &mut Context<Self>,
     ) {
-        let Some(host_panel) = self.host_registry.panel_for_group(group) else {
-            return;
-        };
-        let Some(entry) = self.registry.windows.get(&host_panel) else {
-            return;
-        };
-        if entry.window_id != window_id
-            || entry.host_group != Some(group)
-            || entry.visibility != PanelWindowVisibility::Visible
-        {
-            return;
+        let part_member = self
+            .part_members_by_group
+            .get(&group)
+            .into_iter()
+            .flatten()
+            .filter(|member| matches!(member, WindowGridMember::Group(_)))
+            .find(|member| {
+                self.registry.members.get(member).is_some_and(|entry| {
+                    entry.window_id == window_id
+                        && entry.host_group == Some(group)
+                        && entry.visibility == PanelWindowVisibility::Visible
+                })
+            })
+            .copied();
+
+        if part_member.is_none() {
+            let Some(host_panel) = self.host_registry.panel_for_group(group) else {
+                return;
+            };
+            let Some(entry) = self.registry.windows.get(&host_panel) else {
+                return;
+            };
+            if entry.window_id != window_id
+                || entry.host_group != Some(group)
+                || entry.visibility != PanelWindowVisibility::Visible
+            {
+                return;
+            }
         }
 
         if let Some(drag_host) = self.drag_host_manager.as_ref().and_then(|manager| manager.upgrade()) {
@@ -3452,9 +3553,11 @@ impl FloatingWindowManager {
             });
         }
 
-        // The destination frame was rendered before DragHost closed. Queue one
-        // more native paint after the source surface stops covering the target.
-        self.request_native_redraw(host_panel);
+        if let Some(member) = part_member {
+            self.request_member_redraw(member);
+        } else if let Some(panel) = self.host_registry.panel_for_group(group) {
+            self.request_native_redraw(panel);
+        }
     }
 
     fn create_part_window(
