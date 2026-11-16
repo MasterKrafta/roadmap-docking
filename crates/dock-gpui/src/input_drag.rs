@@ -1006,7 +1006,15 @@ pub(crate) fn floating_bounds_for_drag(
         target: Some(DropTarget::FreeArea),
         floating_bounds: None,
     };
-    floating_bounds_for_request_in_host(controller, &request, source_host, source_window_id)
+    // DragHost follows the cursor with a Group-only surface. Keep these bounds
+    // Group-only as well; the permanent Header band is added after mouse-up.
+    floating_bounds_for_request_in_host(
+        controller,
+        &request,
+        source_host,
+        source_window_id,
+        false,
+    )
 }
 
 /// Calculates the FreeArea preview using the active session's original press point.
@@ -1044,7 +1052,13 @@ fn floating_bounds_for_request(
     controller: &mut DockController,
     request: &DragDropRequest,
 ) -> Option<Rect> {
-    floating_bounds_for_request_in_host(controller, request, DragSourceHost::Main, None)
+    floating_bounds_for_request_in_host(
+        controller,
+        request,
+        DragSourceHost::Main,
+        None,
+        true,
+    )
 }
 
 fn floating_bounds_for_request_in_host(
@@ -1052,6 +1066,7 @@ fn floating_bounds_for_request_in_host(
     request: &DragDropRequest,
     source_host: DragSourceHost,
     source_window_id: Option<WindowId>,
+    include_composition_header: bool,
 ) -> Option<Rect> {
     let column_header_height = controller.metrics().column_header_height;
     let dock_area_column_ids = match request.payload {
@@ -1104,13 +1119,14 @@ fn floating_bounds_for_request_in_host(
     let mut bounds =
         desired_floating_bounds(source_rect, preferred_size, request.origin, request.point)?;
 
-    // A detached PanelTab becomes a one-tab Group inside a Floating composition.
-    // Reserve the composition-header band above that Group so promotion does not
-    // push the tab down relative to the pointer when the header becomes visible.
-    if matches!(
-        (request.handle, request.payload),
-        (DragHandle::PanelTab, DragPayload::Panel { .. })
-    ) {
+    // Only callers that calculate final composition bounds include this band.
+    // DragHost tracking uses a Group-only temporary surface and must not add it.
+    if include_composition_header
+        && matches!(
+            (request.handle, request.payload),
+            (DragHandle::PanelTab, DragPayload::Panel { .. })
+        )
+    {
         bounds.origin.y -= column_header_height;
         bounds.size.height += column_header_height;
     }
