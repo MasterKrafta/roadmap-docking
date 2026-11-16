@@ -15,9 +15,12 @@ pub struct DockMetrics {
     pub drag_threshold: f32,
     pub min_group_height: f32,
     pub collapsed_group_height: f32,
-    /// Height of a Column's own header, separate from each Group header.
+    /// Height of the shared CompositionHeader row above the Columns in a Main or Floating composition.
+    /// This is also the vertical space reserved before each Column's Groups.
     pub column_header_height: f32,
+    /// Height of each Group's own header; independent from the tab strip.
     pub header_height: f32,
+    /// Height of the tab strip, independent from the CompositionHeader and Group header.
     pub tab_strip_height: f32,
     /// Width of group controls such as the mode switch and group menu.
     pub group_control_button_width: f32,
