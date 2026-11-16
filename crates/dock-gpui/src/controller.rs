@@ -361,6 +361,8 @@ pub struct DockController {
     resize_frame: ResizeFrameThrottle,
     /// One history transaction remains open while an existing FloatingHost moves natively.
     native_window_move_transaction_active: bool,
+    /// A separate native OS resize loop also owns an open Core history transaction.
+    native_resize_transaction_active: bool,
     /// The native adapter must place restored floating windows on available monitors.
     /// Initial native bounds may come from a caller-provided Layout and need monitor recovery.
     initial_monitor_recovery_pending: bool,
@@ -404,6 +406,7 @@ impl DockController {
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             native_window_move_transaction_active: false,
+            native_resize_transaction_active: false,
             initial_monitor_recovery_pending,
             registry,
             panel_views: PanelViewCache::default(),
@@ -456,6 +459,7 @@ impl DockController {
         }
         if self.has_active_pointer_interaction()
             || self.native_window_move_transaction_active
+            || self.native_resize_transaction_active
             || self.drag.host_session.is_some()
         {
             return Err(DockControllerConfigError::ActiveInteraction);
@@ -930,7 +934,10 @@ impl DockController {
 
     /// Opens one history transaction while an existing FloatingHost moves natively.
     pub(crate) fn begin_native_window_move_transaction(&mut self) -> bool {
-        if self.native_window_move_transaction_active || !self.history.begin_transaction(&self.layout) {
+        if self.native_window_move_transaction_active
+            || self.native_resize_transaction_active
+            || !self.history.begin_transaction(&self.layout)
+        {
             return false;
         }
         self.native_window_move_transaction_active = true;
@@ -941,17 +948,21 @@ impl DockController {
     /// The adapter streams ResizeFloatingBounds commands until WM_EXITSIZEMOVE.
     pub(crate) fn begin_native_resize_transaction(&mut self) -> bool {
         if self.native_window_move_transaction_active
+            || self.native_resize_transaction_active
             || self.interaction.is_some()
             || !self.history.begin_transaction(&self.layout)
         {
             return false;
         }
+        self.native_resize_transaction_active = true;
         true
     }
 
     /// Commits the Core bounds updates collected during one native resize loop.
     pub(crate) fn finish_native_resize_transaction(&mut self) -> bool {
-        self.history.commit_transaction(&self.layout)
+        let committed = self.history.commit_transaction(&self.layout);
+        self.native_resize_transaction_active = false;
+        committed
     }
 
     /// Starts a transaction and Core drag session for an already-floating title bar.
