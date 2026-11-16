@@ -1377,6 +1377,11 @@ impl DragHostManager {
                         .push(active_panel);
                 }
             }
+            if by_group.is_empty() {
+                // A collapsed Group may have no active PanelRect to mount, but its
+                // Group host still needs to render once before DragHost is closed.
+                by_group.insert(target_group, Vec::new());
+            }
             by_group
         });
 
@@ -1501,16 +1506,6 @@ impl DragHostManager {
                     manager.show_handoff_target(primary_target_group, manager_cx)
                 })
             });
-        if target_shown
-            && self.active.as_ref().is_some_and(|active| {
-                active.handoff.as_ref().is_some_and(|handoff| {
-                    handoff.required_panels_by_group.is_empty()
-                })
-            })
-        {
-            self.complete_floating_handoff(primary_target_group, &[], cx);
-            return false;
-        }
         !target_shown
     }
 
