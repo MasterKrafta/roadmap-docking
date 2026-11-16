@@ -991,8 +991,7 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) -> Option<Vec<(WindowGridMember, Rect)>> {
         let frames = self.frame_geometries_for_bounds(&bounds)?;
-        let header_height = self.controller.update(cx, |controller, _| controller.metrics().column_header_height);
-        arrange_grid_geometry_bounds(bounds, &frames, links, anchor, header_height)
+        arrange_grid_geometry_bounds(bounds, &frames, links, anchor)
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
