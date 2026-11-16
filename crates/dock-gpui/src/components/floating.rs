@@ -611,10 +611,7 @@ impl Render for FloatingPartHost {
                         snapshot.metrics.column_header_height,
                     ),
                 );
-                let local_column = ColumnRect {
-                    column,
-                    rect: header_rect,
-                };
+                let local_column = ColumnRect::new(column, header_rect);
                 root.child(DockCompositionView::render_header(
                     format!("floating-column-header-{:?}", column),
                     header_rect,
@@ -691,10 +688,10 @@ impl FloatingPartHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window.window_handle().window_id())
         });
-        let local_group = GroupRect {
-            group: group_id,
-            rect: Rect::new(Point::ZERO, group_rect.rect.size),
-        };
+        let local_group = GroupRect::new(
+            group_id,
+            Rect::new(Point::ZERO, group_rect.rect.size),
+        );
         if dragged_group == Some(group_id)
             || transfer.groups_without_visible_tabs.contains(&group_id)
         {
@@ -706,10 +703,10 @@ impl FloatingPartHost {
             ));
         }
 
-        let local_strip = dock_core::TabStripRect {
-            group: group_id,
-            rect: floating_part_local_rect(strip.rect, group_rect.rect.origin),
-        };
+        let local_strip = dock_core::TabStripRect::new(
+            group_id,
+            floating_part_local_rect(strip.rect, group_rect.rect.origin),
+        );
         let visible_headers = transfer.visible_tab_headers(
             &snapshot.rects.tab_headers,
             &snapshot.rects.tab_strips,
@@ -725,11 +722,13 @@ impl FloatingPartHost {
         let local_headers = visible_headers
             .into_iter()
             .filter(|header| header.group == group_id)
-            .map(|header| dock_core::TabHeaderRect {
-                group: group_id,
-                panel: header.panel,
-                index: header.index,
-                rect: floating_part_local_rect(header.rect, group_rect.rect.origin),
+            .map(|header| {
+                dock_core::TabHeaderRect::new(
+                    group_id,
+                    header.panel,
+                    header.index,
+                    floating_part_local_rect(header.rect, group_rect.rect.origin),
+                )
             })
             .collect::<Vec<_>>();
         let local_overflow = snapshot
