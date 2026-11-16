@@ -442,6 +442,93 @@ fn collect_floating_part_windows(
     result
 }
 
+fn floating_part_internal_links(
+    specs: &[FloatingPartWindowSnapshot],
+) -> Vec<WindowGridLink> {
+    let mut floating_groups = Vec::new();
+    for spec in specs {
+        if !floating_groups.contains(&spec.floating_group) {
+            floating_groups.push(spec.floating_group);
+        }
+    }
+
+    let mut links = Vec::new();
+    for floating_group in floating_groups {
+        let headers = specs
+            .iter()
+            .filter_map(|spec| {
+                (spec.floating_group == floating_group
+                    && matches!(spec.kind, FloatingPartKind::Header { .. }))
+                .then_some(spec)
+            })
+            .collect::<Vec<_>>();
+
+        for header in &headers {
+            let FloatingPartKind::Header { column } = header.kind else {
+                continue;
+            };
+            let mut previous = header.member;
+            for group in specs.iter().filter(|spec| {
+                spec.floating_group == floating_group
+                    && matches!(
+                        spec.kind,
+                        FloatingPartKind::Group {
+                            column: group_column,
+                            ..
+                        } if group_column == column
+                    )
+            }) {
+                links.push(WindowGridLink {
+                    from: previous,
+                    to: group.member,
+                    direction: WindowGridDirection::Below,
+                });
+                previous = group.member;
+            }
+        }
+
+        for pair in headers.windows(2) {
+            links.push(WindowGridLink {
+                from: pair[0].member,
+                to: pair[1].member,
+                direction: WindowGridDirection::Right,
+            });
+        }
+    }
+
+    links
+}
+
+fn floating_part_boundary_member(
+    specs: &[FloatingPartWindowSnapshot],
+    floating_group: FloatingGroupId,
+    side: WindowGridDirection,
+) -> Option<WindowGridMember> {
+    let members = specs
+        .iter()
+        .filter(|spec| spec.floating_group == floating_group)
+        .collect::<Vec<_>>();
+    let first_header = members.iter().find_map(|spec| {
+        matches!(spec.kind, FloatingPartKind::Header { .. }).then_some(spec.member)
+    });
+    let last_header = members.iter().rev().find_map(|spec| {
+        matches!(spec.kind, FloatingPartKind::Header { .. }).then_some(spec.member)
+    });
+    let first_group = members.iter().find_map(|spec| {
+        matches!(spec.kind, FloatingPartKind::Group { .. }).then_some(spec.member)
+    });
+    let last_group = members.iter().rev().find_map(|spec| {
+        matches!(spec.kind, FloatingPartKind::Group { .. }).then_some(spec.member)
+    });
+
+    match side {
+        WindowGridDirection::Left => first_header.or(first_group),
+        WindowGridDirection::Right => last_header.or(last_group),
+        WindowGridDirection::Above => first_header.or(first_group),
+        WindowGridDirection::Below => last_group.or(last_header),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct NativeResizeSession {
     group: FloatingGroupId,
@@ -3799,6 +3886,91 @@ impl FloatingWindowManager {
         entry.window.remove_window(cx);
     }
 
+    /// Replaces legacy composition-only graph nodes with the real Header/Group
+    /// members while preserving links between different Floating compositions.
+    fn rebuild_floating_part_window_grid(
+        &mut self,
+        desired: &[FloatingPartWindowSnapshot],
+    ) {
+        let previous_links = self.window_chains.all_links();
+        let mut owners = HashMap::<WindowGridMember, FloatingGroupId>::new();
+        for spec in desired {
+            owners.insert(spec.member, spec.floating_group);
+        }
+
+        let mut links = floating_part_internal_links(desired);
+        for previous in previous_links {
+            let from_group = match previous.from {
+                WindowGridMember::FloatingComposition(group) => Some(group),
+                member => owners.get(&member).copied(),
+            };
+            let to_group = match previous.to {
+                WindowGridMember::FloatingComposition(group) => Some(group),
+                member => owners.get(&member).copied(),
+            };
+            let (Some(from_group), Some(to_group)) = (from_group, to_group) else {
+                continue;
+            };
+            if from_group == to_group {
+                // Internal Header/Group edges are regenerated from the current
+                // Core layout; keep only relationships between compositions.
+                continue;
+            }
+
+            let from = match previous.from {
+                WindowGridMember::FloatingComposition(group) => {
+                    floating_part_boundary_member(desired, group, previous.direction)
+                }
+                member => owners.contains_key(&member).then_some(member),
+            };
+            let to = match previous.to {
+                WindowGridMember::FloatingComposition(group) => {
+                    floating_part_boundary_member(desired, group, previous.direction.opposite())
+                }
+                member => owners.contains_key(&member).then_some(member),
+            };
+            let (Some(from), Some(to)) = (from, to) else {
+                continue;
+            };
+            if from != to {
+                links.push(WindowGridLink {
+                    from,
+                    to,
+                    direction: previous.direction,
+                });
+            }
+        }
+
+        let member_order = desired
+            .iter()
+            .enumerate()
+            .map(|(index, spec)| (spec.member, index))
+            .collect::<HashMap<_, _>>();
+        links.sort_by_key(|link| {
+            (
+                member_order.get(&link.from).copied().unwrap_or(usize::MAX),
+                member_order.get(&link.to).copied().unwrap_or(usize::MAX),
+                match link.direction {
+                    WindowGridDirection::Left => 0u8,
+                    WindowGridDirection::Right => 1,
+                    WindowGridDirection::Above => 2,
+                    WindowGridDirection::Below => 3,
+                },
+            )
+        });
+
+        if self.window_chains.replace_all_links(&links) {
+            // Every live relationship has been rebuilt from Core members and
+            // preserved cross-composition links. Old pending reconnect requests
+            // refer to the previous graph generation and must not be replayed.
+            self.pending_window_grid_reconnections.clear();
+        } else {
+            tracing::warn!(
+                "could not rebuild WindowGrid from the current Floating Header/Group topology"
+            );
+        }
+    }
+
     fn reconcile_part_windows(
         &mut self,
         transferred_panels: &[PanelId],
@@ -3818,6 +3990,7 @@ impl FloatingWindowManager {
                 &transferred_panels,
             )
         });
+        self.rebuild_floating_part_window_grid(&desired);
         let desired_members = desired
             .iter()
             .map(|spec| spec.member)
