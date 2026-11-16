@@ -22,7 +22,7 @@ use platform::{
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
     components::{FloatingHost, floating::{FloatingPartHost, FloatingPartKind}},
-    drag_host_manager::DragHostSurface, geometry::DockGeometry,
+    geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
         NativeFrameGeometry, arrange_window_grid_bounds as arrange_grid_geometry_bounds,
@@ -50,7 +50,6 @@ pub enum PanelWindowVisibility {
 enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
     Part(WindowHandle<FloatingPartHost>),
-    DragHost(WindowHandle<DragHostSurface>),
 }
 
 impl PanelWindowHandle {
@@ -58,7 +57,6 @@ impl PanelWindowHandle {
         match self {
             Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
             Self::Part(window) => window.update(cx, |_, _, _| ()).is_ok(),
-            Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
         }
     }
 
@@ -75,17 +73,6 @@ impl PanelWindowHandle {
                 })
                 .map_err(|error| error.to_string()),
             Self::Part(_) => Err("Floating part windows have immutable Core ownership".into()),
-            Self::DragHost(window) => {
-                match window.update(cx, |surface, window, host_cx| {
-                    let updated = surface.set_floating_group(group, window, host_cx);
-                    host_cx.notify();
-                    updated
-                }) {
-                    Ok(true) => Ok(()),
-                    Ok(false) => Err("DragHost could not switch its Floating composition".into()),
-                    Err(error) => Err(error.to_string()),
-                }
-            }
         }
     }
 
@@ -96,9 +83,6 @@ impl PanelWindowHandle {
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
             Self::Part(window) => window
-                .update(cx, |_, _, host_cx| host_cx.notify())
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
         }
@@ -114,12 +98,6 @@ impl PanelWindowHandle {
             }
             Self::Part(window) => {
                 let _ = window.update(cx, |_, window, _| window.remove_window());
-            }
-            Self::DragHost(window) => {
-                let _ = window.update(cx, |surface, window, surface_cx| {
-                    let _ = surface.set_floating_group(None, window, surface_cx);
-                    window.remove_window();
-                });
             }
         }
     }
@@ -210,7 +188,7 @@ impl PanelWindowRegistry {
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
         match self.windows.get(&panel)?.window {
             PanelWindowHandle::Floating(window) => Some(window),
-            PanelWindowHandle::Part(_) | PanelWindowHandle::DragHost(_) => None,
+            PanelWindowHandle::Part(_) => None,
         }
     }
 
@@ -750,150 +728,6 @@ impl FloatingWindowManager {
 
     pub(crate) fn drag_host_manager(&self) -> Option<Entity<DragHostManager>> {
         self.drag_host_manager.as_ref()?.upgrade()
-    }
-
-    /// Registers an already-open content DragHost as a persistent Floating host.
-    /// If its PanelId currently keys the source composition's HWND, that HWND is
-    /// reassigned to the remaining source composition and DragHost takes its key.
-    /// This reuses both existing native surfaces instead of opening a third window.
-    pub(crate) fn adopt_drag_host_window(
-        &mut self,
-        panel: PanelId,
-        group: FloatingGroupId,
-        window: WindowHandle<DragHostSurface>,
-        window_id: WindowId,
-        native_window: NativeWindowId,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let Some(bounds) = self.controller.update(cx, |controller, _| {
-            controller.layout().floating_group(group).map(|floating| floating.bounds)
-        }) else {
-            return false;
-        };
-
-        enum SourceHostReassignment {
-            DormantPanelWindow,
-            ActiveComposition {
-                source_group: FloatingGroupId,
-                replacement_panel: Option<PanelId>,
-            },
-        }
-
-        let source_host_reassignment = match self
-            .registry
-            .windows
-            .get(&panel)
-            .map(|entry| entry.host_group)
-        {
-            None => None,
-            Some(None) => Some(SourceHostReassignment::DormantPanelWindow),
-            Some(Some(source_group)) => {
-                if source_group == group {
-                    return false;
-                }
-
-                let replacement_panel = self.controller.update(cx, |controller, _| {
-                    let floating = controller.layout().floating_group(source_group)?;
-                    let area = controller.layout().dock_area(floating.area)?;
-                    let mut panels = Vec::new();
-                    let mut seen = HashSet::new();
-                    collect_panel_order(controller.layout(), area.root, &mut panels, &mut seen);
-                    Some(panels.into_iter().find(|candidate| *candidate != panel))
-                }).flatten();
-
-                // Every open panel may already own a dormant, hidden HWND. That is
-                // not a conflict: retire it and move the active source-composition
-                // HWND to that PanelId instead. Only another active composition host
-                // is a genuine key collision.
-                if replacement_panel.is_some_and(|replacement| {
-                    self.registry
-                        .windows
-                        .get(&replacement)
-                        .is_some_and(|entry| entry.host_group.is_some())
-                }) {
-                    return false;
-                }
-
-                Some(SourceHostReassignment::ActiveComposition {
-                    source_group,
-                    replacement_panel,
-                })
-            }
-        };
-
-        // DragHost was created before the persistent Floating composition header
-        // existed. Use its actual native bounds when taking over the HWND.
-        let current_native_bounds = self
-            .core_bounds_from_native_window(native_window)
-            .unwrap_or(bounds);
-        let configured = window.update(cx, |surface, native, surface_cx| {
-            surface.set_floating_group(Some(group), native, surface_cx)
-        });
-        if !matches!(configured, Ok(true)) {
-            return false;
-        }
-
-        match source_host_reassignment {
-            Some(SourceHostReassignment::DormantPanelWindow) => {
-                // The panel had a per-panel HWND, but it was not hosting a
-                // composition. DragHost replaces that hidden native surface.
-                self.release_panel_window(panel, cx);
-            }
-            Some(SourceHostReassignment::ActiveComposition {
-                source_group,
-                replacement_panel: Some(replacement_panel),
-            }) => {
-                let Some(existing_entry) = self.registry.windows.remove(&panel) else {
-                    return false;
-                };
-                if self.registry.windows.contains_key(&replacement_panel) {
-                    self.release_panel_window(replacement_panel, cx);
-                }
-                self.registry.windows.insert(replacement_panel, existing_entry);
-                self.host_registry
-                    .floating_groups
-                    .insert(source_group, replacement_panel);
-            }
-            Some(SourceHostReassignment::ActiveComposition {
-                source_group,
-                replacement_panel: None,
-            }) => {
-                // The detached content was the source composition's last
-                // remaining content. Its old host is no longer needed.
-                self.release_panel_window(panel, cx);
-                self.host_registry.floating_groups.remove(&source_group);
-            }
-            None => {}
-        }
-
-        let scale = self.native_ops.scale_factor(native_window).ok();
-        self.registry.windows.insert(
-            panel,
-            PanelWindowEntry {
-                window: PanelWindowHandle::DragHost(window),
-                window_id,
-                native_window: Some(native_window),
-                bounds: current_native_bounds,
-                native_min_size: None,
-                native_horizontal_resize_min_widths: None,
-                native_left_resize_enabled: None,
-                native_top_resize_enabled: None,
-                native_scale_factor: scale,
-                native_bounds_dirty: false,
-                resize_enabled: false,
-                host_group: Some(group),
-                visibility: PanelWindowVisibility::Visible,
-            },
-        );
-        self.host_registry.floating_groups.insert(group, panel);
-        self.reconcile(cx);
-
-        self.host_registry.floating_groups.get(&group) == Some(&panel)
-            && self.registry.windows.get(&panel).is_some_and(|entry| {
-                entry.host_group == Some(group)
-                    && entry.native_window == Some(native_window)
-                    && entry.window_id == window_id
-            })
     }
 
     /// Resolves each typed WindowGrid identity to its matching permanent native host.
