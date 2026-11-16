@@ -190,7 +190,9 @@ impl WindowGrid {
         if !self.members.contains(&group) {
             return false;
         }
-        self.remove_member_inner(group, true);
+        // Direct detach is fail-safe: reconnect only after the manager validates
+        // the resulting native geometry through a prune candidate.
+        self.remove_member_inner(group, false);
         true
     }
 
@@ -292,7 +294,6 @@ impl WindowGrid {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct WindowGridPruneResult {
     pub(crate) removed_members: usize,
-    pub(crate) horizontal_chains_to_compact: Vec<Vec<FloatingGroupId>>,
     pub(crate) reconnect_candidates: Vec<WindowGridLink>,
     pub(crate) components_to_align: Vec<FloatingGroupId>,
 }
@@ -511,23 +512,29 @@ impl WindowGridRegistry {
             result.removed_members += stale_members.len();
 
             let had_stale_members = !stale_members.is_empty();
+            let mut temporary_reconnections = Vec::new();
             for stale in &stale_members {
-                if let Some(candidate) = grid.remove_member_inner(*stale, false)
-                    && live_groups.contains(&candidate.from)
+                if let Some(candidate) = grid.remove_member_inner(*stale, true) {
+                    temporary_reconnections.push(candidate);
+                }
+            }
+
+            // The temporary links let consecutive stale nodes collapse into
+            // one straight-through candidate, but none is published before
+            // native geometry validation in FloatingWindowManager.
+            for candidate in temporary_reconnections {
+                grid.links.retain(|link| *link != candidate);
+                if live_groups.contains(&candidate.from)
                     && live_groups.contains(&candidate.to)
+                    && !result.reconnect_candidates.contains(&candidate)
                 {
                     result.reconnect_candidates.push(candidate);
                 }
             }
 
             for component in grid.connected_components() {
-                if component.members.len() > 1 {
-                    if had_stale_members {
-                        result.components_to_align.push(component.members[0]);
-                    }
-                    if had_stale_members && component.is_ordered_horizontal_chain() {
-                        result.horizontal_chains_to_compact.push(component.members.clone());
-                    }
+                if had_stale_members && component.members.len() > 1 {
+                    result.components_to_align.push(component.members[0]);
                 }
                 self.store_grid(component);
             }
@@ -802,16 +809,16 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_middle_horizontal_member_preserves_contiguity_order() {
+    fn direct_middle_member_removal_splits_until_geometry_is_validated() {
         let [a, b, c] = groups(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
         assert!(grid.link_after(b, c));
         assert!(grid.remove_member(b));
-        assert_eq!(grid.members_for(a), vec![a, c]);
-        assert_eq!(grid.members_for(c), vec![a, c]);
-        assert_eq!(grid.direction_between(a, c), Some(WindowGridDirection::Right));
+        assert_eq!(grid.members_for(a), vec![a]);
+        assert_eq!(grid.members_for(c), vec![c]);
+        assert_eq!(grid.direction_between(a, c), None);
         assert_eq!(grid.members_for(b), vec![b]);
         assert!(grid.is_valid());
     }
@@ -858,7 +865,6 @@ mod tests {
         let live = HashSet::from([a, c, d]);
         let pruned = grid.retain_groups(&live);
         assert_eq!(pruned.removed_members, 1);
-        assert_eq!(pruned.horizontal_chains_to_compact, vec![vec![c, d]]);
         assert_eq!(
             pruned.reconnect_candidates,
             vec![super::WindowGridLink {
@@ -874,6 +880,31 @@ mod tests {
     }
 
     #[test]
+    fn pruning_a_straight_run_of_missing_members_produces_one_live_reconnect() {
+        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_after(a, b));
+        assert!(grid.link_after(b, c));
+        assert!(grid.link_after(c, d));
+
+        let live = HashSet::from([a, d]);
+        let pruned = grid.retain_groups(&live);
+        assert_eq!(pruned.removed_members, 2);
+        assert_eq!(
+            pruned.reconnect_candidates,
+            vec![super::WindowGridLink {
+                from: a,
+                to: d,
+                direction: WindowGridDirection::Right,
+            }],
+        );
+        assert_eq!(grid.members_for(a), vec![a]);
+        assert_eq!(grid.members_for(d), vec![d]);
+        assert!(grid.is_valid());
+    }
+
+    #[test]
     fn pruning_missing_groups_splits_and_preserves_other_components() {
         let [a, b, c, d] = groups(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
@@ -885,7 +916,6 @@ mod tests {
         let live = HashSet::from([a, c, d]);
         let pruned = grid.retain_groups(&live);
         assert_eq!(pruned.removed_members, 1);
-        assert_eq!(pruned.horizontal_chains_to_compact, vec![vec![c, d]]);
         assert!(pruned.reconnect_candidates.is_empty());
         assert_eq!(pruned.components_to_align, vec![c]);
         assert_eq!(grid.members_for(c), vec![c, d]);
@@ -905,7 +935,6 @@ mod tests {
         let live = HashSet::from([c]);
         let first = grid.retain_groups(&live);
         assert_eq!(first.removed_members, 2);
-        assert!(first.horizontal_chains_to_compact.is_empty());
         assert!(first.reconnect_candidates.is_empty());
         assert!(first.components_to_align.is_empty());
 
