@@ -1,7 +1,7 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThemeMetrics {
     /// Height of the shared CompositionHeader row above a Main or Floating composition.
-    pub column_header_height: f32,
+    pub composition_header_height: f32,
     /// Height of a Group's own header; independent from the tab strip below/within it.
     pub group_header_height: f32,
     /// Height of the tab strip, kept separate from both composition and Group headers.
@@ -58,7 +58,7 @@ impl ThemeMetrics {
     /// Validates finite, positive layout metrics and their required relationships.
     pub fn validate(self) -> Result<(), &'static str> {
         let positive = [
-            ("column_header_height", self.column_header_height),
+            ("composition_header_height", self.composition_header_height),
             ("group_header_height", self.group_header_height),
             ("tab_strip_height", self.tab_strip_height),
             (
@@ -90,7 +90,7 @@ impl ThemeMetrics {
         for (name, value) in positive {
             if !value.is_finite() {
                 return Err(match name {
-                    "column_header_height" => "column_header_height must be finite",
+                    "composition_header_height" => "composition_header_height must be finite",
                     "group_header_height" => "group_header_height must be finite",
                     "tab_strip_height" => "tab_strip_height must be finite",
                     "group_control_button_width" => "group_control_button_width must be finite",
@@ -119,7 +119,7 @@ impl ThemeMetrics {
             }
             if value <= 0.0 {
                 return Err(match name {
-                    "column_header_height" => "column_header_height must be positive",
+                    "composition_header_height" => "composition_header_height must be positive",
                     "group_header_height" => "group_header_height must be positive",
                     "tab_strip_height" => "tab_strip_height must be positive",
                     "group_control_button_width" => "group_control_button_width must be positive",
@@ -204,7 +204,7 @@ impl ThemeMetrics {
 impl Default for ThemeMetrics {
     fn default() -> Self {
         Self {
-            column_header_height: 32.0,
+            composition_header_height: 32.0,
             group_header_height: 28.0,
             tab_strip_height: 28.0,
             group_control_button_width: 34.0,
@@ -299,12 +299,12 @@ mod tests {
     #[test]
     fn keeps_composition_group_and_tab_heights_independent() {
         let defaults = ThemeMetrics::default();
-        assert_eq!(defaults.column_header_height, 32.0);
+        assert_eq!(defaults.composition_header_height, 32.0);
         assert_eq!(defaults.group_header_height, 28.0);
         assert_eq!(defaults.tab_strip_height, 28.0);
 
         let customized = ThemeMetrics {
-            column_header_height: 18.0,
+            composition_header_height: 18.0,
             group_header_height: 22.0,
             tab_strip_height: 12.0,
             ..defaults
