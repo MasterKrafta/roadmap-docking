@@ -13,7 +13,8 @@ use gpui::{
 };
 
 use crate::{
-    DockController, DockTheme, DragHostManager, FloatingWindowManager,
+    dock_metrics_from_theme, DockController, DockControllerConfigError, DockTheme,
+    DragHostManager, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
@@ -249,6 +250,31 @@ impl Render for DockHost {
         floating_manager.update(cx, |manager, _| {
             manager.attach_drag_host_manager(drag_host_manager.downgrade());
         });
+
+        // The shared ThemeMetrics are authoritative at the GPUI boundary.
+        // Apply them only after FloatingWindowManager has subscribed to controller
+        // events, so already-open WindowGrids can be realigned for the new header.
+        match dock_metrics_from_theme(self.theme.metrics) {
+            Ok(metrics) => {
+                self.controller.update(cx, |controller, controller_cx| {
+                    match controller.update_metrics(metrics) {
+                        Ok(true) => {
+                            controller.flush_events(controller_cx);
+                            controller_cx.notify();
+                        }
+                        Ok(false) | Err(DockControllerConfigError::ActiveInteraction) => {}
+                        Err(error) => tracing::warn!(
+                            %error,
+                            "could not synchronize DockMetrics with the current ThemeMetrics"
+                        ),
+                    }
+                });
+            }
+            Err(error) => tracing::warn!(
+                %error,
+                "could not convert the current ThemeMetrics into valid DockMetrics"
+            ),
+        }
 
         let focus_handle = self
             .root_focus_handle
