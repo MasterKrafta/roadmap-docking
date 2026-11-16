@@ -2455,10 +2455,10 @@ impl FloatingWindowManager {
             .unwrap_or(Point::ZERO)
     }
 
-    /// Makes the PanelId registry and composition-host map match the current Layout.
+    /// Makes the typed Header/Group window registry match the current Core Layout.
     ///
-    /// Every open panel keeps its own native window. A floating composition is
-    /// rendered by one of those windows; the other panel windows stay hidden.
+    /// Each Floating Column owns one Header host, and each Group owns one host.
+    /// Main remains in its original MainDockView and never enters this registry.
     pub fn reconcile(&mut self, cx: &mut Context<Self>) {
         if self.reconciling {
             return;
@@ -2518,15 +2518,20 @@ impl FloatingWindowManager {
             });
 
         groups.sort_by_key(|group| group.z_order);
+        self.reconcile_part_windows(&transferred_panels, cx);
 
         let live_groups = groups.iter().map(|group| group.id).collect::<HashSet<_>>();
-        let live_members = live_groups.iter().copied().map(window_grid_member).collect::<HashSet<_>>();
+        let live_members = live_groups
+            .iter()
+            .copied()
+            .map(window_grid_member)
+            .chain(self.registry.members.keys().copied())
+            .collect::<HashSet<_>>();
         let prune_result = self.window_chains.retain_members(&live_members);
         let removed_chain_members = prune_result.removed_members;
         let stale_alignment_anchors = self.pending_window_chain_alignment.iter()
             .filter(|anchor| {
-                !anchor.floating_group().is_some_and(|group| live_groups.contains(&group))
-                    || !self.window_chains.is_chained(**anchor)
+                !live_members.contains(anchor) || !self.window_chains.is_chained(**anchor)
             })
             .copied().collect::<Vec<_>>();
         for anchor in stale_alignment_anchors {
@@ -2542,19 +2547,10 @@ impl FloatingWindowManager {
             }
         }
 
-        let previous_hosts = self.host_registry.floating_groups.clone();
-        let next_hosts = groups
-            .iter()
-            .filter_map(|group| {
-                let previous = previous_hosts
-                    .get(&group.id)
-                    .copied()
-                    .filter(|panel| group.panels.contains(panel));
-                let host = previous.or_else(|| group.panels.first().copied())?;
-                Some((group.id, host))
-            })
-            .collect::<HashMap<_, _>>();
-        let desired_panels = next_hosts.values().copied().collect::<HashSet<_>>();
+        // Permanent Floating hosts are now keyed by Header/Group Core nodes.
+        // The PanelId-host table remains only for transitional DragHost ownership.
+        let next_hosts = HashMap::<FloatingGroupId, PanelId>::new();
+        let desired_panels = HashSet::<PanelId>::new();
 
         let monitor_work_areas = if recover_initial_bounds {
             match self.native_ops.monitor_work_areas() {
@@ -2571,8 +2567,8 @@ impl FloatingWindowManager {
             None
         };
 
-        // Discard externally closed native handles, then create only the
-        // composition hosts selected above. Main-dock panels allocate no windows.
+        // Discard externally closed legacy/DragHost handles. Permanent Floating
+        // Header/Group windows have already been reconciled by Core-node identity.
         let unavailable_panels = self
             .registry
             .windows
@@ -2744,8 +2740,8 @@ impl FloatingWindowManager {
 
         self.registry.panel_locations = panel_locations;
 
-        // Publish only hosts whose GPUI view has actually been assigned. A
-        // failed assignment remains absent and is retried by the next pass.
+        // No permanent FloatingComposition host is published. Typed Header/Group
+        // members are the visible native representation from this stage onward.
         let mut active_hosts = HashMap::new();
         let mut monitor_corrections = Vec::new();
         for group in &groups {
