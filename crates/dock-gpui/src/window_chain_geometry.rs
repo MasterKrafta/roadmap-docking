@@ -547,7 +547,7 @@ fn collect_window_grid_region(
 /// window's corresponding edges. Origins are physical desktop pixels; every
 /// neighbouring window keeps its own logical size and DPI scale.
 ///
-/// The east region is anchored to the resized HWND's DWM-visible right edge.
+/// The east region is anchored to the resized HWND's physical client-right edge.
 /// Each south branch is anchored to that branch's first lower client top, so a
 /// resize of an upper-left window does not move an unrelated lower-right branch.
 pub(crate) fn shift_window_grid_after_resize(
@@ -608,10 +608,10 @@ pub(crate) fn shift_window_grid_after_resize(
         }
     }
 
-    let visible_right = bounds[resized_index].1.origin.x
+    let client_right = bounds[resized_index].1.origin.x
         + frames[resized_index].outer_width
-        - frames[resized_index].visible_right_inset;
-    if !visible_right.is_finite() {
+        - frames[resized_index].client_right_inset;
+    if !client_right.is_finite() {
         return None;
     }
     let east_region = collect_window_grid_region(
@@ -620,8 +620,8 @@ pub(crate) fn shift_window_grid_after_resize(
         &adjacency,
         |member| {
             let index = indices[&member];
-            let visible_left = bounds[index].1.origin.x + frames[index].visible_left_inset;
-            visible_left.is_finite() && visible_left >= visible_right - 1.5
+            let client_left = bounds[index].1.origin.x + frames[index].client_left_inset;
+            client_left.is_finite() && client_left >= client_right - 1.5
         },
     );
 
