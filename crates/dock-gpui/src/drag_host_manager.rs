@@ -400,19 +400,19 @@ impl DragHostManager {
         let window = cx
             .open_window(options, move |_, app| {
                 app.new(|_| DragHostSurface {
-                        theme,
-                        controller,
-                        controller_observed: false,
-                        panel: surface_panel,
-                        group,
-                        dock_area,
-                        reserve_composition_header,
-                        composition_header_width: if reserve_composition_header {
-                            drag_logical_size.width
-                        } else {
-                            0.0
-                        },
-                        drag_content_size: logical_size,
+                    theme,
+                    controller,
+                    controller_observed: false,
+                    panel: surface_panel,
+                    group,
+                    dock_area,
+                    reserve_composition_header,
+                    composition_header_width: if reserve_composition_header {
+                        drag_logical_size.width
+                    } else {
+                        0.0
+                    },
+                    drag_content_size: logical_size,
                     handoff_placeholder: false,
                 })
             })
