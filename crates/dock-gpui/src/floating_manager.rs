@@ -1202,6 +1202,7 @@ impl FloatingWindowManager {
         source_group: FloatingGroupId,
         part: DockWindowPart,
         bounds: Rect,
+        cx: &mut Context<Self>,
     ) -> Option<Rect> {
         bounds.validate_non_empty().ok()?;
         let member = window_grid_member_for_part(part);
@@ -1209,7 +1210,31 @@ impl FloatingWindowManager {
         if entry.host_group != Some(source_group) {
             return None;
         }
-        self.screen_bounds_from_floating_native_window(entry.native_window?, bounds)
+        let window_id = entry.window_id;
+        let native_window = entry.native_window?;
+        let part_origin = self.controller.update(cx, |controller, _| {
+            let rects = controller.floating_geometry(window_id, source_group).ok()?;
+            match part {
+                DockWindowPart::Header { column } => rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .map(|rect| rect.rect.origin),
+                DockWindowPart::Group { group } => rects
+                    .groups
+                    .iter()
+                    .find(|rect| rect.group == group)
+                    .map(|rect| rect.rect.origin),
+            }
+        })?;
+        let host_local_bounds = Rect::new(
+            Point::new(
+                bounds.origin.x - part_origin.x,
+                bounds.origin.y - part_origin.y,
+            ),
+            bounds.size,
+        );
+        self.screen_bounds_from_floating_native_window(native_window, host_local_bounds)
     }
 
     fn screen_bounds_from_floating_native_window(
@@ -2295,6 +2320,7 @@ impl FloatingWindowManager {
         &self,
         source_host: DragSourceHost,
         bounds: Rect,
+        cx: &mut Context<Self>,
     ) -> Option<Rect> {
         match source_host {
             DragSourceHost::Main => self.screen_bounds_from_main_local(bounds),
@@ -2302,7 +2328,7 @@ impl FloatingWindowManager {
                 self.screen_bounds_from_floating_local(group, bounds)
             }
             DragSourceHost::FloatingPart { group, part } => {
-                self.screen_bounds_from_floating_part(group, part, bounds)
+                self.screen_bounds_from_floating_part(group, part, bounds, cx)
             }
         }
     }

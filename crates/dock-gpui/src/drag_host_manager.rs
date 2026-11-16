@@ -962,8 +962,8 @@ impl DragHostManager {
             }
         };
         let screen_free_area_bounds = local_free_area_bounds.and_then(|bounds| {
-            floating_manager.update(cx, |manager, _| {
-                manager.screen_bounds_for_drag_source(source_host, bounds)
+            floating_manager.update(cx, |manager, manager_cx| {
+                manager.screen_bounds_for_drag_source(source_host, bounds, manager_cx)
             })
         });
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
