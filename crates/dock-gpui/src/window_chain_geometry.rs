@@ -952,7 +952,7 @@ mod contiguous_window_chain_bounds_tests {
 #[cfg(test)]
 mod window_grid_bounds_tests {
     use super::{
-        NativeFrameGeometry, arrange_window_grid_bounds,
+        NativeFrameGeometry, arrange_window_grid_bounds, floating_part_outer_bounds,
         match_moving_window_width_to_target,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember};
