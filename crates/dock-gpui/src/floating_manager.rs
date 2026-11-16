@@ -2868,11 +2868,25 @@ impl FloatingWindowManager {
             return Some(false);
         };
 
-        // The shared geometry routine also rejects invalid overlaps and cycles.
-        // The target-side member remains the fixed anchor during this check.
-        if self
-            .arrange_window_grid_bounds(member_bounds, &links, candidate.from, cx)
-            .is_none()
+        // A temporarily unavailable native frame must keep the candidate queued;
+        // only a successful measurement followed by invalid geometry rejects it.
+        let Some(frames) = self.frame_geometries_for_bounds(&member_bounds) else {
+            return None;
+        };
+        let header_height = self.controller.update(cx, |controller, _| {
+            controller.metrics().column_header_height
+        });
+
+        // The target-side member remains the fixed anchor. The shared geometry
+        // routine also rejects invalid overlaps and inconsistent graph layouts.
+        if arrange_grid_geometry_bounds(
+            member_bounds,
+            &frames,
+            &links,
+            candidate.from,
+            header_height,
+        )
+        .is_none()
         {
             return Some(false);
         }
