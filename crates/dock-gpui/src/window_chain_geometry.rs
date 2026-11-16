@@ -274,7 +274,7 @@ pub(crate) fn arrange_window_grid_bounds(
             return None;
         }
         adjacency[from].push((to, link.direction));
-        adjacency[to].push((from, opposite_direction(link.direction)));
+        adjacency[to].push((from, link.direction.opposite()));
     }
 
     let mut visited = HashSet::from([anchor_index]);
@@ -352,15 +352,6 @@ pub(crate) fn arrange_window_grid_bounds(
     }
 
     Some(bounds)
-}
-
-fn opposite_direction(direction: WindowGridDirection) -> WindowGridDirection {
-    match direction {
-        WindowGridDirection::Left => WindowGridDirection::Right,
-        WindowGridDirection::Right => WindowGridDirection::Left,
-        WindowGridDirection::Above => WindowGridDirection::Below,
-        WindowGridDirection::Below => WindowGridDirection::Above,
-    }
 }
 
 fn place_grid_neighbour(
@@ -944,6 +935,34 @@ mod window_grid_bounds_tests {
         WindowGridLink { from, to, direction }
     }
 
+    fn frame_with_native_insets(
+        logical_width: f32,
+        logical_height: f32,
+        scale_factor: f32,
+        visible_left_inset: f32,
+        visible_right_inset: f32,
+        client_left_inset: f32,
+        client_top_inset: f32,
+        client_right_inset: f32,
+        client_bottom_inset: f32,
+    ) -> NativeFrameGeometry {
+        let client_width = logical_width * scale_factor;
+        let client_height = logical_height * scale_factor;
+        NativeFrameGeometry {
+            outer_width: client_left_inset + client_width + client_right_inset,
+            outer_height: client_top_inset + client_height + client_bottom_inset,
+            visible_left_inset,
+            visible_right_inset,
+            client_left_inset,
+            client_top_inset,
+            client_right_inset,
+            client_bottom_inset,
+            client_width,
+            client_height,
+            scale_factor,
+        }
+    }
+
     #[test]
     fn native_frame_measurements_capture_client_insets_and_monitor_scale() {
         use platform::{PhysicalPoint, PhysicalRect, PhysicalSize};
@@ -1022,6 +1041,141 @@ mod window_grid_bounds_tests {
         assert_eq!(planned.client_top_inset, 30.0);
         assert_eq!(planned.client_right_inset, 8.0);
         assert_eq!(planned.client_bottom_inset, 10.0);
+    }
+
+    #[test]
+    fn all_join_directions_respect_fractional_dpi_and_native_frame_insets() {
+        let [anchor, moving] = groups(2).try_into().expect("two group ids");
+        let anchor_bounds = bounds(anchor, 100.0, 200.0, 200.0, 120.0);
+        let moving_bounds = bounds(moving, 900.0, 1000.0, 160.0, 100.0);
+        let anchor_frame = frame_with_native_insets(
+            200.0, 120.0, 1.25, 2.0, 3.0, 8.0, 10.0, 7.0, 6.0,
+        );
+        let moving_frame = frame_with_native_insets(
+            160.0, 100.0, 1.5, 4.0, 5.0, 13.0, 17.0, 8.0, 9.0,
+        );
+
+        for direction in [
+            WindowGridDirection::Left,
+            WindowGridDirection::Right,
+            WindowGridDirection::Above,
+            WindowGridDirection::Below,
+        ] {
+            let input = vec![anchor_bounds, moving_bounds];
+            let arranged = arrange_window_grid_bounds(
+                input,
+                &[anchor_frame, moving_frame],
+                &[link(anchor, moving, direction)],
+                anchor,
+                32.0,
+            )
+            .expect("fractional-DPI native frames should produce a valid join");
+
+            assert_eq!(arranged[0], anchor_bounds, "{direction:?} moved its anchor");
+            assert_eq!(arranged[1].1.size, moving_bounds.1.size);
+
+            let expected_x = match direction {
+                WindowGridDirection::Left => {
+                    anchor_bounds.1.origin.x
+                        + anchor_frame.visible_left_inset
+                        - moving_frame.outer_width
+                        + moving_frame.visible_right_inset
+                }
+                WindowGridDirection::Right => {
+                    anchor_bounds.1.origin.x
+                        + anchor_frame.outer_width
+                        - anchor_frame.visible_right_inset
+                        - moving_frame.visible_left_inset
+                }
+                WindowGridDirection::Above | WindowGridDirection::Below => {
+                    anchor_bounds.1.origin.x
+                        + anchor_frame.client_left_inset
+                        - moving_frame.client_left_inset
+                }
+            };
+            let expected_y = match direction {
+                WindowGridDirection::Left | WindowGridDirection::Right => {
+                    anchor_bounds.1.origin.y
+                }
+                WindowGridDirection::Below => {
+                    anchor_bounds.1.origin.y
+                        + anchor_frame.client_top_inset
+                        + anchor_frame.client_height
+                        - 32.0 * moving_frame.scale_factor
+                        - moving_frame.client_top_inset
+                }
+                WindowGridDirection::Above => {
+                    anchor_bounds.1.origin.y
+                        + anchor_frame.client_top_inset
+                        + 32.0 * anchor_frame.scale_factor
+                        - moving_frame.client_top_inset
+                        - moving_frame.client_height
+                }
+            };
+            assert_eq!(
+                arranged[1].1.origin,
+                Point::new(expected_x, expected_y),
+                "{direction:?} used the wrong physical edge or monitor scale",
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_grid_geometry_is_rejected_without_partial_results() {
+        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let original = vec![
+            bounds(a, 10.0, 20.0, 100.0, 80.0),
+            bounds(b, 300.0, 20.0, 100.0, 80.0),
+            bounds(c, 600.0, 20.0, 100.0, 80.0),
+        ];
+        let frames = [
+            frame(100.0, 80.0, 1.0),
+            frame(100.0, 80.0, 1.0),
+            frame(100.0, 80.0, 1.0),
+        ];
+
+        assert!(
+            arrange_window_grid_bounds(
+                vec![original[0], original[0]],
+                &[frames[0], frames[0]],
+                &[],
+                a,
+                32.0,
+            )
+            .is_none(),
+            "duplicate FloatingGroup IDs must be rejected",
+        );
+        assert!(
+            arrange_window_grid_bounds(
+                original.clone(),
+                &frames,
+                &[link(a, b, WindowGridDirection::Right)],
+                a,
+                32.0,
+            )
+            .is_none(),
+            "disconnected components must not be laid out as one grid",
+        );
+        assert!(
+            arrange_window_grid_bounds(
+                original.clone(),
+                &frames,
+                &[
+                    link(a, b, WindowGridDirection::Right),
+                    link(b, c, WindowGridDirection::Right),
+                    link(a, c, WindowGridDirection::Below),
+                ],
+                a,
+                32.0,
+            )
+            .is_none(),
+            "extra cyclic edges must be rejected",
+        );
+        assert_eq!(original, vec![
+            bounds(a, 10.0, 20.0, 100.0, 80.0),
+            bounds(b, 300.0, 20.0, 100.0, 80.0),
+            bounds(c, 600.0, 20.0, 100.0, 80.0),
+        ]);
     }
 
     #[test]
