@@ -353,7 +353,23 @@ Core Layout остаётся владельцем структуры Composition
 
 ### Этап 4. Переработать геометрию WindowGrid
 
+<Статус: частично реализован 16 ноября 2026 г.; продолжается миграция графа WindowGrid на реальные Header/Group members.>
+
 Файлы: window_chain.rs, window_chain_geometry.rs, floating_manager.rs и unit-тесты геометрии.
+
+Уже реализовано:
+
+- Вертикальная геометрия больше не вычитает высоту старой CompositionHeader. Соседние окна стыкуются по client top/bottom с учётом отдельных native insets и DPI каждого HWND.
+- Для Floating Header/Group введён общий расчёт native outer bounds из Core client rect. Он учитывает физический origin исходного Floating окна, локальный логический origin элемента, client insets и DPI целевого HWND.
+- reconcile_part_windows переиспользует полученные bounds и пересчитывает их при смене DPI или native-bounds invalidation.
+- Core ColumnRect и GroupRect продолжают задавать верхний ряд Header, порядок Group и их общую ширину внутри колонки.
+- Добавлена синхронизация Z-order всех видимых Header/Group окон в порядке Core FloatingGroup.
+
+Осталось:
+
+- Перевести сами связи WindowGrid с временных FloatingComposition на реальные Header/Group HWND и сохранить внешние связи между колонками/композициями.
+- Перестраивать связи верхнего ряда при добавлении и удалении Column, а вертикальные связи — при изменении состава Group.
+- Проверить и согласовать перемещение/изменение размеров окон колонки так, чтобы ширина Header и Group оставалась одинаковой, Header не двигался при вертикальной перестановке Group.
 
 1. В верхнем горизонтальном ряду располагать Header windows колонок.
 2. Под каждым Header располагать принадлежащие ему Group windows в порядке Core Layout.
