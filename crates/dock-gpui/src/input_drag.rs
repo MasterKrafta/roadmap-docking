@@ -192,8 +192,9 @@ pub(crate) fn begin_panel_drag_host(
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
-        // Main-origin tabs retain delayed LayoutChanged publication so their
-        // DragHost can be adopted before FloatingWindowManager reconciles.
+        // Main-origin tabs retain delayed LayoutChanged publication so
+        // FloatingWindowManager can create the permanent Group host before the
+        // temporary DragHost releases the active PanelView.
         let promote_on_float = matches!(
             (source_host, handle),
             (DragSourceHost::Main, DragHandle::PanelTab)
@@ -323,8 +324,8 @@ pub(crate) fn begin_group_drag_host(
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
         // Preserve Main-origin event ordering: publish LayoutChanged only
-        // after its DragHost has been adopted. Floating-origin content can also
-        // adopt the temporary HWND; DragHostManager handles host re-registration.
+        // after Core has created the detached Floating state. The permanent
+        // Header/Group windows are reconciled before the temporary DragHost handoff.
         let promote_on_float = matches!(source_host, DragSourceHost::Main);
         let group_rect = match source_host {
             DragSourceHost::Main => controller
