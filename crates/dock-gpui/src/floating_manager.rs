@@ -3445,6 +3445,303 @@ impl FloatingWindowManager {
         self.request_native_redraw(host_panel);
     }
 
+    fn create_part_window(
+        &mut self,
+        spec: FloatingPartWindowSnapshot,
+        cx: &mut Context<Self>,
+    ) -> Option<PanelWindowEntry> {
+        let controller = self.controller.clone();
+        let theme = self.theme;
+        let manager = cx.entity().downgrade();
+        let logical_origin = self.gpui_origin_for_bounds(spec.bounds);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                point(px(logical_origin.x), px(logical_origin.y)),
+                size(px(spec.bounds.size.width), px(spec.bounds.size.height)),
+            ))),
+            titlebar: None,
+            focus: false,
+            show: false,
+            kind: WindowKind::Floating,
+            // Header/Group windows are positioned by FloatingWindowManager.
+            // Their custom drag and resize behavior is connected in later stages.
+            is_movable: false,
+            app_owns_titlebar_drag: false,
+            is_resizable: false,
+            is_minimizable: false,
+            ..Default::default()
+        };
+
+        let window = match cx.open_window(options, move |_, app| {
+            let host = match spec.kind {
+                FloatingPartKind::Header { column } => FloatingPartHost::new_header(
+                    controller,
+                    spec.floating_group,
+                    column,
+                    theme,
+                    manager,
+                ),
+                FloatingPartKind::Group { column, group } => FloatingPartHost::new_group(
+                    controller,
+                    spec.floating_group,
+                    column,
+                    group,
+                    theme,
+                    manager,
+                ),
+            };
+            app.new(|_| host)
+        }) {
+            Ok(window) => window,
+            Err(error) => {
+                tracing::error!(
+                    ?spec.member,
+                    %error,
+                    "GPUI could not create a Floating Header/Group window"
+                );
+                return None;
+            }
+        };
+
+        let window_id = match window.update(cx, |_, window, _| {
+            window.window_handle().window_id()
+        }) {
+            Ok(window_id) => window_id,
+            Err(error) => {
+                tracing::error!(
+                    ?spec.member,
+                    %error,
+                    "could not inspect the new Floating part window identifier"
+                );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
+            }
+        };
+
+        let native_ops = self.native_ops;
+        let native_window = match window.update(cx, move |_, window, _| {
+            native_ops.hwnd_of(window)
+        }) {
+            Ok(Ok(native_window)) => Some(native_window),
+            Ok(Err(error)) => {
+                tracing::error!(
+                    ?spec.member,
+                    %error,
+                    "Floating part window has no native handle"
+                );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
+            }
+            Err(error) => {
+                tracing::error!(
+                    ?spec.member,
+                    %error,
+                    "could not inspect a newly created Floating part window"
+                );
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+                return None;
+            }
+        };
+
+        let Some(native_window) = native_window else {
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+            return None;
+        };
+        let Some(owner) = self.main_native_window else {
+            tracing::error!(
+                ?spec.member,
+                "could not create a Floating part window without the main native owner"
+            );
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+            return None;
+        };
+        if let Err(error) = self.native_ops.set_owner(native_window, owner) {
+            tracing::error!(
+                ?spec.member,
+                %error,
+                "could not assign the main window as Floating part owner"
+            );
+            let _ = window.update(cx, |_, window, _| window.remove_window());
+            return None;
+        }
+        if !hide_from_taskbar(native_window) {
+            tracing::warn!(
+                ?spec.member,
+                "could not hide a Floating part window from the taskbar"
+            );
+        }
+
+        self.sync_part_window_bounds(native_window, spec.bounds);
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0);
+
+        Some(PanelWindowEntry {
+            window: PanelWindowHandle::Part(window),
+            window_id,
+            native_window: Some(native_window),
+            bounds: spec.bounds,
+            native_min_size: None,
+            native_horizontal_resize_min_widths: None,
+            native_left_resize_enabled: None,
+            native_top_resize_enabled: None,
+            native_scale_factor: scale,
+            native_bounds_dirty: false,
+            resize_enabled: false,
+            host_group: Some(spec.floating_group),
+            visibility: PanelWindowVisibility::Hidden,
+        })
+    }
+
+    fn sync_part_window_bounds(&self, native_window: NativeWindowId, bounds: Rect) {
+        let Some(position) = self.physical_origin_for_bounds(bounds) else {
+            return;
+        };
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some(size) = DockGeometry::physical_size_from_logical(bounds.size, scale) else {
+            return;
+        };
+        if let Err(error) = self.native_ops.set_window_bounds(native_window, position, size) {
+            tracing::debug!(
+                ?native_window,
+                %error,
+                "could not synchronize Floating part native bounds"
+            );
+        }
+    }
+
+    fn release_member_window(
+        &mut self,
+        member: WindowGridMember,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut entry) = self.registry.members.remove(&member) else {
+            return;
+        };
+
+        if let Some(native_window) = entry.native_window {
+            if entry.native_horizontal_resize_min_widths.is_some() {
+                let _ = self.native_ops.set_horizontal_resize_min_widths(native_window, None);
+                entry.native_horizontal_resize_min_widths = None;
+            }
+            if entry.resize_enabled {
+                let _ = self.native_ops.disable_resize(native_window);
+                entry.resize_enabled = false;
+            }
+            if entry.native_min_size.is_some() {
+                let _ = self.native_ops.set_min_size(native_window, None);
+                entry.native_min_size = None;
+            }
+            let _ = self.native_ops.hide(native_window);
+        }
+
+        entry.window.remove_window(cx);
+    }
+
+    fn reconcile_part_windows(
+        &mut self,
+        transferred_panels: &[PanelId],
+        cx: &mut Context<Self>,
+    ) {
+        let scale = self
+            .main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let transferred_panels = transferred_panels.iter().copied().collect::<HashSet<_>>();
+        let desired = self.controller.update(cx, |controller, _| {
+            collect_floating_part_windows(
+                controller.layout(),
+                &controller.metrics(),
+                scale,
+                &transferred_panels,
+            )
+        });
+        let desired_members = desired
+            .iter()
+            .map(|spec| spec.member)
+            .collect::<HashSet<_>>();
+        let stale_members = self
+            .registry
+            .members
+            .keys()
+            .filter(|member| !desired_members.contains(member))
+            .copied()
+            .collect::<Vec<_>>();
+        for member in stale_members {
+            self.release_member_window(member, cx);
+        }
+
+        let mut members_by_group = HashMap::<FloatingGroupId, Vec<WindowGridMember>>::new();
+        for spec in &desired {
+            members_by_group
+                .entry(spec.floating_group)
+                .or_default()
+                .push(spec.member);
+        }
+        self.part_members_by_group = members_by_group;
+
+        for spec in desired {
+            if !self.registry.members.contains_key(&spec.member) {
+                if let Some(entry) = self.create_part_window(spec, cx) {
+                    self.registry.members.insert(spec.member, entry);
+                } else {
+                    continue;
+                }
+            }
+
+            let Some(entry) = self.registry.members.get_mut(&spec.member) else {
+                continue;
+            };
+            if entry.bounds != spec.bounds || entry.native_bounds_dirty {
+                if let Some(native_window) = entry.native_window {
+                    self.sync_part_window_bounds(native_window, spec.bounds);
+                    entry.native_scale_factor = self
+                        .native_ops
+                        .scale_factor(native_window)
+                        .ok()
+                        .filter(|scale| scale.is_finite() && *scale > 0.0);
+                }
+                entry.bounds = spec.bounds;
+                entry.native_bounds_dirty = false;
+            }
+
+            let should_be_visible = !spec.contains_transferred_panels;
+            if should_be_visible && entry.visibility == PanelWindowVisibility::Hidden {
+                let Some(native_window) = entry.native_window else {
+                    continue;
+                };
+                match self.native_ops.show_no_activate(native_window) {
+                    Ok(()) => entry.visibility = PanelWindowVisibility::Visible,
+                    Err(error) => tracing::warn!(
+                        ?spec.member,
+                        %error,
+                        "could not show a Floating part window"
+                    ),
+                }
+            } else if !should_be_visible && entry.visibility == PanelWindowVisibility::Visible {
+                if let Some(native_window) = entry.native_window {
+                    if let Err(error) = self.native_ops.hide(native_window) {
+                        tracing::warn!(
+                            ?spec.member,
+                            %error,
+                            "could not hide a Floating part while its PanelViews are transported"
+                        );
+                    } else {
+                        entry.visibility = PanelWindowVisibility::Hidden;
+                    }
+                }
+            }
+        }
+    }
+
     fn initial_panel_window_bounds(
         &self,
         panel: PanelId,
