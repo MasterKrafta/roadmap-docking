@@ -741,11 +741,20 @@ impl FloatingZoneContext<'_> {
         {
             return Ok(());
         }
+        // The visual affordance may span the whole Floating frame, while the
+        // command target remains the ordinary Group edge for Panel/Group drags.
+        // Whole-composition drags keep FloatingTop/FloatingBottom so the host
+        // adapter can join the corresponding native window chain.
+        let target_edge = if matches!(self.source, DropSource::Composition { .. }) {
+            kind
+        } else {
+            edge
+        };
         push_zone(
             self.zones,
             DropTarget::GroupEdge {
                 group: target_group,
-                zone: kind,
+                zone: target_edge,
             },
             kind,
             rect,

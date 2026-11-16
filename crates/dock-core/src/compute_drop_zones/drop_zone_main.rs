@@ -87,9 +87,26 @@ impl Layout {
                 if group_edge_is_noop(self, tree_index, source, group_rect.group, edge) {
                     continue;
                 }
+                // A multi-Group Floating Column uses FloatingTop when inserted
+                // above the first Main Group. This preserves the composition
+                // insertion semantics; single-Group drags keep the ordinary Top.
+                let is_floating_composition_top = edge == DropZone::Top
+                    && matches!(source, DropSource::Composition { .. })
+                    && source_is_floating_root(self, source_root)
+                    && !self.is_simple_composition_root(source_root)
+                    && owner_column(self, tree_index, group_rect.group)
+                        .and_then(|column| self.node(column))
+                        .is_some_and(|node| {
+                            matches!(node, Node::Column(column)
+                                if column.groups.first() == Some(&group_rect.group))
+                        });
                 let target = DropTarget::GroupEdge {
                     group: group_rect.group,
-                    zone: edge,
+                    zone: if is_floating_composition_top {
+                        DropZone::FloatingTop
+                    } else {
+                        edge
+                    },
                 };
                 push_zone(zones, target, kind, zone_rect)?;
             }
