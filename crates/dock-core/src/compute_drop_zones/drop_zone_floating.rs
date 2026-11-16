@@ -554,14 +554,14 @@ impl FloatingZoneContext<'_> {
         // target window's outer bounds. This is the same for Main- and
         // Floating-origin drags; only internal Group boundaries remain Core drops.
         if horizontal_composition {
-            self.append_horizontal_edge_zones(floating_rect, target_groups, true)?;
+            self.append_horizontal_edge_zones(floating_rect, target_groups)?;
         } else {
             let top_rect = if let Some(first_group) = target_groups.first() {
                 floating_top_edge_rect(floating_rect.rect, first_group.rect, self.metrics)?
             } else {
                 None
             };
-            self.append_vertical_edge_zones(top_rect, bottom_rect, target_groups, true)?;
+            self.append_vertical_edge_zones(top_rect, bottom_rect, target_groups)?;
         }
         Ok(())
     }
@@ -570,7 +570,6 @@ impl FloatingZoneContext<'_> {
         &mut self,
         floating_rect: FloatingGroupRect,
         target_groups: &[GroupRect],
-        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         // In a horizontal composition, top/bottom edge zones span each column
         // independently, so a drop over one branch targets that branch.
@@ -585,7 +584,7 @@ impl FloatingZoneContext<'_> {
             }
         }
         for column in columns {
-            self.append_column_edge_zones(floating_rect, column, target_groups, include_bottom)?;
+            self.append_column_edge_zones(floating_rect, column, target_groups)?;
         }
 
         // Generic-profile horizontal splits may contain Tabs nodes directly,
@@ -594,11 +593,7 @@ impl FloatingZoneContext<'_> {
             .iter()
             .filter(|group| owner_column(self.layout, self.tree_index, group.group).is_none())
         {
-            self.append_direct_branch_edge_zones(
-                floating_rect.rect,
-                *target_group,
-                include_bottom,
-            )?;
+            self.append_direct_branch_edge_zones(floating_rect.rect, *target_group)?;
         }
         Ok(())
     }
@@ -608,7 +603,6 @@ impl FloatingZoneContext<'_> {
         floating_rect: FloatingGroupRect,
         column: NodeId,
         target_groups: &[GroupRect],
-        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         let mut column_groups: Vec<GroupRect> = target_groups
             .iter()
@@ -656,14 +650,12 @@ impl FloatingZoneContext<'_> {
             DropZone::Bottom,
             self.metrics,
         )?;
-        if include_bottom {
-            self.push_floating_edge_zone(
-                last_group.group,
-                DropZone::Bottom,
-                DropZone::FloatingBottom,
-                column_bottom_rect,
-            )?;
-        }
+        self.push_floating_edge_zone(
+            last_group.group,
+            DropZone::Bottom,
+            DropZone::FloatingBottom,
+            column_bottom_rect,
+        )?;
         Ok(())
     }
 
@@ -671,7 +663,6 @@ impl FloatingZoneContext<'_> {
         &mut self,
         floating_bounds: Rect,
         target_group: GroupRect,
-        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         if let Some(top_branch_rect) = floating_top_edge_rect_for_branch(
             floating_bounds,
@@ -692,14 +683,12 @@ impl FloatingZoneContext<'_> {
             DropZone::Bottom,
             self.metrics,
         )?;
-        if include_bottom {
-            self.push_floating_edge_zone(
-                target_group.group,
-                DropZone::Bottom,
-                DropZone::FloatingBottom,
-                bottom_branch_rect,
-            )?;
-        }
+        self.push_floating_edge_zone(
+            target_group.group,
+            DropZone::Bottom,
+            DropZone::FloatingBottom,
+            bottom_branch_rect,
+        )?;
         Ok(())
     }
 
@@ -708,7 +697,6 @@ impl FloatingZoneContext<'_> {
         top_rect: Option<Rect>,
         bottom_rect: Rect,
         target_groups: &[GroupRect],
-        include_bottom: bool,
     ) -> Result<(), ComputeRectsError> {
         // A vertically stacked floating root has one outer top and bottom,
         // targeting its first and last groups respectively.
@@ -726,14 +714,12 @@ impl FloatingZoneContext<'_> {
                 top_rect,
             )?;
         }
-        if include_bottom {
-            self.push_floating_edge_zone(
-                last_group.group,
-                DropZone::Bottom,
-                DropZone::FloatingBottom,
-                bottom_rect,
-            )?;
-        }
+        self.push_floating_edge_zone(
+            last_group.group,
+            DropZone::Bottom,
+            DropZone::FloatingBottom,
+            bottom_rect,
+        )?;
         Ok(())
     }
 
