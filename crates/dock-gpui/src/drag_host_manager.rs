@@ -222,6 +222,7 @@ impl DragHostManager {
             None,
             false,
             false,
+            false,
             cx,
         )
     }
@@ -251,6 +252,7 @@ impl DragHostManager {
             None,
             false,
             false,
+            false,
             cx,
         )
     }
@@ -278,6 +280,7 @@ impl DragHostManager {
             None,
             None,
             promote_on_float,
+            true,
             true,
             cx,
         )
@@ -312,6 +315,7 @@ impl DragHostManager {
             Some(group),
             None,
             promote_on_float,
+            true,
             false,
             cx,
         )
@@ -343,6 +347,7 @@ impl DragHostManager {
             Some(side),
             true,
             false,
+            false,
             cx,
         )
     }
@@ -355,6 +360,7 @@ impl DragHostManager {
         group: Option<NodeId>,
         dock_area: Option<DockSide>,
         promote_on_float: bool,
+        remove_window_frame: bool,
         render_detached_tab: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
@@ -458,7 +464,7 @@ impl DragHostManager {
         if !platform::hide_from_taskbar(native_window) {
             tracing::warn!("could not hide the new DragHost from the taskbar");
         }
-        let frame_state = if reserve_composition_header {
+        let frame_state = if remove_window_frame {
             match self.native_ops.remove_window_frame(native_window) {
                 Ok(state) => {
                     if let Err(error) = window.update(cx, |_, window, app| {
@@ -494,7 +500,7 @@ impl DragHostManager {
             }
         };
         let Some(destination_grab_offset) =
-            DockGeometry::physical_offset_from_logical(drag_grab_offset, destination_scale)
+            DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
         else {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::InvalidGrabOffset);
@@ -524,7 +530,7 @@ impl DragHostManager {
         if (final_scale - destination_scale).abs() > 0.001 {
             destination_scale = final_scale;
             let Some(final_grab_offset) =
-                DockGeometry::physical_offset_from_logical(drag_grab_offset, destination_scale)
+                DockGeometry::physical_offset_from_logical(grab_offset, destination_scale)
             else {
                 self.discard_unregistered_window(&window, native_window, cx);
                 return Err(DragHostError::InvalidGrabOffset);
@@ -540,7 +546,7 @@ impl DragHostManager {
         }
 
         let Some(physical_size) =
-            DockGeometry::physical_size_from_logical(drag_logical_size, destination_scale)
+            DockGeometry::physical_size_from_logical(logical_size, destination_scale)
         else {
             self.discard_unregistered_window(&window, native_window, cx);
             return Err(DragHostError::InvalidLogicalSize);
@@ -596,7 +602,7 @@ impl DragHostManager {
             window_id,
             native_window,
             panels: panels.clone(),
-            grab_offset: drag_grab_offset,
+            grab_offset,
             frame_state,
             visible,
             drop_target: None,
