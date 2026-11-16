@@ -6,10 +6,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use dock_core::{FloatingGroupId, Point, Rect, Size};
+use dock_core::{Point, Rect, Size};
 use platform::{PhysicalPoint, PhysicalRect, PhysicalSize};
 
-use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridRegistry};
+use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
 
 /// Native frame and client measurements, all in physical desktop pixels.
 ///
@@ -187,10 +187,10 @@ impl NativeFrameGeometry {
 /// DWM-visible edges. Each member retains its own Core size.
 #[cfg(test)]
 pub(crate) fn arrange_contiguous_window_chain_bounds(
-    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    mut bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
-    anchor: FloatingGroupId,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    anchor: WindowGridMember,
+) -> Option<Vec<(WindowGridMember, Rect)>> {
     if bounds.len() != frames.len() || frames.iter().any(|frame| !frame.is_valid()) {
         return None;
     }
@@ -228,12 +228,12 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
 /// covers the lower header. Repeated links on one side are laid out as a
 /// deterministic outward lane in member order.
 pub(crate) fn arrange_window_grid_bounds(
-    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    mut bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
     links: &[WindowGridLink],
-    anchor: FloatingGroupId,
+    anchor: WindowGridMember,
     header_height: f32,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
+) -> Option<Vec<(WindowGridMember, Rect)>> {
     if bounds.len() != frames.len()
         || bounds.is_empty()
         || frames.iter().any(|frame| !frame.is_valid())
@@ -446,11 +446,11 @@ fn client_rects_overlap(
 /// This is used for a vertical Drop: the target window remains the width
 /// reference and is never resized to accommodate the moving window.
 pub(crate) fn match_moving_window_width_to_target(
-    mut bounds: Vec<(FloatingGroupId, Rect)>,
-    target: FloatingGroupId,
-    moving: FloatingGroupId,
+    mut bounds: Vec<(WindowGridMember, Rect)>,
+    target: WindowGridMember,
+    moving: WindowGridMember,
     moving_minimum_width: f32,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
+) -> Option<Vec<(WindowGridMember, Rect)>> {
     let target_index = bounds.iter().position(|(group, _)| *group == target)?;
     let moving_index = bounds.iter().position(|(group, _)| *group == moving)?;
     let target_width = bounds[target_index].1.size.width;
@@ -498,7 +498,7 @@ pub(crate) fn native_resize_bottom_edge_delta(
 
 fn direction_from_member(
     link: WindowGridLink,
-    member: FloatingGroupId,
+    member: WindowGridMember,
 ) -> Option<WindowGridDirection> {
     if link.from == member {
         Some(link.direction)
@@ -510,11 +510,11 @@ fn direction_from_member(
 }
 
 fn collect_window_grid_region(
-    seeds: &[FloatingGroupId],
-    resized_group: FloatingGroupId,
-    adjacency: &HashMap<FloatingGroupId, Vec<FloatingGroupId>>,
-    mut belongs_to_region: impl FnMut(FloatingGroupId) -> bool,
-) -> HashSet<FloatingGroupId> {
+    seeds: &[WindowGridMember],
+    resized_group: WindowGridMember,
+    adjacency: &HashMap<WindowGridMember, Vec<WindowGridMember>>,
+    mut belongs_to_region: impl FnMut(WindowGridMember) -> bool,
+) -> HashSet<WindowGridMember> {
     let mut visited = HashSet::new();
     let mut pending = VecDeque::new();
 
@@ -549,13 +549,13 @@ fn collect_window_grid_region(
 /// Each south branch is anchored to that branch's first lower client top, so a
 /// resize of an upper-left window does not move an unrelated lower-right branch.
 pub(crate) fn shift_window_grid_after_resize(
-    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    mut bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
     links: &[WindowGridLink],
-    resized_group: FloatingGroupId,
+    resized_group: WindowGridMember,
     right_edge_delta: f32,
     bottom_edge_delta: f32,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
+) -> Option<Vec<(WindowGridMember, Rect)>> {
     if !right_edge_delta.is_finite()
         || !bottom_edge_delta.is_finite()
         || bounds.len() != frames.len()
@@ -582,7 +582,7 @@ pub(crate) fn shift_window_grid_after_resize(
     }
     let resized_index = *indices.get(&resized_group)?;
 
-    let mut adjacency = HashMap::<FloatingGroupId, Vec<FloatingGroupId>>::new();
+    let mut adjacency = HashMap::<WindowGridMember, Vec<WindowGridMember>>::new();
     let mut right_seeds = Vec::new();
     let mut below_seeds = Vec::new();
     for link in links {
@@ -670,15 +670,15 @@ pub(crate) fn shift_window_grid_after_resize(
 /// edge remains reachable. An upper window stays in front of the lower window
 /// so its HWND physically covers the lower CompositionHeader.
 pub(crate) fn floating_grid_members_in_native_front_to_back(
-    members: &[FloatingGroupId],
+    members: &[WindowGridMember],
     links: &[WindowGridLink],
-) -> Option<Vec<FloatingGroupId>> {
+) -> Option<Vec<WindowGridMember>> {
     let member_set = members.iter().copied().collect::<HashSet<_>>();
     if member_set.len() != members.len() {
         return None;
     }
 
-    let mut outgoing = HashMap::<FloatingGroupId, Vec<FloatingGroupId>>::new();
+    let mut outgoing = HashMap::<WindowGridMember, Vec<WindowGridMember>>::new();
     let mut indegree = members
         .iter()
         .copied()
@@ -725,10 +725,10 @@ pub(crate) fn floating_grid_members_in_native_front_to_back(
 
 /// Produces a deterministic back-to-front order while keeping each connected
 /// component adjacent in the native Z stack.
-pub(crate) fn floating_groups_in_native_z_order(
-    groups: &[(FloatingGroupId, i32)],
+pub(crate) fn window_grid_members_in_native_z_order(
+    groups: &[(WindowGridMember, i32)],
     grids: &WindowGridRegistry,
-) -> Vec<FloatingGroupId> {
+) -> Vec<WindowGridMember> {
     let mut emitted = HashSet::new();
     let mut blocks = Vec::new();
 
@@ -782,9 +782,13 @@ mod contiguous_window_chain_bounds_tests {
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::{Key, SlotMap};
 
-    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [WindowGridMember; 3]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let groups = [ids.insert(()), ids.insert(()), ids.insert(())];
+        let groups = [
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+        ];
         (ids, groups)
     }
 
@@ -856,7 +860,7 @@ mod contiguous_window_chain_bounds_tests {
         assert_eq!(arranged[2].1.origin, Point::new(280.0, 8.0));
 
         assert!(
-            arrange_contiguous_window_chain_bounds(input, &frames, FloatingGroupId::null())
+            arrange_contiguous_window_chain_bounds(input, &frames, WindowGridMember::FloatingComposition(FloatingGroupId::null()))
                 .is_none()
         );
     }
@@ -920,22 +924,24 @@ mod window_grid_bounds_tests {
         NativeFrameGeometry, arrange_window_grid_bounds,
         match_moving_window_width_to_target,
     };
-    use crate::window_chain::{WindowGridDirection, WindowGridLink};
+    use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::SlotMap;
 
-    fn groups(count: usize) -> Vec<FloatingGroupId> {
+    fn groups(count: usize) -> Vec<WindowGridMember> {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        (0..count).map(|_| ids.insert(())).collect()
+        (0..count)
+            .map(|_| WindowGridMember::FloatingComposition(ids.insert(())))
+            .collect()
     }
 
     fn bounds(
-        id: FloatingGroupId,
+        id: WindowGridMember,
         x: f32,
         y: f32,
         width: f32,
         height: f32,
-    ) -> (FloatingGroupId, Rect) {
+    ) -> (WindowGridMember, Rect) {
         (id, Rect::new(Point::new(x, y), Size::new(width, height)))
     }
 
@@ -947,7 +953,7 @@ mod window_grid_bounds_tests {
         .unwrap()
     }
 
-    fn link(from: FloatingGroupId, to: FloatingGroupId, direction: WindowGridDirection) -> WindowGridLink {
+    fn link(from: WindowGridMember, to: WindowGridMember, direction: WindowGridDirection) -> WindowGridLink {
         WindowGridLink { from, to, direction }
     }
 
@@ -1493,13 +1499,15 @@ mod native_resize_grid_geometry_tests {
         NativeFrameGeometry, native_resize_bottom_edge_delta, native_resize_right_edge_delta,
         shift_window_grid_after_resize,
     };
-    use crate::window_chain::{WindowGridDirection, WindowGridLink};
+    use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::SlotMap;
 
-    fn groups(count: usize) -> (SlotMap<FloatingGroupId, ()>, Vec<FloatingGroupId>) {
+    fn groups(count: usize) -> (SlotMap<FloatingGroupId, ()>, Vec<WindowGridMember>) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let groups = (0..count).map(|_| ids.insert(())).collect();
+        let groups = (0..count)
+            .map(|_| WindowGridMember::FloatingComposition(ids.insert(())))
+            .collect();
         (ids, groups)
     }
 
@@ -1538,8 +1546,8 @@ mod native_resize_grid_geometry_tests {
     }
 
     fn link(
-        from: FloatingGroupId,
-        to: FloatingGroupId,
+        from: WindowGridMember,
+        to: WindowGridMember,
         direction: WindowGridDirection,
     ) -> WindowGridLink {
         WindowGridLink { from, to, direction }
@@ -1772,16 +1780,16 @@ mod native_resize_grid_geometry_tests {
 mod native_z_order_tests {
     use super::{
         floating_grid_members_in_native_front_to_back,
-        floating_groups_in_native_z_order,
+        window_grid_members_in_native_z_order,
     };
-    use crate::window_chain::{WindowGridDirection, WindowGridRegistry};
+    use crate::window_chain::{WindowGridDirection, WindowGridMember, WindowGridRegistry};
     use dock_core::FloatingGroupId;
     use slotmap::SlotMap;
 
     #[test]
     fn each_join_direction_places_the_covering_or_edge_owner_in_front() {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let [a, b] = [ids.insert(()), ids.insert(())];
+        let [a, b] = [WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(()))];
         let cases = [
             (WindowGridDirection::Left, vec![b, a]),
             (WindowGridDirection::Right, vec![a, b]),
@@ -1800,7 +1808,7 @@ mod native_z_order_tests {
                 Some(expected_front_to_back.clone())
             );
             assert_eq!(
-                floating_groups_in_native_z_order(&[(a, 1), (b, 2)], &grids),
+                window_grid_members_in_native_z_order(&[(a, 1), (b, 2)], &grids),
                 expected_front_to_back.into_iter().rev().collect::<Vec<_>>()
             );
         }
@@ -1809,7 +1817,7 @@ mod native_z_order_tests {
     #[test]
     fn t_shaped_grid_obeys_all_vertical_and_horizontal_z_constraints() {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let [a, b, c, d] = [ids.insert(()), ids.insert(()), ids.insert(()), ids.insert(())];
+        let [a, b, c, d] = [WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(()))];
         let mut grids = WindowGridRegistry::default();
 
         assert!(grids.link_to_side(a, b, WindowGridDirection::Above));
@@ -1834,7 +1842,7 @@ mod native_z_order_tests {
             );
         }
         assert_eq!(
-            floating_groups_in_native_z_order(&[(a, 1), (b, 2), (c, 3), (d, 4)], &grids),
+            window_grid_members_in_native_z_order(&[(a, 1), (b, 2), (c, 3), (d, 4)], &grids),
             vec![d, c, a, b]
         );
     }
@@ -1843,11 +1851,11 @@ mod native_z_order_tests {
     fn grid_members_are_kept_adjacent_in_native_z_order() {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
         let [a, b, c, d, e] = [
-            ids.insert(()),
-            ids.insert(()),
-            ids.insert(()),
-            ids.insert(()),
-            ids.insert(()),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
         ];
         let groups = [(a, 1), (c, 4), (d, 5), (e, 7), (b, 8)];
         let mut grids = WindowGridRegistry::default();
@@ -1855,7 +1863,7 @@ mod native_z_order_tests {
         assert!(grids.link_after(c, d));
 
         assert_eq!(
-            floating_groups_in_native_z_order(&groups, &grids),
+            window_grid_members_in_native_z_order(&groups, &grids),
             vec![d, c, e, b, a],
             "grid members are raised back-to-front internally and ranked by their frontmost member"
         );
@@ -1864,11 +1872,11 @@ mod native_z_order_tests {
     #[test]
     fn an_unlinked_floating_group_remains_a_single_z_order_block() {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let [a, b, c, d] = [ids.insert(()), ids.insert(()), ids.insert(()), ids.insert(())];
+        let [a, b, c, d] = [WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(())), WindowGridMember::FloatingComposition(ids.insert(()))];
         let groups = [(a, 3), (b, 1), (c, 2), (d, 4)];
 
         assert_eq!(
-            floating_groups_in_native_z_order(&groups, &WindowGridRegistry::default()),
+            window_grid_members_in_native_z_order(&groups, &WindowGridRegistry::default()),
             vec![b, c, a, d]
         );
     }
@@ -1880,9 +1888,12 @@ mod moving_window_width_tests {
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::SlotMap;
 
-    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 2]) {
+    fn groups() -> (SlotMap<FloatingGroupId, ()>, [WindowGridMember; 2]) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let groups = [ids.insert(()), ids.insert(())];
+        let groups = [
+            WindowGridMember::FloatingComposition(ids.insert(())),
+            WindowGridMember::FloatingComposition(ids.insert(())),
+        ];
         (ids, groups)
     }
 
