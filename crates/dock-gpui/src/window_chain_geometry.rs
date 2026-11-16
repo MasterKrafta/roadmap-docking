@@ -108,6 +108,22 @@ impl NativeFrameGeometry {
         self.is_valid().then_some(self)
     }
 
+    /// Converts a desired physical client origin and logical client size into
+    /// the outer-window bounds required by this HWND's measured frame and DPI.
+    pub(crate) fn outer_bounds_for_client_rect(self, client_rect: Rect) -> Option<Rect> {
+        client_rect.validate_non_empty().ok()?;
+        let frame = self.with_logical_client_size(client_rect.size)?;
+        let outer = Rect::new(
+            Point::new(
+                client_rect.origin.x - frame.client_left_inset,
+                client_rect.origin.y - frame.client_top_inset,
+            ),
+            client_rect.size,
+        );
+        outer.validate_non_empty().ok()?;
+        Some(outer)
+    }
+
     /// Fallback for a not-yet-created HWND. Its future client is treated as a
     /// frame-less window; reconciliation replaces this estimate with native data.
     pub(crate) fn without_frame_size(
@@ -977,6 +993,28 @@ mod window_grid_bounds_tests {
             client_height,
             scale_factor,
         }
+    }
+
+    #[test]
+    fn outer_window_bounds_preserve_a_client_rect_at_fractional_dpi() {
+        let frame = frame_with_native_insets(
+            200.0, 120.0, 1.5, 6.0, 6.0, 8.0, 30.0, 8.0, 10.0,
+        );
+        let client = Rect::new(Point::new(1000.0, 600.0), Size::new(240.0, 180.0));
+
+        let outer = frame
+            .outer_bounds_for_client_rect(client)
+            .expect("valid client geometry and native insets");
+
+        assert_eq!(outer.origin, Point::new(992.0, 570.0));
+        assert_eq!(outer.size, client.size);
+        assert_eq!(
+            Point::new(
+                outer.origin.x + frame.client_left_inset,
+                outer.origin.y + frame.client_top_inset,
+            ),
+            client.origin,
+        );
     }
 
     #[test]
