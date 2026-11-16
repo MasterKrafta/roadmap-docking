@@ -455,12 +455,49 @@ impl DockController {
             .floating_group(group)
             .and_then(|floating| self.layout.dock_area(floating.area))
             .is_some_and(|area| area.root == column);
-        let command = if is_root_column {
-            DockCommand::ResizeFloatingBounds { group, bounds }
-        } else {
-            DockCommand::Float { node: column, bounds }
+        if is_root_column {
+            return self.finish_native_window_move_commands(
+                std::iter::once(DockCommand::ResizeFloatingBounds { group, bounds }),
+                cx,
+            );
+        }
+
+        // Float chooses a preferred height for newly-created compositions. A
+        // Header move must preserve the Column's current size, so restore its
+        // captured bounds inside the same active history transaction.
+        let before_panels = self.panel_keys();
+        let previous_version = self.layout.version();
+        let outcome = match self.history.apply(
+            &mut self.layout,
+            DockCommand::Float { node: column, bounds },
+            &self.metrics,
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return self.rollback_native_window_move_transaction(error, previous_version, cx);
+            }
         };
-        self.finish_native_window_move_commands(std::iter::once(command), cx)
+        let new_group = match outcome.actual_value {
+            Some(dock_core::CommandValue::FloatingGroup(group)) => group,
+            _ => {
+                let error = CommandError::InvalidTarget {
+                    reason: "detaching a Floating Column did not return its new FloatingGroup ID",
+                };
+                return self.rollback_native_window_move_transaction(error, previous_version, cx);
+            }
+        };
+        if let Err(error) = self.history.apply(
+            &mut self.layout,
+            DockCommand::ResizeFloatingBounds {
+                group: new_group,
+                bounds,
+            },
+            &self.metrics,
+        ) {
+            return self.rollback_native_window_move_transaction(error, previous_version, cx);
+        }
+
+        self.finish_native_window_move_transaction(before_panels, previous_version, cx)
     }
 
     /// Returns every Column in a moved Floating WindowChain to one Main DockArea.
@@ -567,23 +604,19 @@ impl DockController {
         let previous_version = self.layout.version();
         for command in commands {
             if let Err(error) = self.history.apply(&mut self.layout, command, &self.metrics) {
-                self.finish_failure(&error);
-                let cancel_result = self.history.cancel_transaction(&mut self.layout, &self.metrics);
-                self.native_window_move_transaction_active = false;
-                self.drag.cancel_gesture();
-                self.drag.clear_layout_version();
-                self.drag.cancel_host_session();
-                if cancel_result.is_ok() && self.layout.version() != previous_version {
-                    self.pending_events.push_back(DockEvent::LayoutChanged {
-                        version: self.layout.version(),
-                    });
-                }
-                self.flush_events(cx);
-                cx.notify();
-                return Err(error);
+                return self.rollback_native_window_move_transaction(error, previous_version, cx);
             }
         }
 
+        self.finish_native_window_move_transaction(before_panels, previous_version, cx)
+    }
+
+    fn finish_native_window_move_transaction(
+        &mut self,
+        before_panels: HashMap<PanelId, PanelKey>,
+        previous_version: u64,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
         self.finish_success(before_panels, previous_version, std::iter::empty());
         self.history.commit_transaction(&self.layout);
         self.native_window_move_transaction_active = false;
@@ -593,6 +626,28 @@ impl DockController {
         self.flush_events(cx);
         cx.notify();
         Ok(())
+    }
+
+    fn rollback_native_window_move_transaction(
+        &mut self,
+        error: CommandError,
+        previous_version: u64,
+        cx: &mut Context<Self>,
+    ) -> Result<(), CommandError> {
+        self.finish_failure(&error);
+        let cancel_result = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+        self.native_window_move_transaction_active = false;
+        self.drag.cancel_gesture();
+        self.drag.clear_layout_version();
+        self.drag.cancel_host_session();
+        if cancel_result.is_ok() && self.layout.version() != previous_version {
+            self.pending_events.push_back(DockEvent::LayoutChanged {
+                version: self.layout.version(),
+            });
+        }
+        self.flush_events(cx);
+        cx.notify();
+        Err(error)
     }
 
     /// Publishes a Core drop-resolution failure without applying a command.

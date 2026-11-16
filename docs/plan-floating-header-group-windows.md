@@ -386,7 +386,7 @@ Core Layout остаётся владельцем структуры Composition
 - DragSourceHost сохраняет точную идентичность Header/Group HWND. Координаты FreeArea и проверка окна под курсором используют именно исходный part-host.
 - Drop между окнами, принадлежащими одной Floating Composition, остаётся Core Drop. WindowGrid-side insertion применяется только к другой Floating Composition.
 - FloatingPartHost::Header использует тот же pointer pipeline; перетаскивание двигает только HWND своего Header и Group этой Column.
-- После прохождения drag threshold отпускание мыши отделяет вложенную Column существующей Core-командой Float в одной Undo-транзакции. Если Column уже является корнем Floating, обновляются только её bounds.
+- После прохождения drag threshold отпускание мыши отделяет вложенную Column существующей Core-командой Float в одной Undo-транзакции, затем восстанавливает её исходные width/height. Если Column уже является корнем Floating, обновляются только её bounds.
 - После отделения очищаются прежние связи WindowGrid выбранной Column; внутренние Header/Group связи перестраиваются по актуальному Core Layout. Связи, которые ранее соединяли разные Floating Composition, сохраняются.
 
 Осталось:
