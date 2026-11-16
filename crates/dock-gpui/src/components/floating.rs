@@ -2109,33 +2109,38 @@ impl FloatingPartHost {
             .filter_map(|(rect, view)| view.as_ref().map(|_| rect.panel))
             .collect::<HashSet<_>>();
         let window_id = window.window_handle().window_id();
-        let handoff_panels = self.manager.upgrade().and_then(|manager| {
-            manager.update(cx, |manager, manager_cx| {
+        // A new Group HWND may render synchronously while the manager is still
+        // reconciling it. Defer both the handoff lookup and its confirmation.
+        let manager = self.manager.clone();
+        let floating_group = self.floating_group;
+        window.on_next_frame(move |_, app| {
+            let Some(manager) = manager.upgrade() else {
+                return;
+            };
+            let Some(required_panels) = manager.update(app, |manager, manager_cx| {
                 manager.pending_drag_host_handoff_panels(
-                    self.floating_group,
+                    floating_group,
                     window_id,
                     manager_cx,
                 )
-            })
-        });
-        if let Some(required_panels) = handoff_panels.filter(|required| {
-            required.iter().all(|panel| rendered_panels.contains(panel))
-        }) {
-            let manager = self.manager.clone();
-            let floating_group = self.floating_group;
-            window.on_next_frame(move |_, app| {
-                if let Some(manager) = manager.upgrade() {
-                    let _ = manager.update(app, |manager, manager_cx| {
-                        manager.notify_drag_host_handoff_rendered(
-                            floating_group,
-                            window_id,
-                            &required_panels,
-                            manager_cx,
-                        );
-                    });
-                }
+            }) else {
+                return;
+            };
+            if !required_panels
+                .iter()
+                .all(|panel| rendered_panels.contains(panel))
+            {
+                return;
+            }
+            let _ = manager.update(app, |manager, manager_cx| {
+                manager.notify_drag_host_handoff_rendered(
+                    floating_group,
+                    window_id,
+                    &required_panels,
+                    manager_cx,
+                );
             });
-        }
+        });
 
         root = root
             .child(pointer_input)

@@ -24,8 +24,7 @@ use dock_core::{
 use crate::{
     components::{context_menu::GroupMenuToggle, MainDockView, PanelHost},
     dock_components::{
-        collect_group_presentations, CollapseColumnButton, DockCompositionView,
-        DockGroupView, GroupPresentation,
+        collect_group_presentations, DockGroupView, GroupPresentation,
     },
     floating_manager::{floating_window_chain_direction, DockingWindowAtPoint},
     geometry::DockGeometry,
@@ -45,6 +44,19 @@ fn source_layout_rects(
             Some(controller.floating_geometry(source_window_id, group).ok()?.clone())
         }
     }
+}
+
+fn group_bounds_to_floating_composition_bounds(group_bounds: Rect, header_height: f32) -> Rect {
+    Rect::new(
+        Point::new(
+            group_bounds.origin.x,
+            group_bounds.origin.y - header_height,
+        ),
+        Size::new(
+            group_bounds.size.width,
+            group_bounds.size.height + header_height,
+        ),
+    )
 }
 
 fn dock_area_drag_uses_free_area(target_window: Option<DockingWindowAtPoint>) -> bool {
@@ -300,7 +312,7 @@ impl DragHostManager {
             Some(group),
             None,
             promote_on_float,
-            true,
+            false,
             cx,
         )
     }
@@ -343,7 +355,7 @@ impl DragHostManager {
         group: Option<NodeId>,
         dock_area: Option<DockSide>,
         promote_on_float: bool,
-        reserve_composition_header: bool,
+        render_detached_tab: bool,
         cx: &mut Context<Self>,
     ) -> Result<DragHostId, DragHostError> {
         if self.active.is_some() {
@@ -352,25 +364,10 @@ impl DragHostManager {
         let owner = self
             .main_native_window
             .ok_or(DragHostError::MainWindowUnavailable)?;
-        let reserved_header_height = if reserve_composition_header {
-            self.controller.update(cx, |controller, _| {
-                controller.metrics().column_header_height
-            })
-        } else {
-            0.0
-        };
-        let drag_grab_offset = Point::new(
-            grab_offset.x,
-            grab_offset.y + reserved_header_height,
-        );
-        let drag_logical_size = Size::new(
-            logical_size.width,
-            logical_size.height + reserved_header_height,
-        );
-        drag_grab_offset
+        grab_offset
             .validate()
             .map_err(|_| DragHostError::InvalidGrabOffset)?;
-        drag_logical_size
+        logical_size
             .validate_positive()
             .map_err(|_| DragHostError::InvalidLogicalSize)?;
 
@@ -385,7 +382,7 @@ impl DragHostManager {
         let owner_scale = valid_scale(self.native_ops.scale_factor(owner)?)
             .ok_or(DragHostError::InvalidScaleFactor)?;
         let physical_grab_offset =
-            DockGeometry::physical_offset_from_logical(drag_grab_offset, owner_scale)
+            DockGeometry::physical_offset_from_logical(grab_offset, owner_scale)
                 .ok_or(DragHostError::InvalidGrabOffset)?;
         let physical_origin =
             DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
@@ -398,7 +395,7 @@ impl DragHostManager {
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                 point(px(logical_origin.x), px(logical_origin.y)),
-                size(px(drag_logical_size.width), px(drag_logical_size.height)),
+                size(px(logical_size.width), px(logical_size.height)),
             ))),
             titlebar: None,
             focus: false,
@@ -413,7 +410,7 @@ impl DragHostManager {
         let theme = self.theme;
         let controller = self.controller.clone();
         let defer_layout_events_until_parts_ready =
-            dock_area.is_some() || promote_on_float || reserve_composition_header;
+            dock_area.is_some() || promote_on_float;
         let surface_panel = panels.first().copied();
         let window = cx
             .open_window(options, move |_, app| {
@@ -424,12 +421,7 @@ impl DragHostManager {
                     panel: surface_panel,
                     group,
                     dock_area,
-                    reserve_composition_header,
-                    composition_header_width: if reserve_composition_header {
-                        drag_logical_size.width
-                    } else {
-                        0.0
-                    },
+                    render_detached_tab,
                     drag_content_size: logical_size,
                     handoff_placeholder: false,
                 })
@@ -1040,6 +1032,21 @@ impl DragHostManager {
             None
         };
         let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
+        let needs_column_header = (target == Some(DropTarget::FreeArea) || chain_join.is_some())
+            && matches!(
+                drag_handle,
+                Some(DragHandle::PanelTab | DragHandle::GroupGrip)
+            );
+        let free_area_bounds = if needs_column_header {
+            let header_height = self.controller.update(cx, |controller, _| {
+                controller.metrics().column_header_height
+            });
+            free_area_bounds.map(|bounds| {
+                group_bounds_to_floating_composition_bounds(bounds, header_height)
+            })
+        } else {
+            free_area_bounds
+        };
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
                 let _ = controller.cancel_pointer_interaction();
@@ -1801,8 +1808,7 @@ pub(crate) struct DragHostSurface {
     panel: Option<PanelId>,
     group: Option<NodeId>,
     dock_area: Option<DockSide>,
-    reserve_composition_header: bool,
-    composition_header_width: f32,
+    render_detached_tab: bool,
     drag_content_size: Size,
     handoff_placeholder: bool,
 }
@@ -1882,8 +1888,6 @@ impl Render for DragHostSurface {
         if self.handoff_placeholder {
             return root;
         }
-
-        let reserve_composition_header = self.reserve_composition_header;
 
         if let Some(side) = self.dock_area
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
@@ -2180,44 +2184,9 @@ impl Render for DragHostSurface {
                 })
             })
         {
-            let group_content_origin = if self.reserve_composition_header {
-                root = root.child(DockCompositionView::render_header(
-                    format!("drag-group-composition-header-{:?}", snapshot.group.group),
-                    Rect::new(
-                        Point::ZERO,
-                        Size::new(
-                            self.composition_header_width,
-                            snapshot.metrics.column_header_height,
-                        ),
-                    ),
-                    &[],
-                    snapshot.metrics,
-                    self.theme,
-                ));
-                let control_width = snapshot.metrics.column_control_button_width;
-                root = root.child(
-                    div()
-                        .absolute()
-                        .left(px(
-                            (self.composition_header_width - 2.0 * control_width).max(0.0),
-                        ))
-                        .top_0()
-                        .w(px(control_width))
-                        .h(px(snapshot.metrics.column_header_height))
-                        .child(CollapseColumnButton::render_with_metrics(
-                            format!("drag-group-collapse-column-{:?}", snapshot.group.group),
-                            self.theme,
-                            control_width,
-                            snapshot.metrics.control_icon_size,
-                        )),
-                );
-                Point::new(
-                    snapshot.group.rect.origin.x,
-                    snapshot.group.rect.origin.y - snapshot.metrics.column_header_height,
-                )
-            } else {
-                snapshot.group.rect.origin
-            };
+            // The temporary DragHost presents only the Group. The permanent
+            // CompositionHeader is created after a successful Floating drop.
+            let group_content_origin = snapshot.group.rect.origin;
             let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
             root = root.child(DockGroupView::render_core(
                 snapshot.column,
@@ -2250,7 +2219,7 @@ impl Render for DragHostSurface {
                     .map(|descriptor| descriptor.title().to_string())
                     .unwrap_or_else(|| format!("Panel {panel:?}"));
                 let metrics = controller.metrics();
-                let detached_group = if reserve_composition_header {
+                let detached_group = if self.render_detached_tab {
                     let group = controller.layout().nodes().find_map(|(id, node)| {
                         let Node::Tabs(tabs) = node else {
                             return None;
@@ -2299,41 +2268,8 @@ impl Render for DragHostSurface {
                 Some((view, title, metrics, detached_group))
             })
         {
-            // A detached tab reserves the same CompositionHeader as a floating
-            // composition, then uses the shared Core Group and PanelHost renderer.
-            if self.reserve_composition_header {
-                root = root.child(DockCompositionView::render_header(
-                    format!("drag-tab-composition-header-{panel:?}"),
-                    Rect::new(
-                        Point::ZERO,
-                        Size::new(
-                            self.composition_header_width,
-                            metrics.column_header_height,
-                        ),
-                    ),
-                    &[],
-                    metrics,
-                    self.theme,
-                ));
-                let control_width = metrics.column_control_button_width;
-                root = root.child(
-                    div()
-                        .absolute()
-                        .left(px(
-                            (self.composition_header_width - 2.0 * control_width).max(0.0),
-                        ))
-                        .top_0()
-                        .w(px(control_width))
-                        .h(px(metrics.column_header_height))
-                        .child(CollapseColumnButton::render_with_metrics(
-                            format!("drag-tab-collapse-column-{panel:?}"),
-                            self.theme,
-                            control_width,
-                            metrics.control_icon_size,
-                        )),
-                );
-            }
-
+            // A detached tab uses the shared Group renderer without drawing a
+            // CompositionHeader in the temporary DragHost.
             if let Some((source_header, presentation)) = detached_group {
                 let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
                 root = root.child(DockGroupView::render_detached_tab(
@@ -2349,20 +2285,12 @@ impl Render for DragHostSurface {
             } else {
                 // Flyout panels have no source Tabs Group. Keep their existing
                 // standalone preview; PanelTab drags take the Core renderer above.
-                let mut tab_surface = div()
+                let tab_surface = div()
                     .size_full()
                     .min_w_0()
                     .min_h_0()
                     .flex()
                     .flex_col();
-                if self.reserve_composition_header {
-                    tab_surface = tab_surface.child(
-                        div()
-                            .w_full()
-                            .h(px(metrics.column_header_height))
-                            .flex_none(),
-                    );
-                }
                 root = root.child(tab_surface.child(DockGroupView::render_active(
                     format!("drag-tab-group-{panel:?}"),
                     title,
@@ -2610,5 +2538,28 @@ mod floating_window_chain_target_tests {
         assert!(!dock_area_drag_uses_free_area(Some(
             DockingWindowAtPoint::Main { point: Point::ZERO }
         )));
+    }
+}
+
+#[cfg(test)]
+mod floating_group_drag_bounds_tests {
+    use dock_core::{Point, Rect, Size};
+
+    use super::group_bounds_to_floating_composition_bounds;
+
+    #[test]
+    fn temporary_group_bounds_become_composition_bounds_without_moving_group_origin() {
+        let temporary_group = Rect::new(
+            Point::new(420.0, 280.0),
+            Size::new(640.0, 480.0),
+        );
+
+        assert_eq!(
+            group_bounds_to_floating_composition_bounds(temporary_group, 28.0),
+            Rect::new(
+                Point::new(420.0, 252.0),
+                Size::new(640.0, 508.0),
+            ),
+        );
     }
 }

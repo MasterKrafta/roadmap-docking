@@ -110,7 +110,9 @@ impl DockGroupView {
         theme: Theme,
         toggle_menu: GroupMenuToggle,
     ) -> impl IntoElement {
-        let group_origin = Point::new(0.0, metrics.column_header_height);
+        // The temporary drag surface contains only the Group. Its permanent
+        // Column Header is created separately after a successful Floating drop.
+        let group_origin = Point::ZERO;
         let group_rect = Rect::new(group_origin, content_size);
         let group = GroupRect::new(source_header.group, group_rect);
 
