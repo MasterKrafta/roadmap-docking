@@ -237,8 +237,9 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
-    /// Stores the chain order (left-to-right) for activation-time native Z-order
-    /// correction. Activation of any member must not invert overlapping resize edges.
+    /// Stores a WindowGrid's native Z priority in front-to-back order for
+    /// activation-time correction. Implementations must preserve the same order
+    /// when any member is activated, including vertical header-overlap constraints.
     fn set_window_chain_z_order(
         &self,
         _window: NativeWindowId,
@@ -584,8 +585,8 @@ mod windows_impl {
         right_min_client_width: i32,
     }
 
-    /// The input order is left-to-right. Raising right-to-left leaves the
-    /// leftmost window on top, where its right Resize edge overlaps its neighbour.
+    /// The input order is front-to-back. Raising in reverse leaves the first
+    /// member on top while preserving every direction-aware grid overlap.
     fn raise_native_window_chain(ordered_members: &[HWND]) -> Result<(), NativeError> {
         for member in ordered_members.iter().rev().copied() {
             // SAFETY: All handles belong to live GPUI windows registered in this chain.
@@ -731,8 +732,8 @@ mod windows_impl {
 
         if message == WM_ACTIVATE && (wparam.0 & 0xffff) != WA_INACTIVE as usize {
             // Windows normally raises the activated HWND above its siblings.
-            // Reapply the chain's left-to-right stacking without changing focus,
-            // so each preceding window keeps ownership of the shared resize edge.
+            // Reapply the grid's direction-aware stacking without changing focus,
+            // so upper headers and shared horizontal resize edges remain covered.
             // SAFETY: The subclass owns this state for the lifetime of the HWND.
             let chain_z_order = unsafe { (*state).chain_z_order.clone() };
             if !chain_z_order.is_empty() {
