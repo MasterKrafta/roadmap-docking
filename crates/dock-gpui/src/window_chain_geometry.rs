@@ -1257,15 +1257,25 @@ mod window_grid_bounds_tests {
             .expect("a vertical grid should have finite bounds");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
-        assert_eq!(arranged[1].1.origin, Point::new(100.0, 352.0));
-        assert_eq!(arranged[2].1.origin, Point::new(100.0, 620.0));
+        let header_height = composition_header_height();
+        let second_y = 100.0 + frames[0].client_height
+            - header_height * frames[1].scale_factor
+            - frames[1].client_top_inset;
+        let third_y = second_y + frames[1].client_height
+            - header_height * frames[2].scale_factor
+            - frames[2].client_top_inset;
+        assert_eq!(arranged[1].1.origin, Point::new(100.0, second_y));
+        assert_eq!(arranged[2].1.origin, Point::new(100.0, third_y));
         assert_eq!(arranged[0].1.size, Size::new(300.0, 300.0));
         assert_eq!(arranged[1].1.size, Size::new(300.0, 200.0));
         assert_eq!(arranged[2].1.size, Size::new(300.0, 100.0));
 
         let a_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
         let b_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
-        assert_eq!(a_client_bottom - b_client_top, 48.0);
+        assert_eq!(
+            a_client_bottom - b_client_top,
+            composition_header_height() * frames[1].scale_factor
+        );
 
         let b_client_bottom = arranged[1].1.origin.y + frames[1].client_height;
         let c_client_top = arranged[2].1.origin.y;
@@ -1286,7 +1296,10 @@ mod window_grid_bounds_tests {
             .expect("the upper window should be positioned");
 
         assert_eq!(arranged[1].1.origin, Point::new(120.0, 500.0));
-        assert_eq!(arranged[0].1.origin, Point::new(120.0, 2composition_header_height()));
+        assert_eq!(
+            arranged[0].1.origin,
+            Point::new(120.0, 200.0 + composition_header_height())
+        );
         let moving_client_bottom = arranged[0].1.origin.y + frames[0].client_height;
         let target_client_top = arranged[1].1.origin.y + frames[1].client_top_inset;
         assert_eq!(moving_client_bottom - target_client_top, composition_header_height());
@@ -1336,7 +1349,10 @@ mod window_grid_bounds_tests {
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 100.0));
         assert_eq!(arranged[1].1.origin, Point::new(100.0, composition_header_height()));
         assert_eq!(arranged[2].1.origin, Point::new(300.0, 100.0));
-        assert_eq!(arranged[3].1.origin, Point::new(300.0, 268.0));
+        assert_eq!(
+            arranged[3].1.origin,
+            Point::new(300.0, 300.0 - composition_header_height())
+        );
     }
 
     #[test]
@@ -1360,8 +1376,11 @@ mod window_grid_bounds_tests {
         let arranged = arrange_window_grid_bounds(input, &frames, &links, a, composition_header_height())
             .expect("same-side neighbors should form a vertical lane");
 
-        assert_eq!(arranged[1].1.origin.y, 368.0);
-        assert_eq!(arranged[2].1.origin.y, 536.0);
+        let header_height = composition_header_height();
+        let second_y = 100.0 + frames[0].client_height - header_height;
+        let third_y = second_y + frames[1].client_height - header_height;
+        assert_eq!(arranged[1].1.origin.y, second_y);
+        assert_eq!(arranged[2].1.origin.y, third_y);
     }
 
     #[test]
