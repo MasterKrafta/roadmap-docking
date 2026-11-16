@@ -1272,6 +1272,31 @@ mod native_resize_grid_geometry_tests {
             .expect("valid frame geometry")
     }
 
+    fn frame_with_insets(
+        width: f32,
+        height: f32,
+        client_left: f32,
+        client_right: f32,
+        client_top: f32,
+        client_bottom: f32,
+        visible_left: f32,
+        visible_right: f32,
+    ) -> NativeFrameGeometry {
+        NativeFrameGeometry {
+            outer_width: client_left + width + client_right,
+            outer_height: client_top + height + client_bottom,
+            visible_left_inset: visible_left,
+            visible_right_inset: visible_right,
+            client_left_inset: client_left,
+            client_top_inset: client_top,
+            client_right_inset: client_right,
+            client_bottom_inset: client_bottom,
+            client_width: width,
+            client_height: height,
+            scale_factor: 1.0,
+        }
+    }
+
     fn link(
         from: FloatingGroupId,
         to: FloatingGroupId,
@@ -1309,6 +1334,35 @@ mod native_resize_grid_geometry_tests {
         assert_eq!(shifted[2].1.origin, Point::new(0.0, 70.0));
         assert_eq!(shifted[3].1.origin, Point::new(124.0, 30.0));
         assert_eq!(shifted[3].1.size, Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn east_branch_uses_client_edges_when_visible_frame_insets_differ() {
+        let (_ids, ids) = groups(4);
+        let [a, b, c, d] = ids.as_slice() else { panic!("four groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(110.0, 0.0, 50.0, 40.0)),
+            (*c, rect(-2.0, 70.0, 100.0, 40.0)),
+            (*d, rect(110.0, 35.0, 50.0, 50.0)),
+        ];
+        let frames = vec![
+            frame_with_insets(100.0, 80.0, 10.0, 10.0, 5.0, 5.0, 2.0, 4.0),
+            frame_with_insets(50.0, 40.0, 14.0, 6.0, 5.0, 5.0, 6.0, 4.0),
+            frame_with_insets(100.0, 40.0, 12.0, 8.0, 5.0, 5.0, 2.0, 4.0),
+            frame_with_insets(50.0, 50.0, 14.0, 6.0, 5.0, 5.0, 1.0, 4.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*a, *c, WindowGridDirection::Below),
+            link(*b, *d, WindowGridDirection::Below),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *a, 20.0, 0.0)
+            .expect("valid grid with different frame insets");
+        assert_eq!(shifted[1].1.origin.x, 130.0);
+        assert_eq!(shifted[2].1.origin.x, -2.0);
+        assert_eq!(shifted[3].1.origin.x, 130.0);
     }
 
     #[test]
