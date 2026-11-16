@@ -312,6 +312,13 @@ fn floating_pointer_point(
     core_origin: Point,
 ) -> Result<Point, dock_core::GeometryError> {
     let local = crate::geometry::DockGeometry::point_from_gpui(position)?;
+    floating_local_point_to_core(local, core_origin)
+}
+
+fn floating_local_point_to_core(
+    local: Point,
+    core_origin: Point,
+) -> Result<Point, dock_core::GeometryError> {
     let point = Point::new(local.x + core_origin.x, local.y + core_origin.y);
     point.validate()?;
     Ok(point)
@@ -2879,8 +2886,19 @@ mod floating_dock_area_header_hit_tests {
 
 #[cfg(test)]
 mod floating_part_host_geometry_tests {
-    use super::floating_part_local_rect;
+    use super::{floating_local_point_to_core, floating_part_local_rect};
     use dock_core::{Point, Rect, Size};
+
+    #[test]
+    fn part_window_pointer_is_rebased_to_the_core_composition_origin() {
+        let core = floating_local_point_to_core(
+            Point::new(12.0, 24.0),
+            Point::new(180.0, 96.0),
+        )
+        .unwrap();
+
+        assert_eq!(core, Point::new(192.0, 120.0));
+    }
 
     #[test]
     fn detached_group_geometry_is_rebased_to_the_window_origin() {
