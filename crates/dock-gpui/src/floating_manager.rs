@@ -1259,6 +1259,41 @@ impl FloatingWindowManager {
         else {
             return false;
         };
+        self.cursor_over_other_docking_window_from_native(source_window)
+    }
+
+    /// Checks the cursor against the exact part HWND that initiated a Floating drag.
+    /// The fallback path keeps compatibility with the legacy full-composition host.
+    pub(crate) fn cursor_over_other_docking_window_from_source(
+        &self,
+        source_group: FloatingGroupId,
+        source_window_id: WindowId,
+        part: Option<DockWindowPart>,
+    ) -> bool {
+        let source_window = match part {
+            Some(part) => {
+                let member = window_grid_member_for_part(part);
+                self.registry.members.get(&member)
+                    .filter(|entry| {
+                        entry.host_group == Some(source_group)
+                            && entry.window_id == source_window_id
+                    })
+                    .and_then(|entry| entry.native_window)
+            }
+            None => self.panel_window_for_group(source_group)
+                .filter(|entry| entry.window_id == source_window_id)
+                .and_then(|entry| entry.native_window),
+        };
+        let Some(source_window) = source_window else {
+            return false;
+        };
+        self.cursor_over_other_docking_window_from_native(source_window)
+    }
+
+    fn cursor_over_other_docking_window_from_native(
+        &self,
+        source_window: NativeWindowId,
+    ) -> bool {
         let Ok(cursor) = self.native_ops.cursor_position() else {
             return false;
         };

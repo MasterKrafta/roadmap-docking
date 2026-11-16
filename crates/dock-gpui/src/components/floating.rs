@@ -11,9 +11,10 @@ use dock_core::{
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollHandle,
-    Styled, WeakEntity, Window, WindowId, canvas, div, prelude::InteractiveElement as _, rgb,
+    AnyView, App, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    ScrollHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
+    prelude::InteractiveElement as _, rgb,
 };
 use ui::Theme;
 
@@ -39,7 +40,7 @@ use crate::{
         },
         resize_preview_for_interaction, ResizePreview,
     },
-    DockController, DragSourceHost, FloatingWindowManager,
+    DockController, DockWindowPart, DragSourceHost, FloatingWindowManager,
 };
 
 use super::{
@@ -304,6 +305,1207 @@ fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool)
     leaves_source || over_other_window
 }
 
+
+/// Maps a pointer event from a Floating part HWND back into the composition's Core space.
+fn floating_pointer_point(
+    position: gpui::Point<gpui::Pixels>,
+    core_origin: Point,
+) -> Result<Point, dock_core::GeometryError> {
+    let local = crate::geometry::DockGeometry::point_from_gpui(position)?;
+    let point = Point::new(local.x + core_origin.x, local.y + core_origin.y);
+    point.validate()?;
+    Ok(point)
+}
+
+fn floating_drag_source(
+    group: FloatingGroupId,
+    part: Option<DockWindowPart>,
+) -> DragSourceHost {
+    match part {
+        Some(part) => DragSourceHost::FloatingPart { group, part },
+        None => DragSourceHost::Floating { group },
+    }
+}
+
+/// Installs the same pointer/capture/drag pipeline on the legacy FloatingHost and
+/// an individual Group part window. point_origin is zero for the legacy host and
+/// the Core Group origin for a detached Group HWND.
+fn render_floating_pointer_input(
+    group: FloatingGroupId,
+    manager: WeakEntity<FloatingWindowManager>,
+    controller: Entity<DockController>,
+    input_window_id: WindowId,
+    floating_rect: Option<Rect>,
+    dock_component_tab_zones: HashMap<PanelId, Rect>,
+    dock_area_drag_area: Option<(Rect, Vec<ColumnRect>, Vec<SplitterRect>, DockMetrics)>,
+    hide_header: bool,
+    tab_press: Rc<Cell<Option<FloatingTabPress>>>,
+    group_press: Rc<Cell<Option<FloatingGroupPress>>>,
+    pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    source_part: Option<DockWindowPart>,
+    point_origin: Point,
+) -> impl IntoElement {
+    let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
+    let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
+    let dock_component_tab_zones_for_up = dock_component_tab_zones;
+    let title_input = canvas(
+            move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
+            move |_, hitbox, window, _| {
+                if let Some(hitbox) = hitbox {
+                    let manager_for_down = manager.clone();
+                    let controller_for_down = controller.clone();
+                    let tab_press_for_down = tab_press.clone();
+                    let group_press_for_down = group_press.clone();
+                    let pointer_capture_for_down = pointer_capture.clone();
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture
+                            || event.button != MouseButton::Left
+                            || !hitbox.is_hovered(window)
+                            || DockInteractionCoordinator::has_capture(&pointer_capture_for_down)
+                            || DockInteractionCoordinator::window_has_capture(window)
+                            || tab_press_for_down.get().is_some()
+                            || group_press_for_down.get().is_some()
+                            || controller_for_down.update(app, |controller, _| {
+                                controller.has_active_pointer_interaction()
+                            })
+                        {
+                            return;
+                        }
+                        let native_interaction_active =
+                            manager_for_down.upgrade().is_some_and(|manager| {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.native_move_active()
+                                        || manager.drag_host_manager().is_some_and(|drag_host| {
+                                            drag_host.update(manager_cx, |drag_host, _| {
+                                                drag_host.active_drag_host_id().is_some()
+                                            })
+                                        })
+                                })
+                            });
+                        if native_interaction_active {
+                            return;
+                        }
+                        let Ok(point) = floating_pointer_point(event.position, point_origin) else {
+                            return;
+                        };
+
+                        let core_hit = controller_for_down.update(app, |controller, _| {
+                            controller
+                                .hit_floating_window(input_window_id, group, point)
+                                .ok()
+                        });
+                        // FloatingWindowContent can render DockTab independently of the
+                        // DockGroupView. Normalize the tab's own geometry before the
+                        // pointer handler decides between moving this window and tearing
+                        // the individual panel off into another Floating window.
+                        let dock_component_tab_hit =
+                            controller_for_down.update(app, |controller, _| {
+                                let rects = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()?;
+                                rects.tab_headers.iter().find_map(|header| {
+                                    (dock_component_tab_zones_for_down.contains_key(&header.panel)
+                                        && matches!(header.rect.contains(point), Ok(true)))
+                                    .then_some(dock_core::HitResult::TabHeader {
+                                        group: header.group,
+                                        panel: header.panel,
+                                        index: header.index,
+                                    })
+                                })
+                            });
+                        let hit = dock_component_tab_hit.or(core_hit);
+
+                        if let Some(resize_hit @ dock_core::HitResult::Splitter { .. }) =
+                            hit.clone()
+                        {
+                            let floating_rects = controller_for_down.update(app, |controller, _| {
+                                controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .cloned()
+                            });
+                            if let Some(rects) = floating_rects {
+                                begin_resize_hit_with_rects(
+                                    &controller_for_down,
+                                    input_window_id,
+                                    resize_hit,
+                                    point,
+                                    &rects,
+                                    app,
+                                );
+                                let resize_started = controller_for_down
+                                    .update(app, |controller, _| {
+                                        controller
+                                            .resize_interaction_for_window(input_window_id)
+                                            .is_some()
+                                    });
+                                if resize_started {
+                                    if !DockInteractionCoordinator::capture(
+                                        window,
+                                        hitbox,
+                                        &pointer_capture_for_down,
+                                    ) {
+                                        DockInteractionCoordinator::cancel(
+                                            &controller_for_down,
+                                            window,
+                                            &pointer_capture_for_down,
+                                            app,
+                                        );
+                                        return;
+                                    }
+                                    app.stop_propagation();
+                                    return;
+                                }
+                            }
+                        }
+
+                        // The remaining CompositionHeader region controls moving the whole Floating.
+                        let floating_title_region = if !hide_header {
+                            dock_area_drag_area.as_ref().and_then(
+                                |(area_rect, columns, splitters, metrics)| {
+                                    floating_dock_area_title_pointer_region(
+                                        *area_rect,
+                                        columns,
+                                        splitters,
+                                        point,
+                                        *metrics,
+                                    )
+                                },
+                            )
+                        } else {
+                            None
+                        };
+                        if let Some(is_title_grip) = floating_title_region {
+                            if is_title_grip
+                                && let Some(manager) = manager_for_down.upgrade()
+                            {
+                                manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_window_move(group, point, manager_cx)
+                                });
+                            }
+                            // The header owns this point, including the fixed controls.
+                            // Do not let a button press fall through to the Group or Tab below.
+                            app.stop_propagation();
+                            return;
+                        }
+
+                        let group_candidate = controller_for_down.update(app, |controller, _| {
+                            let dock_group = match hit.clone()? {
+                                dock_core::HitResult::Group { group }
+                                | dock_core::HitResult::TabStrip { group } => group,
+                                _ => return None,
+                            };
+                            let rects = controller.floating_geometry(input_window_id, group).ok()?;
+                            let group_rect = rects
+                                .groups
+                                .iter()
+                                .find(|rect| rect.group == dock_group)?
+                                .rect;
+                            let in_column = controller.layout().nodes().any(|(_, node)| {
+                                matches!(
+                                    node,
+                                    Node::Column(column) if column.groups.contains(&dock_group)
+                                )
+                            });
+                            let zone = GroupDragArea::drag_zone(
+                                group_rect,
+                                controller.metrics(),
+                                in_column,
+                            );
+                            GroupDragArea::contains(zone, point)
+                                .then_some((dock_group, controller.layout().version()))
+                        });
+                        if let Some((dock_group, layout_version)) = group_candidate {
+                            let is_single_tab_floating = controller_for_down.update(
+                                app,
+                                |controller, _| {
+                                    floating_has_single_tab_dock(
+                                        controller.layout(),
+                                        group,
+                                        dock_group,
+                                    )
+                                },
+                            );
+                            if is_single_tab_floating
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_single_tab_window_move(
+                                        group,
+                                        point,
+                                        manager_cx,
+                                    )
+                                })
+                            {
+                                app.stop_propagation();
+                                return;
+                            }
+
+                            begin_drag_at(
+                                &controller_for_down,
+                                dock_core::DragPayload::Group { group: dock_group },
+                                dock_core::DragHandle::GroupGrip,
+                                point,
+                                floating_drag_source(group, source_part),
+                                input_window_id,
+                                app,
+                            );
+                            group_press_for_down.set(Some(FloatingGroupPress {
+                                group: dock_group,
+                                layout_version,
+                            }));
+                            if !DockInteractionCoordinator::capture(
+                                window,
+                                hitbox,
+                                &pointer_capture_for_down,
+                            ) {
+                                group_press_for_down.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_down,
+                                    window,
+                                    &pointer_capture_for_down,
+                                    app,
+                                );
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+
+                        let press = controller_for_down.update(app, |controller, _| {
+                            let dock_core::HitResult::TabHeader {
+                                group: tab_group,
+                                panel,
+                                ..
+                            } = hit.clone()?
+                            else {
+                                return None;
+                            };
+                            // FloatingWindowContent uses DockTab for every Group.
+                            // The complete header is available for activation and drag.
+                            Some((tab_group, panel, controller.layout().version()))
+                        });
+                        if let Some((tab_group, panel, layout_version)) = press {
+                            let is_single_tab_floating = controller_for_down.update(
+                                app,
+                                |controller, _| {
+                                    floating_has_single_tab_dock(
+                                        controller.layout(),
+                                        group,
+                                        tab_group,
+                                    )
+                                },
+                            );
+                            if is_single_tab_floating
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_single_tab_window_move(
+                                        group,
+                                        point,
+                                        manager_cx,
+                                    )
+                                })
+                            {
+                                app.stop_propagation();
+                                return;
+                            }
+
+                            tab_press_for_down.set(Some(FloatingTabPress {
+                                tab_group,
+                                panel,
+                                origin: point,
+                                layout_version,
+                            }));
+                            // Capture at press so leaving this native window before
+                            // the next GPUI move event still reaches the drag pipeline.
+                            if !DockInteractionCoordinator::capture(
+                                window,
+                                hitbox,
+                                &pointer_capture_for_down,
+                            ) {
+                                tab_press_for_down.set(None);
+                            }
+                        }
+                    });
+
+                    let manager_for_move = manager.clone();
+                    let controller_for_move = controller.clone();
+                    let tab_press_for_move = tab_press.clone();
+                    let group_press_for_move = group_press.clone();
+                    let pointer_capture_for_move = pointer_capture.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture || !event.dragging() {
+                            return;
+                        }
+                        let resize_owner = controller_for_move.update(app, |controller, _| {
+                            controller.resize_interaction().map(|interaction| interaction.window_id)
+                        });
+                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
+                            app.stop_propagation();
+                            return;
+                        }
+                        let resize_active = resize_owner == Some(input_window_id);
+                        if resize_active {
+                            if !DockInteractionCoordinator::ensure_current(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            ) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_move,
+                            ) {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                floating_pointer_point(event.position, point_origin)
+                            else {
+                                return;
+                            };
+                            let should_schedule = controller_for_move.update(app, |controller, _| {
+                                controller.queue_resize_frame_point(input_window_id, point)
+                            });
+                            if should_schedule {
+                                let controller = controller_for_move.clone();
+                                window.on_next_frame(move |_, app| {
+                                    let point = controller.update(app, |controller, _| {
+                                        controller.take_resize_frame_point(input_window_id)
+                                    });
+                                    if let Some(point) = point {
+                                        update_resize(&controller, input_window_id, point, app);
+                                    }
+                                });
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+                        if let Some(group_press) = group_press_for_move.get() {
+                            let layout_is_current =
+                                controller_for_move.update(app, |controller, _| {
+                                    controller.layout().version() == group_press.layout_version
+                                });
+                            if !layout_is_current {
+                                group_press_for_move.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let manager_entity = manager_for_move.upgrade();
+                            let drag_host_active = manager_entity
+                                .as_ref()
+                                .and_then(|manager| {
+                                    manager.update(app, |manager, _| manager.drag_host_manager())
+                                })
+                                .is_some_and(|drag_host| {
+                                    drag_host.update(app, |manager, _| {
+                                        manager.active_drag_host_id().is_some()
+                                    })
+                                });
+                            if drag_host_active {
+                                group_press_for_move.set(None);
+                                if DockInteractionCoordinator::has_capture(
+                                    &pointer_capture_for_move,
+                                ) {
+                                    DockInteractionCoordinator::release(
+                                        window,
+                                        &pointer_capture_for_move,
+                                    );
+                                }
+                                app.stop_propagation();
+                                return;
+                            }
+                            if manager_entity.as_ref().is_some_and(|manager| {
+                                manager.update(app, |manager, _| manager.native_move_active())
+                            }) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_move,
+                            ) {
+                                group_press_for_move.set(None);
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_move,
+                                    window,
+                                    &pointer_capture_for_move,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                floating_pointer_point(event.position, point_origin)
+                            else {
+                                app.stop_propagation();
+                                return;
+                            };
+                            let dragging = update_drag_at(&controller_for_move, point, app)
+                                || controller_for_move.update(app, |controller, _| {
+                                    matches!(
+                                        controller.drag().session().state(),
+                                        dock_core::DragState::Dragging {
+                                            payload: dock_core::DragPayload::Group { group },
+                                            ..
+                                        } if group == group_press.group
+                                    )
+                                });
+                            if dragging {
+                                let leaves_source =
+                                    controller_for_move.update(app, |controller, _| {
+                                        let Some(rects) = controller
+                                            .floating_geometry(input_window_id, group)
+                                            .ok()
+                                        else {
+                                            return true;
+                                        };
+                                        let Some(group_rect) = rects
+                                            .groups
+                                            .iter()
+                                            .find(|rect| rect.group == group_press.group)
+                                            .map(|rect| rect.rect)
+                                        else {
+                                            return true;
+                                        };
+                                        let in_column =
+                                            controller.layout().nodes().any(|(_, node)| {
+                                                matches!(
+                                                    node,
+                                                    Node::Column(column)
+                                                        if column.groups.contains(&group_press.group)
+                                                )
+                                            });
+                                        let zone = GroupDragArea::drag_zone(
+                                            group_rect,
+                                            controller.metrics(),
+                                            in_column,
+                                        );
+                                        !GroupDragArea::contains(zone, point)
+                                    });
+                                let over_other_window =
+                                    manager_entity.as_ref().is_some_and(|manager| {
+                                        manager.update(app, |manager, _| {
+                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                        })
+                                    });
+                                if leaves_source || over_other_window {
+                                    let drag_host_manager =
+                                        manager_entity.as_ref().and_then(|manager| {
+                                            manager.update(app, |manager, _| {
+                                                manager.drag_host_manager()
+                                            })
+                                        });
+                                    if let Some(drag_host_manager) = drag_host_manager {
+                                        if !begin_group_drag_host(
+                                            &controller_for_move,
+                                            &drag_host_manager,
+                                            app,
+                                        ) {
+                                            tracing::debug!(
+                                                "Floating Group drag could not start DragHost"
+                                            );
+                                        }
+                                    } else {
+                                        controller_for_move.update(app, |controller, cx| {
+                                            let _ = controller.cancel_pointer_interaction();
+                                            cx.notify();
+                                        });
+                                    }
+                                    group_press_for_move.set(None);
+                                    DockInteractionCoordinator::release(
+                                        window,
+                                        &pointer_capture_for_move,
+                                    );
+                                    app.stop_propagation();
+                                    return;
+                                }
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+
+                        let Some(press) = tab_press_for_move.get() else {
+                            return;
+                        };
+                        let manager_entity = manager_for_move.upgrade();
+                        let drag_host_active = manager_entity
+                            .as_ref()
+                            .and_then(|manager| {
+                                manager.update(app, |manager, _| manager.drag_host_manager())
+                            })
+                            .is_some_and(|drag_host| {
+                                drag_host.update(app, |manager, _| {
+                                    manager.active_drag_host_id().is_some()
+                                })
+                            });
+                        if drag_host_active {
+                            tab_press_for_move.set(None);
+                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_move) {
+                                DockInteractionCoordinator::release(window, &pointer_capture_for_move);
+                            }
+                            return;
+                        }
+                        if manager_entity.as_ref().is_some_and(|manager| {
+                            manager
+                                .update(app, |manager, _| manager.native_move_active())
+                        }) {
+                            return;
+                        }
+                        if DockInteractionCoordinator::capture_was_lost(
+                            window,
+                            &pointer_capture_for_move,
+                        ) {
+                            tab_press_for_move.set(None);
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            );
+                            return;
+                        }
+                        let Ok(point) = floating_pointer_point(event.position, point_origin) else {
+                            return;
+                        };
+                        let drag = FloatingTabDrag {
+                            source_window_id: input_window_id,
+                            source_group: group,
+                            source_part,
+                            panel: press.panel,
+                            press_origin: press.origin,
+                            layout_version: press.layout_version,
+                        };
+                        let dragging = update_floating_tab_drag(
+                            &controller_for_move,
+                            drag,
+                            point,
+                            app,
+                        );
+                        if !dragging {
+                            if !DockInteractionCoordinator::release_if_inactive(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            ) {
+                                tab_press_for_move.set(None);
+                            }
+                            return;
+                        }
+                        // Capture only after the Core threshold is crossed. A
+                        // normal click therefore continues to reach tab controls.
+                        if !DockInteractionCoordinator::capture(
+                            window,
+                            hitbox,
+                            &pointer_capture_for_move,
+                        ) {
+                            tab_press_for_move.set(None);
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_move,
+                                window,
+                                &pointer_capture_for_move,
+                                app,
+                            );
+                            return;
+                        }
+
+                        let leaves_source = if let Some(zone) =
+                            dock_component_tab_zones_for_move.get(&press.panel).copied()
+                        {
+                            DockTab::leaves_strip_zone(zone, point)
+                        } else {
+                            controller_for_move.update(app, |controller, _| {
+                                let strip = controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .and_then(|rects| {
+                                        rects
+                                            .tab_strips
+                                            .iter()
+                                            .find(|strip| strip.group == press.tab_group)
+                                            .map(|strip| strip.rect)
+                                    });
+                                if let Some(strip) = strip {
+                                    DockTab::leaves_strip_zone(strip, point)
+                                } else {
+                                    floating_rect.is_some_and(|rect| {
+                                        rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                                    })
+                                }
+                            })
+                        };
+                        let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                            manager
+                                .update(app, |manager, _| {
+                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                })
+                                
+                        });
+                        if floating_tab_drag_host_required(leaves_source, over_other_window)
+                            && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
+                                manager.update(app, |manager, _| manager.drag_host_manager())
+                            })
+                        {
+                            if !begin_panel_drag_host(
+                                &controller_for_move,
+                                &drag_host_manager,
+                                app,
+                            ) {
+                                tracing::debug!("Floating Panel drag could not start DragHost");
+                            }
+                            tab_press_for_move.set(None);
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_move,
+                            );
+                            app.stop_propagation();
+                            return;
+                        }
+                        app.stop_propagation();
+                    });
+
+                    let manager_for_up = manager.clone();
+                    let controller_for_up = controller.clone();
+                    let tab_press_for_up = tab_press.clone();
+                    let group_press_for_up = group_press.clone();
+                    let pointer_capture_for_up = pointer_capture.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let resize_owner = controller_for_up.update(app, |controller, _| {
+                            controller.resize_interaction().map(|interaction| interaction.window_id)
+                        });
+                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
+                            app.stop_propagation();
+                            return;
+                        }
+                        let resize_active = resize_owner == Some(input_window_id);
+                        if resize_active {
+                            if !DockInteractionCoordinator::ensure_current(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            ) {
+                                app.stop_propagation();
+                                return;
+                            }
+                            if DockInteractionCoordinator::capture_was_lost(
+                                window,
+                                &pointer_capture_for_up,
+                            ) {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                floating_pointer_point(event.position, point_origin)
+                            else {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            };
+                            let floating_rects = controller_for_up.update(app, |controller, _| {
+                                controller
+                                    .floating_geometry(input_window_id, group)
+                                    .ok()
+                                    .cloned()
+                            });
+                            controller_for_up.update(app, |controller, _| {
+                                controller.clear_resize_frame_point(input_window_id);
+                            });
+                            if let Some(rects) = floating_rects {
+                                finish_resize_with_rects(
+                                    &controller_for_up,
+                                    input_window_id,
+                                    point,
+                                    event.click_count,
+                                    &rects,
+                                    app,
+                                );
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                            } else {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                            }
+                            app.stop_propagation();
+                            return;
+                        }
+                        if let Some(manager) = manager_for_up.upgrade() {
+                            let drag_host_active = manager
+                                .update(app, |manager, _| manager.drag_host_manager())
+                                .is_some_and(|drag_host| {
+                                    drag_host.update(app, |manager, _| {
+                                        manager.active_drag_host_id().is_some()
+                                    })
+                                });
+                            if drag_host_active {
+                                tab_press_for_up.set(None);
+                                group_press_for_up.set(None);
+                                if DockInteractionCoordinator::has_capture(
+                                    &pointer_capture_for_up,
+                                ) {
+                                    DockInteractionCoordinator::release(
+                                        window,
+                                        &pointer_capture_for_up,
+                                    );
+                                }
+                                return;
+                            }
+                            if manager.update(app, |manager, _| manager.native_move_active()) {
+                                return;
+                            }
+                        }
+                        if DockInteractionCoordinator::capture_was_lost(
+                            window,
+                            &pointer_capture_for_up,
+                        ) {
+                            tab_press_for_up.set(None);
+                            group_press_for_up.set(None);
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            );
+                            return;
+                        }
+                        if let Some(group_press) = group_press_for_up.get() {
+                            group_press_for_up.set(None);
+                            let layout_is_current =
+                                controller_for_up.update(app, |controller, _| {
+                                    controller.layout().version() == group_press.layout_version
+                                });
+                            if !layout_is_current {
+                                DockInteractionCoordinator::cancel(
+                                    &controller_for_up,
+                                    window,
+                                    &pointer_capture_for_up,
+                                    app,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                            let Ok(point) =
+                                floating_pointer_point(event.position, point_origin)
+                            else {
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                                app.stop_propagation();
+                                return;
+                            };
+                            let dragging = update_drag_at(&controller_for_up, point, app)
+                                || controller_for_up.update(app, |controller, _| {
+                                    matches!(
+                                        controller.drag().session().state(),
+                                        dock_core::DragState::Dragging {
+                                            payload: dock_core::DragPayload::Group { group },
+                                            ..
+                                        } if group == group_press.group
+                                    )
+                                });
+                            if dragging {
+                                let leaves_source =
+                                controller_for_up.update(app, |controller, _| {
+                                    let Some(rects) = controller
+                                        .floating_geometry(input_window_id, group)
+                                        .ok()
+                                    else {
+                                        return true;
+                                    };
+                                    let Some(group_rect) = rects
+                                        .groups
+                                        .iter()
+                                        .find(|rect| rect.group == group_press.group)
+                                        .map(|rect| rect.rect)
+                                    else {
+                                        return true;
+                                    };
+                                    let in_column =
+                                        controller.layout().nodes().any(|(_, node)| {
+                                            matches!(
+                                                node,
+                                                Node::Column(column)
+                                                    if column.groups.contains(&group_press.group)
+                                            )
+                                        });
+                                    let zone = GroupDragArea::drag_zone(
+                                        group_rect,
+                                        controller.metrics(),
+                                        in_column,
+                                    );
+                                    !GroupDragArea::contains(zone, point)
+                                });
+                                let manager_entity = manager_for_up.upgrade();
+                                let over_other_window =
+                                    manager_entity.as_ref().is_some_and(|manager| {
+                                        manager.update(app, |manager, _| {
+                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                        })
+                                    });
+                                if leaves_source || over_other_window {
+                                    if let Some(drag_host_manager) =
+                                        manager_entity.as_ref().and_then(|manager| {
+                                            manager.update(app, |manager, _| {
+                                                manager.drag_host_manager()
+                                            })
+                                        })
+                                    {
+                                        if !begin_group_drag_host(
+                                            &controller_for_up,
+                                            &drag_host_manager,
+                                            app,
+                                        ) {
+                                            tracing::debug!(
+                                                "Floating Group drag could not start DragHost on release"
+                                            );
+                                        }
+                                    } else {
+                                        controller_for_up.update(app, |controller, cx| {
+                                            let _ = controller.cancel_pointer_interaction();
+                                            cx.notify();
+                                        });
+                                    }
+                                } else {
+                                    controller_for_up.update(app, |controller, cx| {
+                                        let _ = controller.cancel_pointer_interaction();
+                                        cx.notify();
+                                    });
+                                }
+                            } else {
+                                controller_for_up.update(app, |controller, cx| {
+                                    let _ = controller.cancel_pointer_interaction();
+                                    cx.notify();
+                                });
+                            }
+                            DockInteractionCoordinator::release(window, &pointer_capture_for_up);
+                            app.stop_propagation();
+                            return;
+                        }
+                        let Some(press) = tab_press_for_up.get() else {
+                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                            }
+                            return;
+                        };
+                        tab_press_for_up.set(None);
+                        let Ok(point) = floating_pointer_point(event.position, point_origin) else {
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
+                            return;
+                        };
+
+                        // MouseUp can be the first event delivered beyond the drag threshold.
+                        // Give the shared floating-tab pipeline the release position before
+                        // deciding whether this tab crossed its source strip boundary.
+                        let drag = FloatingTabDrag {
+                            source_window_id: input_window_id,
+                            source_group: group,
+                            source_part,
+                            panel: press.panel,
+                            press_origin: press.origin,
+                            layout_version: press.layout_version,
+                        };
+                        let dragging = update_floating_tab_drag(
+                            &controller_for_up,
+                            drag,
+                            point,
+                            app,
+                        );
+                        if dragging {
+                            let leaves_source = if let Some(zone) =
+                                dock_component_tab_zones_for_up.get(&press.panel).copied()
+                            {
+                                DockTab::leaves_strip_zone(zone, point)
+                            } else {
+                                controller_for_up.update(app, |controller, _| {
+                                    let strip = controller
+                                        .floating_geometry(input_window_id, group)
+                                        .ok()
+                                        .and_then(|rects| {
+                                            rects
+                                                .tab_strips
+                                                .iter()
+                                                .find(|strip| strip.group == press.tab_group)
+                                                .map(|strip| strip.rect)
+                                        });
+                                    if let Some(strip) = strip {
+                                        DockTab::leaves_strip_zone(strip, point)
+                                    } else {
+                                        floating_rect.is_some_and(|rect| {
+                                            rect.contains(point).map(|contains| !contains).unwrap_or(true)
+                                        })
+                                    }
+                                })
+                            };
+                            let manager_entity = manager_for_up.upgrade();
+                            let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
+                                manager.update(app, |manager, _| {
+                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                })
+                            });
+                            if floating_tab_drag_host_required(leaves_source, over_other_window)
+                                && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
+                                    manager.update(app, |manager, _| manager.drag_host_manager())
+                                })
+                            {
+                                if !begin_panel_drag_host(
+                                    &controller_for_up,
+                                    &drag_host_manager,
+                                    app,
+                                ) {
+                                    tracing::debug!("Floating Panel drag could not start DragHost on release");
+                                }
+                                DockInteractionCoordinator::release(
+                                    window,
+                                    &pointer_capture_for_up,
+                                );
+                                app.stop_propagation();
+                                return;
+                            }
+                        }
+
+                        let (was_dragging, was_pressed) =
+                            controller_for_up.update(app, |controller, _| {
+                                match controller.drag().session().state() {
+                                    dock_core::DragState::Dragging {
+                                        payload: dock_core::DragPayload::Panel { panel },
+                                        ..
+                                    } if panel == press.panel => (true, false),
+                                    dock_core::DragState::Pressed {
+                                        payload: dock_core::DragPayload::Panel { panel },
+                                        ..
+                                    } if panel == press.panel => (false, true),
+                                    _ => (false, false),
+                                }
+                            });
+                        if was_dragging {
+                            finish_floating_tab_drag(
+                                &controller_for_up,
+                                input_window_id,
+                                group,
+                                press.panel,
+                                point,
+                                app,
+                            );
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
+                            app.stop_propagation();
+                            return;
+                        }
+
+                        if was_pressed {
+                            DockInteractionCoordinator::cancel(
+                                &controller_for_up,
+                                window,
+                                &pointer_capture_for_up,
+                                app,
+                            );
+                        } else {
+                            DockInteractionCoordinator::release(
+                                window,
+                                &pointer_capture_for_up,
+                            );
+                        }
+                        let should_activate = controller_for_up.update(app, |controller, _| {
+                            if controller.layout().version() != press.layout_version {
+                                return false;
+                            }
+                            let core_hit = controller
+                                .hit_floating_window(input_window_id, group, point)
+                                .unwrap_or(dock_core::HitResult::Miss);
+                            let released_hit = controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .and_then(|rects| {
+                                    rects.tab_headers.iter().find_map(|header| {
+                                        (dock_component_tab_zones_for_up.contains_key(&header.panel)
+                                            && matches!(header.rect.contains(point), Ok(true)))
+                                        .then_some(dock_core::HitResult::TabHeader {
+                                            group: header.group,
+                                            panel: header.panel,
+                                            index: header.index,
+                                        })
+                                    })
+                                })
+                                .unwrap_or(core_hit);
+                            let dock_core::HitResult::TabHeader {
+                                group: released_group,
+                                panel: released_panel,
+                                ..
+                            } = released_hit
+                            else {
+                                return false;
+                            };
+                            if released_group != press.tab_group || released_panel != press.panel {
+                                return false;
+                            }
+                            controller
+                                .floating_geometry(input_window_id, group)
+                                .ok()
+                                .is_some_and(|rects| {
+                                    rects.tab_headers.iter().any(|header| {
+                                        header.group == released_group
+                                            && header.panel == released_panel
+                                            && matches!(header.rect.contains(point), Ok(true))
+                                    })
+                                })
+                        });
+                        if should_activate {
+                            controller_for_up.update(app, |controller, cx| {
+                                let changes_active_tab = {
+                                    let layout = controller.layout();
+                                    match layout.node(press.tab_group) {
+                                        Some(Node::Tabs(tabs)) => tabs
+                                            .active_child()
+                                            .and_then(|child| match layout.node(child) {
+                                                Some(Node::Panel(value)) => Some(value.panel_id),
+                                                _ => None,
+                                            })
+                                            != Some(press.panel),
+                                        _ => false,
+                                    }
+                                };
+
+                                let mut commands = vec![DockCommand::ActivateTab {
+                                    group: press.tab_group,
+                                    panel: press.panel,
+                                }];
+                                if changes_active_tab {
+                                    let metrics = controller.metrics();
+                                    let layout = controller.layout();
+                                    if let (Some(bounds), Ok(preferred_height)) = (
+                                        layout.floating_group(group).map(|floating| floating.bounds),
+                                        layout.floating_preferred_height_for_tab(
+                                            group,
+                                            press.tab_group,
+                                            press.panel,
+                                            &metrics,
+                                        ),
+                                    ) {
+                                        if bounds.size.height != preferred_height {
+                                            commands.push(DockCommand::ResizeFloatingBounds {
+                                                group,
+                                                bounds: Rect::new(
+                                                    bounds.origin,
+                                                    dock_core::Size::new(
+                                                        bounds.size.width,
+                                                        preferred_height,
+                                                    ),
+                                                ),
+                                            });
+                                        }
+                                    }
+                                }
+
+                                if let Err(error) = controller.dispatch_sequence_in(commands, cx) {
+                                    tracing::debug!(
+                                        %error,
+                                        "could not activate and resize the floating tab"
+                                    );
+                                }
+                            });
+                            app.stop_propagation();
+                        }
+                    });
+                }
+            },
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full();
+
+    title_input
+}
+
+fn handle_floating_escape(
+    event: &KeyDownEvent,
+    context_menu_is_open: bool,
+    manager: &WeakEntity<FloatingWindowManager>,
+    controller: &Entity<DockController>,
+    tab_press: &Rc<Cell<Option<FloatingTabPress>>>,
+    group_press: &Rc<Cell<Option<FloatingGroupPress>>>,
+    pointer_capture: &Rc<Cell<Option<HitboxId>>>,
+    window: &mut Window,
+    app: &mut App,
+) {
+    if context_menu_is_open || !event.keystroke.key.eq_ignore_ascii_case("escape") {
+        return;
+    }
+    let window_id = window.window_handle().window_id();
+    let resize_owner = controller.update(app, |controller, _| {
+        controller.resize_interaction().map(|interaction| interaction.window_id)
+    });
+    if resize_owner.is_some_and(|owner| owner != window_id) {
+        return;
+    }
+    if let Some(manager) = manager.upgrade() {
+        if manager.update(app, |manager, _| manager.native_move_active()) {
+            return;
+        }
+        let drag_host_manager = manager.update(app, |manager, _| manager.drag_host_manager());
+        if drag_host_manager.is_some_and(|drag_host| {
+            drag_host.update(app, |manager, manager_cx| manager.cancel_active(manager_cx))
+        }) {
+            tab_press.set(None);
+            group_press.set(None);
+            if DockInteractionCoordinator::has_capture(pointer_capture) {
+                DockInteractionCoordinator::release(window, pointer_capture);
+            }
+            app.stop_propagation();
+            return;
+        }
+    }
+    if tab_press.get().is_none() && group_press.get().is_none() && resize_owner.is_none() {
+        return;
+    }
+    tab_press.set(None);
+    group_press.set(None);
+    DockInteractionCoordinator::cancel_on_escape(controller, window, pointer_capture, app);
+    app.stop_propagation();
+}
 /// A Floating containing exactly one Group and one Panel can move as a whole.
 /// Detaching its only tab/group would only create a replacement window.
 fn floating_has_single_tab_dock(
@@ -1135,25 +2337,12 @@ impl Render for FloatingHost {
             .overflow_hidden()
             .bg(rgb(self.theme.colors.panel_surface_background));
 
-        // The shared CompositionHeader moves the complete floating composition.
-        // Every visible DockTab remains an individual panel drag source, including
-        // the only tab in a floating window; it can detach and join another group.
-        let manager = self.manager.clone();
-        let controller = self.controller.clone();
-        let tab_press = self.tab_press.clone();
-        let group_press = self.group_press.clone();
-        let pointer_capture = self.pointer_capture.clone();
-        let pointer_capture_for_escape = pointer_capture.clone();
+        let pointer_capture_for_escape = self.pointer_capture.clone();
         let input_window_id = window_id;
-        let floating_rect = snapshot.as_ref().map(|snapshot| snapshot.floating.rect);
         let dock_component_tab_zones = snapshot
             .as_ref()
             .map(floating_dock_component_tab_zones)
             .unwrap_or_default();
-        // Each mouse-event handler owns its map because all three closures are `move`.
-        let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
-        let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
-        let dock_component_tab_zones_for_up = dock_component_tab_zones;
         let dock_area_drag_area = snapshot.as_ref().map(|snapshot| {
             (
                 snapshot.floating.rect,
@@ -1162,1115 +2351,21 @@ impl Render for FloatingHost {
                 snapshot.metrics,
             )
         });
-        let title_input = canvas(
-            move |bounds, window, _| Some(window.insert_hitbox(bounds, HitboxBehavior::Normal).id),
-            move |_, hitbox, window, _| {
-                if let Some(hitbox) = hitbox {
-                    let manager_for_down = manager.clone();
-                    let controller_for_down = controller.clone();
-                    let tab_press_for_down = tab_press.clone();
-                    let group_press_for_down = group_press.clone();
-                    let pointer_capture_for_down = pointer_capture.clone();
-                    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, app| {
-                        if phase != DispatchPhase::Capture
-                            || event.button != MouseButton::Left
-                            || !hitbox.is_hovered(window)
-                            || DockInteractionCoordinator::has_capture(&pointer_capture_for_down)
-                            || DockInteractionCoordinator::window_has_capture(window)
-                            || tab_press_for_down.get().is_some()
-                            || group_press_for_down.get().is_some()
-                            || controller_for_down.update(app, |controller, _| {
-                                controller.has_active_pointer_interaction()
-                            })
-                        {
-                            return;
-                        }
-                        let native_interaction_active =
-                            manager_for_down.upgrade().is_some_and(|manager| {
-                                manager.update(app, |manager, manager_cx| {
-                                    manager.native_move_active()
-                                        || manager.drag_host_manager().is_some_and(|drag_host| {
-                                            drag_host.update(manager_cx, |drag_host, _| {
-                                                drag_host.active_drag_host_id().is_some()
-                                            })
-                                        })
-                                })
-                            });
-                        if native_interaction_active {
-                            return;
-                        }
-                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
-                            return;
-                        };
-
-                        let core_hit = controller_for_down.update(app, |controller, _| {
-                            controller
-                                .hit_floating_window(input_window_id, group, point)
-                                .ok()
-                        });
-                        // FloatingWindowContent can render DockTab independently of the
-                        // DockGroupView. Normalize the tab's own geometry before the
-                        // pointer handler decides between moving this window and tearing
-                        // the individual panel off into another Floating window.
-                        let dock_component_tab_hit =
-                            controller_for_down.update(app, |controller, _| {
-                                let rects = controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()?;
-                                rects.tab_headers.iter().find_map(|header| {
-                                    (dock_component_tab_zones_for_down.contains_key(&header.panel)
-                                        && matches!(header.rect.contains(point), Ok(true)))
-                                    .then_some(dock_core::HitResult::TabHeader {
-                                        group: header.group,
-                                        panel: header.panel,
-                                        index: header.index,
-                                    })
-                                })
-                            });
-                        let hit = dock_component_tab_hit.or(core_hit);
-
-                        if let Some(resize_hit @ dock_core::HitResult::Splitter { .. }) =
-                            hit.clone()
-                        {
-                            let floating_rects = controller_for_down.update(app, |controller, _| {
-                                controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .cloned()
-                            });
-                            if let Some(rects) = floating_rects {
-                                begin_resize_hit_with_rects(
-                                    &controller_for_down,
-                                    input_window_id,
-                                    resize_hit,
-                                    point,
-                                    &rects,
-                                    app,
-                                );
-                                let resize_started = controller_for_down
-                                    .update(app, |controller, _| {
-                                        controller
-                                            .resize_interaction_for_window(input_window_id)
-                                            .is_some()
-                                    });
-                                if resize_started {
-                                    if !DockInteractionCoordinator::capture(
-                                        window,
-                                        hitbox,
-                                        &pointer_capture_for_down,
-                                    ) {
-                                        DockInteractionCoordinator::cancel(
-                                            &controller_for_down,
-                                            window,
-                                            &pointer_capture_for_down,
-                                            app,
-                                        );
-                                        return;
-                                    }
-                                    app.stop_propagation();
-                                    return;
-                                }
-                            }
-                        }
-
-                        // The remaining CompositionHeader region controls moving the whole Floating.
-                        let floating_title_region = if !hide_header {
-                            dock_area_drag_area.as_ref().and_then(
-                                |(area_rect, columns, splitters, metrics)| {
-                                    floating_dock_area_title_pointer_region(
-                                        *area_rect,
-                                        columns,
-                                        splitters,
-                                        point,
-                                        *metrics,
-                                    )
-                                },
-                            )
-                        } else {
-                            None
-                        };
-                        if let Some(is_title_grip) = floating_title_region {
-                            if is_title_grip
-                                && let Some(manager) = manager_for_down.upgrade()
-                            {
-                                manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_window_move(group, point, manager_cx)
-                                });
-                            }
-                            // The header owns this point, including the fixed controls.
-                            // Do not let a button press fall through to the Group or Tab below.
-                            app.stop_propagation();
-                            return;
-                        }
-
-                        let group_candidate = controller_for_down.update(app, |controller, _| {
-                            let dock_group = match hit.clone()? {
-                                dock_core::HitResult::Group { group }
-                                | dock_core::HitResult::TabStrip { group } => group,
-                                _ => return None,
-                            };
-                            let rects = controller.floating_geometry(input_window_id, group).ok()?;
-                            let group_rect = rects
-                                .groups
-                                .iter()
-                                .find(|rect| rect.group == dock_group)?
-                                .rect;
-                            let in_column = controller.layout().nodes().any(|(_, node)| {
-                                matches!(
-                                    node,
-                                    Node::Column(column) if column.groups.contains(&dock_group)
-                                )
-                            });
-                            let zone = GroupDragArea::drag_zone(
-                                group_rect,
-                                controller.metrics(),
-                                in_column,
-                            );
-                            GroupDragArea::contains(zone, point)
-                                .then_some((dock_group, controller.layout().version()))
-                        });
-                        if let Some((dock_group, layout_version)) = group_candidate {
-                            let is_single_tab_floating = controller_for_down.update(
-                                app,
-                                |controller, _| {
-                                    floating_has_single_tab_dock(
-                                        controller.layout(),
-                                        group,
-                                        dock_group,
-                                    )
-                                },
-                            );
-                            if is_single_tab_floating
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_single_tab_window_move(
-                                        group,
-                                        point,
-                                        manager_cx,
-                                    )
-                                })
-                            {
-                                app.stop_propagation();
-                                return;
-                            }
-
-                            begin_drag_at(
-                                &controller_for_down,
-                                dock_core::DragPayload::Group { group: dock_group },
-                                dock_core::DragHandle::GroupGrip,
-                                point,
-                                DragSourceHost::Floating { group },
-                                input_window_id,
-                                app,
-                            );
-                            group_press_for_down.set(Some(FloatingGroupPress {
-                                group: dock_group,
-                                layout_version,
-                            }));
-                            if !DockInteractionCoordinator::capture(
-                                window,
-                                hitbox,
-                                &pointer_capture_for_down,
-                            ) {
-                                group_press_for_down.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_down,
-                                    window,
-                                    &pointer_capture_for_down,
-                                    app,
-                                );
-                            }
-                            app.stop_propagation();
-                            return;
-                        }
-
-                        let press = controller_for_down.update(app, |controller, _| {
-                            let dock_core::HitResult::TabHeader {
-                                group: tab_group,
-                                panel,
-                                ..
-                            } = hit.clone()?
-                            else {
-                                return None;
-                            };
-                            // FloatingWindowContent uses DockTab for every Group.
-                            // The complete header is available for activation and drag.
-                            Some((tab_group, panel, controller.layout().version()))
-                        });
-                        if let Some((tab_group, panel, layout_version)) = press {
-                            let is_single_tab_floating = controller_for_down.update(
-                                app,
-                                |controller, _| {
-                                    floating_has_single_tab_dock(
-                                        controller.layout(),
-                                        group,
-                                        tab_group,
-                                    )
-                                },
-                            );
-                            if is_single_tab_floating
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_single_tab_window_move(
-                                        group,
-                                        point,
-                                        manager_cx,
-                                    )
-                                })
-                            {
-                                app.stop_propagation();
-                                return;
-                            }
-
-                            tab_press_for_down.set(Some(FloatingTabPress {
-                                tab_group,
-                                panel,
-                                origin: point,
-                                layout_version,
-                            }));
-                            // Capture at press so leaving this native window before
-                            // the next GPUI move event still reaches the drag pipeline.
-                            if !DockInteractionCoordinator::capture(
-                                window,
-                                hitbox,
-                                &pointer_capture_for_down,
-                            ) {
-                                tab_press_for_down.set(None);
-                            }
-                        }
-                    });
-
-                    let manager_for_move = manager.clone();
-                    let controller_for_move = controller.clone();
-                    let tab_press_for_move = tab_press.clone();
-                    let group_press_for_move = group_press.clone();
-                    let pointer_capture_for_move = pointer_capture.clone();
-                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, app| {
-                        if phase != DispatchPhase::Capture || !event.dragging() {
-                            return;
-                        }
-                        let resize_owner = controller_for_move.update(app, |controller, _| {
-                            controller.resize_interaction().map(|interaction| interaction.window_id)
-                        });
-                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
-                            app.stop_propagation();
-                            return;
-                        }
-                        let resize_active = resize_owner == Some(input_window_id);
-                        if resize_active {
-                            if !DockInteractionCoordinator::ensure_current(
-                                &controller_for_move,
-                                window,
-                                &pointer_capture_for_move,
-                                app,
-                            ) {
-                                app.stop_propagation();
-                                return;
-                            }
-                            if DockInteractionCoordinator::capture_was_lost(
-                                window,
-                                &pointer_capture_for_move,
-                            ) {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_move,
-                                    window,
-                                    &pointer_capture_for_move,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            else {
-                                return;
-                            };
-                            let should_schedule = controller_for_move.update(app, |controller, _| {
-                                controller.queue_resize_frame_point(input_window_id, point)
-                            });
-                            if should_schedule {
-                                let controller = controller_for_move.clone();
-                                window.on_next_frame(move |_, app| {
-                                    let point = controller.update(app, |controller, _| {
-                                        controller.take_resize_frame_point(input_window_id)
-                                    });
-                                    if let Some(point) = point {
-                                        update_resize(&controller, input_window_id, point, app);
-                                    }
-                                });
-                            }
-                            app.stop_propagation();
-                            return;
-                        }
-                        if let Some(group_press) = group_press_for_move.get() {
-                            let layout_is_current =
-                                controller_for_move.update(app, |controller, _| {
-                                    controller.layout().version() == group_press.layout_version
-                                });
-                            if !layout_is_current {
-                                group_press_for_move.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_move,
-                                    window,
-                                    &pointer_capture_for_move,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let manager_entity = manager_for_move.upgrade();
-                            let drag_host_active = manager_entity
-                                .as_ref()
-                                .and_then(|manager| {
-                                    manager.update(app, |manager, _| manager.drag_host_manager())
-                                })
-                                .is_some_and(|drag_host| {
-                                    drag_host.update(app, |manager, _| {
-                                        manager.active_drag_host_id().is_some()
-                                    })
-                                });
-                            if drag_host_active {
-                                group_press_for_move.set(None);
-                                if DockInteractionCoordinator::has_capture(
-                                    &pointer_capture_for_move,
-                                ) {
-                                    DockInteractionCoordinator::release(
-                                        window,
-                                        &pointer_capture_for_move,
-                                    );
-                                }
-                                app.stop_propagation();
-                                return;
-                            }
-                            if manager_entity.as_ref().is_some_and(|manager| {
-                                manager.update(app, |manager, _| manager.native_move_active())
-                            }) {
-                                app.stop_propagation();
-                                return;
-                            }
-                            if DockInteractionCoordinator::capture_was_lost(
-                                window,
-                                &pointer_capture_for_move,
-                            ) {
-                                group_press_for_move.set(None);
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_move,
-                                    window,
-                                    &pointer_capture_for_move,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            else {
-                                app.stop_propagation();
-                                return;
-                            };
-                            let dragging = update_drag_at(&controller_for_move, point, app)
-                                || controller_for_move.update(app, |controller, _| {
-                                    matches!(
-                                        controller.drag().session().state(),
-                                        dock_core::DragState::Dragging {
-                                            payload: dock_core::DragPayload::Group { group },
-                                            ..
-                                        } if group == group_press.group
-                                    )
-                                });
-                            if dragging {
-                                let leaves_source =
-                                    controller_for_move.update(app, |controller, _| {
-                                        let Some(rects) = controller
-                                            .floating_geometry(input_window_id, group)
-                                            .ok()
-                                        else {
-                                            return true;
-                                        };
-                                        let Some(group_rect) = rects
-                                            .groups
-                                            .iter()
-                                            .find(|rect| rect.group == group_press.group)
-                                            .map(|rect| rect.rect)
-                                        else {
-                                            return true;
-                                        };
-                                        let in_column =
-                                            controller.layout().nodes().any(|(_, node)| {
-                                                matches!(
-                                                    node,
-                                                    Node::Column(column)
-                                                        if column.groups.contains(&group_press.group)
-                                                )
-                                            });
-                                        let zone = GroupDragArea::drag_zone(
-                                            group_rect,
-                                            controller.metrics(),
-                                            in_column,
-                                        );
-                                        !GroupDragArea::contains(zone, point)
-                                    });
-                                let over_other_window =
-                                    manager_entity.as_ref().is_some_and(|manager| {
-                                        manager.update(app, |manager, _| {
-                                            manager.cursor_over_other_docking_window(group)
-                                        })
-                                    });
-                                if leaves_source || over_other_window {
-                                    let drag_host_manager =
-                                        manager_entity.as_ref().and_then(|manager| {
-                                            manager.update(app, |manager, _| {
-                                                manager.drag_host_manager()
-                                            })
-                                        });
-                                    if let Some(drag_host_manager) = drag_host_manager {
-                                        if !begin_group_drag_host(
-                                            &controller_for_move,
-                                            &drag_host_manager,
-                                            app,
-                                        ) {
-                                            tracing::debug!(
-                                                "Floating Group drag could not start DragHost"
-                                            );
-                                        }
-                                    } else {
-                                        controller_for_move.update(app, |controller, cx| {
-                                            let _ = controller.cancel_pointer_interaction();
-                                            cx.notify();
-                                        });
-                                    }
-                                    group_press_for_move.set(None);
-                                    DockInteractionCoordinator::release(
-                                        window,
-                                        &pointer_capture_for_move,
-                                    );
-                                    app.stop_propagation();
-                                    return;
-                                }
-                            }
-                            app.stop_propagation();
-                            return;
-                        }
-
-                        let Some(press) = tab_press_for_move.get() else {
-                            return;
-                        };
-                        let manager_entity = manager_for_move.upgrade();
-                        let drag_host_active = manager_entity
-                            .as_ref()
-                            .and_then(|manager| {
-                                manager.update(app, |manager, _| manager.drag_host_manager())
-                            })
-                            .is_some_and(|drag_host| {
-                                drag_host.update(app, |manager, _| {
-                                    manager.active_drag_host_id().is_some()
-                                })
-                            });
-                        if drag_host_active {
-                            tab_press_for_move.set(None);
-                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_move) {
-                                DockInteractionCoordinator::release(window, &pointer_capture_for_move);
-                            }
-                            return;
-                        }
-                        if manager_entity.as_ref().is_some_and(|manager| {
-                            manager
-                                .update(app, |manager, _| manager.native_move_active())
-                        }) {
-                            return;
-                        }
-                        if DockInteractionCoordinator::capture_was_lost(
-                            window,
-                            &pointer_capture_for_move,
-                        ) {
-                            tab_press_for_move.set(None);
-                            DockInteractionCoordinator::cancel(
-                                &controller_for_move,
-                                window,
-                                &pointer_capture_for_move,
-                                app,
-                            );
-                            return;
-                        }
-                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
-                            return;
-                        };
-                        let drag = FloatingTabDrag {
-                            source_window_id: input_window_id,
-                            source_group: group,
-                            source_part: None,
-                            panel: press.panel,
-                            press_origin: press.origin,
-                            layout_version: press.layout_version,
-                        };
-                        let dragging = update_floating_tab_drag(
-                            &controller_for_move,
-                            drag,
-                            point,
-                            app,
-                        );
-                        if !dragging {
-                            if !DockInteractionCoordinator::release_if_inactive(
-                                &controller_for_move,
-                                window,
-                                &pointer_capture_for_move,
-                                app,
-                            ) {
-                                tab_press_for_move.set(None);
-                            }
-                            return;
-                        }
-                        // Capture only after the Core threshold is crossed. A
-                        // normal click therefore continues to reach tab controls.
-                        if !DockInteractionCoordinator::capture(
-                            window,
-                            hitbox,
-                            &pointer_capture_for_move,
-                        ) {
-                            tab_press_for_move.set(None);
-                            DockInteractionCoordinator::cancel(
-                                &controller_for_move,
-                                window,
-                                &pointer_capture_for_move,
-                                app,
-                            );
-                            return;
-                        }
-
-                        let leaves_source = if let Some(zone) =
-                            dock_component_tab_zones_for_move.get(&press.panel).copied()
-                        {
-                            DockTab::leaves_strip_zone(zone, point)
-                        } else {
-                            controller_for_move.update(app, |controller, _| {
-                                let strip = controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .and_then(|rects| {
-                                        rects
-                                            .tab_strips
-                                            .iter()
-                                            .find(|strip| strip.group == press.tab_group)
-                                            .map(|strip| strip.rect)
-                                    });
-                                if let Some(strip) = strip {
-                                    DockTab::leaves_strip_zone(strip, point)
-                                } else {
-                                    floating_rect.is_some_and(|rect| {
-                                        rect.contains(point).map(|contains| !contains).unwrap_or(true)
-                                    })
-                                }
-                            })
-                        };
-                        let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
-                            manager
-                                .update(app, |manager, _| {
-                                    manager.cursor_over_other_docking_window(group)
-                                })
-                                
-                        });
-                        if floating_tab_drag_host_required(leaves_source, over_other_window)
-                            && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
-                                manager.update(app, |manager, _| manager.drag_host_manager())
-                            })
-                        {
-                            if !begin_panel_drag_host(
-                                &controller_for_move,
-                                &drag_host_manager,
-                                app,
-                            ) {
-                                tracing::debug!("Floating Panel drag could not start DragHost");
-                            }
-                            tab_press_for_move.set(None);
-                            DockInteractionCoordinator::release(
-                                window,
-                                &pointer_capture_for_move,
-                            );
-                            app.stop_propagation();
-                            return;
-                        }
-                        app.stop_propagation();
-                    });
-
-                    let manager_for_up = manager.clone();
-                    let controller_for_up = controller.clone();
-                    let tab_press_for_up = tab_press.clone();
-                    let group_press_for_up = group_press.clone();
-                    let pointer_capture_for_up = pointer_capture.clone();
-                    window.on_mouse_event(move |event: &MouseUpEvent, phase, window, app| {
-                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
-                            return;
-                        }
-                        let resize_owner = controller_for_up.update(app, |controller, _| {
-                            controller.resize_interaction().map(|interaction| interaction.window_id)
-                        });
-                        if resize_owner.is_some_and(|owner| owner != input_window_id) {
-                            app.stop_propagation();
-                            return;
-                        }
-                        let resize_active = resize_owner == Some(input_window_id);
-                        if resize_active {
-                            if !DockInteractionCoordinator::ensure_current(
-                                &controller_for_up,
-                                window,
-                                &pointer_capture_for_up,
-                                app,
-                            ) {
-                                app.stop_propagation();
-                                return;
-                            }
-                            if DockInteractionCoordinator::capture_was_lost(
-                                window,
-                                &pointer_capture_for_up,
-                            ) {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_up,
-                                    window,
-                                    &pointer_capture_for_up,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            else {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_up,
-                                    window,
-                                    &pointer_capture_for_up,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            };
-                            let floating_rects = controller_for_up.update(app, |controller, _| {
-                                controller
-                                    .floating_geometry(input_window_id, group)
-                                    .ok()
-                                    .cloned()
-                            });
-                            controller_for_up.update(app, |controller, _| {
-                                controller.clear_resize_frame_point(input_window_id);
-                            });
-                            if let Some(rects) = floating_rects {
-                                finish_resize_with_rects(
-                                    &controller_for_up,
-                                    input_window_id,
-                                    point,
-                                    event.click_count,
-                                    &rects,
-                                    app,
-                                );
-                                DockInteractionCoordinator::release(
-                                    window,
-                                    &pointer_capture_for_up,
-                                );
-                            } else {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_up,
-                                    window,
-                                    &pointer_capture_for_up,
-                                    app,
-                                );
-                            }
-                            app.stop_propagation();
-                            return;
-                        }
-                        if let Some(manager) = manager_for_up.upgrade() {
-                            let drag_host_active = manager
-                                .update(app, |manager, _| manager.drag_host_manager())
-                                .is_some_and(|drag_host| {
-                                    drag_host.update(app, |manager, _| {
-                                        manager.active_drag_host_id().is_some()
-                                    })
-                                });
-                            if drag_host_active {
-                                tab_press_for_up.set(None);
-                                group_press_for_up.set(None);
-                                if DockInteractionCoordinator::has_capture(
-                                    &pointer_capture_for_up,
-                                ) {
-                                    DockInteractionCoordinator::release(
-                                        window,
-                                        &pointer_capture_for_up,
-                                    );
-                                }
-                                return;
-                            }
-                            if manager.update(app, |manager, _| manager.native_move_active()) {
-                                return;
-                            }
-                        }
-                        if DockInteractionCoordinator::capture_was_lost(
-                            window,
-                            &pointer_capture_for_up,
-                        ) {
-                            tab_press_for_up.set(None);
-                            group_press_for_up.set(None);
-                            DockInteractionCoordinator::cancel(
-                                &controller_for_up,
-                                window,
-                                &pointer_capture_for_up,
-                                app,
-                            );
-                            return;
-                        }
-                        if let Some(group_press) = group_press_for_up.get() {
-                            group_press_for_up.set(None);
-                            let layout_is_current =
-                                controller_for_up.update(app, |controller, _| {
-                                    controller.layout().version() == group_press.layout_version
-                                });
-                            if !layout_is_current {
-                                DockInteractionCoordinator::cancel(
-                                    &controller_for_up,
-                                    window,
-                                    &pointer_capture_for_up,
-                                    app,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                            let Ok(point) =
-                                crate::geometry::DockGeometry::point_from_gpui(event.position)
-                            else {
-                                DockInteractionCoordinator::release(
-                                    window,
-                                    &pointer_capture_for_up,
-                                );
-                                app.stop_propagation();
-                                return;
-                            };
-                            let dragging = update_drag_at(&controller_for_up, point, app)
-                                || controller_for_up.update(app, |controller, _| {
-                                    matches!(
-                                        controller.drag().session().state(),
-                                        dock_core::DragState::Dragging {
-                                            payload: dock_core::DragPayload::Group { group },
-                                            ..
-                                        } if group == group_press.group
-                                    )
-                                });
-                            if dragging {
-                                let leaves_source =
-                                controller_for_up.update(app, |controller, _| {
-                                    let Some(rects) = controller
-                                        .floating_geometry(input_window_id, group)
-                                        .ok()
-                                    else {
-                                        return true;
-                                    };
-                                    let Some(group_rect) = rects
-                                        .groups
-                                        .iter()
-                                        .find(|rect| rect.group == group_press.group)
-                                        .map(|rect| rect.rect)
-                                    else {
-                                        return true;
-                                    };
-                                    let in_column =
-                                        controller.layout().nodes().any(|(_, node)| {
-                                            matches!(
-                                                node,
-                                                Node::Column(column)
-                                                    if column.groups.contains(&group_press.group)
-                                            )
-                                        });
-                                    let zone = GroupDragArea::drag_zone(
-                                        group_rect,
-                                        controller.metrics(),
-                                        in_column,
-                                    );
-                                    !GroupDragArea::contains(zone, point)
-                                });
-                                let manager_entity = manager_for_up.upgrade();
-                                let over_other_window =
-                                    manager_entity.as_ref().is_some_and(|manager| {
-                                        manager.update(app, |manager, _| {
-                                            manager.cursor_over_other_docking_window(group)
-                                        })
-                                    });
-                                if leaves_source || over_other_window {
-                                    if let Some(drag_host_manager) =
-                                        manager_entity.as_ref().and_then(|manager| {
-                                            manager.update(app, |manager, _| {
-                                                manager.drag_host_manager()
-                                            })
-                                        })
-                                    {
-                                        if !begin_group_drag_host(
-                                            &controller_for_up,
-                                            &drag_host_manager,
-                                            app,
-                                        ) {
-                                            tracing::debug!(
-                                                "Floating Group drag could not start DragHost on release"
-                                            );
-                                        }
-                                    } else {
-                                        controller_for_up.update(app, |controller, cx| {
-                                            let _ = controller.cancel_pointer_interaction();
-                                            cx.notify();
-                                        });
-                                    }
-                                } else {
-                                    controller_for_up.update(app, |controller, cx| {
-                                        let _ = controller.cancel_pointer_interaction();
-                                        cx.notify();
-                                    });
-                                }
-                            } else {
-                                controller_for_up.update(app, |controller, cx| {
-                                    let _ = controller.cancel_pointer_interaction();
-                                    cx.notify();
-                                });
-                            }
-                            DockInteractionCoordinator::release(window, &pointer_capture_for_up);
-                            app.stop_propagation();
-                            return;
-                        }
-                        let Some(press) = tab_press_for_up.get() else {
-                            if DockInteractionCoordinator::has_capture(&pointer_capture_for_up) {
-                                DockInteractionCoordinator::release(
-                                    window,
-                                    &pointer_capture_for_up,
-                                );
-                            }
-                            return;
-                        };
-                        tab_press_for_up.set(None);
-                        let Ok(point) = crate::geometry::DockGeometry::point_from_gpui(event.position) else {
-                            DockInteractionCoordinator::release(
-                                window,
-                                &pointer_capture_for_up,
-                            );
-                            return;
-                        };
-
-                        // MouseUp can be the first event delivered beyond the drag threshold.
-                        // Give the shared floating-tab pipeline the release position before
-                        // deciding whether this tab crossed its source strip boundary.
-                        let drag = FloatingTabDrag {
-                            source_window_id: input_window_id,
-                            source_group: group,
-                            source_part: None,
-                            panel: press.panel,
-                            press_origin: press.origin,
-                            layout_version: press.layout_version,
-                        };
-                        let dragging = update_floating_tab_drag(
-                            &controller_for_up,
-                            drag,
-                            point,
-                            app,
-                        );
-                        if dragging {
-                            let leaves_source = if let Some(zone) =
-                                dock_component_tab_zones_for_up.get(&press.panel).copied()
-                            {
-                                DockTab::leaves_strip_zone(zone, point)
-                            } else {
-                                controller_for_up.update(app, |controller, _| {
-                                    let strip = controller
-                                        .floating_geometry(input_window_id, group)
-                                        .ok()
-                                        .and_then(|rects| {
-                                            rects
-                                                .tab_strips
-                                                .iter()
-                                                .find(|strip| strip.group == press.tab_group)
-                                                .map(|strip| strip.rect)
-                                        });
-                                    if let Some(strip) = strip {
-                                        DockTab::leaves_strip_zone(strip, point)
-                                    } else {
-                                        floating_rect.is_some_and(|rect| {
-                                            rect.contains(point).map(|contains| !contains).unwrap_or(true)
-                                        })
-                                    }
-                                })
-                            };
-                            let manager_entity = manager_for_up.upgrade();
-                            let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
-                                manager.update(app, |manager, _| {
-                                    manager.cursor_over_other_docking_window(group)
-                                })
-                            });
-                            if floating_tab_drag_host_required(leaves_source, over_other_window)
-                                && let Some(drag_host_manager) = manager_entity.as_ref().and_then(|manager| {
-                                    manager.update(app, |manager, _| manager.drag_host_manager())
-                                })
-                            {
-                                if !begin_panel_drag_host(
-                                    &controller_for_up,
-                                    &drag_host_manager,
-                                    app,
-                                ) {
-                                    tracing::debug!("Floating Panel drag could not start DragHost on release");
-                                }
-                                DockInteractionCoordinator::release(
-                                    window,
-                                    &pointer_capture_for_up,
-                                );
-                                app.stop_propagation();
-                                return;
-                            }
-                        }
-
-                        let (was_dragging, was_pressed) =
-                            controller_for_up.update(app, |controller, _| {
-                                match controller.drag().session().state() {
-                                    dock_core::DragState::Dragging {
-                                        payload: dock_core::DragPayload::Panel { panel },
-                                        ..
-                                    } if panel == press.panel => (true, false),
-                                    dock_core::DragState::Pressed {
-                                        payload: dock_core::DragPayload::Panel { panel },
-                                        ..
-                                    } if panel == press.panel => (false, true),
-                                    _ => (false, false),
-                                }
-                            });
-                        if was_dragging {
-                            finish_floating_tab_drag(
-                                &controller_for_up,
-                                input_window_id,
-                                group,
-                                press.panel,
-                                point,
-                                app,
-                            );
-                            DockInteractionCoordinator::release(
-                                window,
-                                &pointer_capture_for_up,
-                            );
-                            app.stop_propagation();
-                            return;
-                        }
-
-                        if was_pressed {
-                            DockInteractionCoordinator::cancel(
-                                &controller_for_up,
-                                window,
-                                &pointer_capture_for_up,
-                                app,
-                            );
-                        } else {
-                            DockInteractionCoordinator::release(
-                                window,
-                                &pointer_capture_for_up,
-                            );
-                        }
-                        let should_activate = controller_for_up.update(app, |controller, _| {
-                            if controller.layout().version() != press.layout_version {
-                                return false;
-                            }
-                            let core_hit = controller
-                                .hit_floating_window(input_window_id, group, point)
-                                .unwrap_or(dock_core::HitResult::Miss);
-                            let released_hit = controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()
-                                .and_then(|rects| {
-                                    rects.tab_headers.iter().find_map(|header| {
-                                        (dock_component_tab_zones_for_up.contains_key(&header.panel)
-                                            && matches!(header.rect.contains(point), Ok(true)))
-                                        .then_some(dock_core::HitResult::TabHeader {
-                                            group: header.group,
-                                            panel: header.panel,
-                                            index: header.index,
-                                        })
-                                    })
-                                })
-                                .unwrap_or(core_hit);
-                            let dock_core::HitResult::TabHeader {
-                                group: released_group,
-                                panel: released_panel,
-                                ..
-                            } = released_hit
-                            else {
-                                return false;
-                            };
-                            if released_group != press.tab_group || released_panel != press.panel {
-                                return false;
-                            }
-                            controller
-                                .floating_geometry(input_window_id, group)
-                                .ok()
-                                .is_some_and(|rects| {
-                                    rects.tab_headers.iter().any(|header| {
-                                        header.group == released_group
-                                            && header.panel == released_panel
-                                            && matches!(header.rect.contains(point), Ok(true))
-                                    })
-                                })
-                        });
-                        if should_activate {
-                            controller_for_up.update(app, |controller, cx| {
-                                let changes_active_tab = {
-                                    let layout = controller.layout();
-                                    match layout.node(press.tab_group) {
-                                        Some(Node::Tabs(tabs)) => tabs
-                                            .active_child()
-                                            .and_then(|child| match layout.node(child) {
-                                                Some(Node::Panel(value)) => Some(value.panel_id),
-                                                _ => None,
-                                            })
-                                            != Some(press.panel),
-                                        _ => false,
-                                    }
-                                };
-
-                                let mut commands = vec![DockCommand::ActivateTab {
-                                    group: press.tab_group,
-                                    panel: press.panel,
-                                }];
-                                if changes_active_tab {
-                                    let metrics = controller.metrics();
-                                    let layout = controller.layout();
-                                    if let (Some(bounds), Ok(preferred_height)) = (
-                                        layout.floating_group(group).map(|floating| floating.bounds),
-                                        layout.floating_preferred_height_for_tab(
-                                            group,
-                                            press.tab_group,
-                                            press.panel,
-                                            &metrics,
-                                        ),
-                                    ) {
-                                        if bounds.size.height != preferred_height {
-                                            commands.push(DockCommand::ResizeFloatingBounds {
-                                                group,
-                                                bounds: Rect::new(
-                                                    bounds.origin,
-                                                    dock_core::Size::new(
-                                                        bounds.size.width,
-                                                        preferred_height,
-                                                    ),
-                                                ),
-                                            });
-                                        }
-                                    }
-                                }
-
-                                if let Err(error) = controller.dispatch_sequence_in(commands, cx) {
-                                    tracing::debug!(
-                                        %error,
-                                        "could not activate and resize the floating tab"
-                                    );
-                                }
-                            });
-                            app.stop_propagation();
-                        }
-                    });
-                }
-            },
-        )
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full();
-        root = root.child(title_input);
+        root = root.child(render_floating_pointer_input(
+            group,
+            self.manager.clone(),
+            self.controller.clone(),
+            input_window_id,
+            snapshot.as_ref().map(|snapshot| snapshot.floating.rect),
+            dock_component_tab_zones,
+            dock_area_drag_area,
+            hide_header,
+            self.tab_press.clone(),
+            self.group_press.clone(),
+            self.pointer_capture.clone(),
+            None,
+            Point::ZERO,
+        ));
 
         let Some(snapshot) = snapshot else {
             return root;
@@ -2578,53 +2673,17 @@ impl Render for FloatingHost {
         let group_press_for_escape = self.group_press.clone();
         let context_menu_is_open = self.open_context_menu.is_some();
         root = root.capture_key_down(move |event, window, app| {
-            if context_menu_is_open
-                || !event.keystroke.key.eq_ignore_ascii_case("escape")
-            {
-                return;
-            }
-            let window_id = window.window_handle().window_id();
-            let resize_owner = controller_for_escape.update(app, |controller, _| {
-                controller.resize_interaction().map(|interaction| interaction.window_id)
-            });
-            if resize_owner.is_some_and(|owner| owner != window_id) {
-                return;
-            }
-            if let Some(manager) = manager_for_escape.upgrade() {
-                if manager.update(app, |manager, _| manager.native_move_active()) {
-                    return;
-                }
-                let drag_host_manager =
-                    manager.update(app, |manager, _| manager.drag_host_manager());
-                if drag_host_manager.is_some_and(|drag_host| {
-                    drag_host.update(app, |manager, manager_cx| {
-                        manager.cancel_active(manager_cx)
-                    })
-                }) {
-                    tab_press_for_escape.set(None);
-                    group_press_for_escape.set(None);
-                    if DockInteractionCoordinator::has_capture(&pointer_capture_for_escape) {
-                        DockInteractionCoordinator::release(window, &pointer_capture_for_escape);
-                    }
-                    app.stop_propagation();
-                    return;
-                }
-            }
-            if tab_press_for_escape.get().is_none()
-                && group_press_for_escape.get().is_none()
-                && resize_owner.is_none()
-            {
-                return;
-            }
-            tab_press_for_escape.set(None);
-            group_press_for_escape.set(None);
-            DockInteractionCoordinator::cancel_on_escape(
+            handle_floating_escape(
+                event,
+                context_menu_is_open,
+                &manager_for_escape,
                 &controller_for_escape,
-                window,
+                &tab_press_for_escape,
+                &group_press_for_escape,
                 &pointer_capture_for_escape,
+                window,
                 app,
             );
-            app.stop_propagation();
         });
 
         root
