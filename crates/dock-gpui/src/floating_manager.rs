@@ -2618,23 +2618,11 @@ impl FloatingWindowManager {
             });
 
         groups.sort_by_key(|group| group.z_order);
-        self.reconcile_part_windows(&transferred_panels, cx);
-
-        let live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
-        let prune_result = self.window_chains.retain_members(&live_members);
+        let prune_result = self.reconcile_part_windows(&transferred_panels, cx);
         let removed_chain_members = prune_result.removed_members;
-        let stale_alignment_anchors = self.pending_window_chain_alignment.iter()
-            .filter(|anchor| {
-                !live_members.contains(anchor) || !self.window_chains.is_chained(**anchor)
-            })
-            .copied().collect::<Vec<_>>();
-        for anchor in stale_alignment_anchors {
-            self.pending_window_chain_alignment.remove(&anchor);
-        }
         if removed_chain_members > 0 {
             tracing::debug!(removed_chain_members, "removed stale WindowGrid members");
         }
-        self.pending_window_chain_alignment.extend(prune_result.components_to_align.iter().copied());
         for candidate in prune_result.reconnect_candidates {
             if !self.pending_window_grid_reconnections.contains(&candidate) {
                 self.pending_window_grid_reconnections.push(candidate);
@@ -4070,10 +4058,11 @@ impl FloatingWindowManager {
         });
 
         if self.window_chains.replace_all_links(&links) {
-            // Every live relationship has been rebuilt from Core members and
-            // preserved cross-composition links. Old pending reconnect requests
-            // refer to the previous graph generation and must not be replayed.
-            self.pending_window_grid_reconnections.clear();
+            // Any previously queued edge that is already present in the rebuilt
+            // Core topology is no longer a reconnection candidate.
+            let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
+            self.pending_window_grid_reconnections
+                .retain(|candidate| !rebuilt_links.contains(candidate));
         } else {
             tracing::warn!(
                 "could not rebuild WindowGrid from the current Floating Header/Group topology"
@@ -4085,7 +4074,7 @@ impl FloatingWindowManager {
         &mut self,
         transferred_panels: &[PanelId],
         cx: &mut Context<Self>,
-    ) {
+    ) -> crate::window_chain::WindowGridPruneResult {
         let scale = self
             .main_native_window
             .and_then(|main| self.native_ops.scale_factor(main).ok())
@@ -4209,6 +4198,32 @@ impl FloatingWindowManager {
                 _ => {}
             }
         }
+
+        // Prune before rebuilding the desired internal Column/Group links.
+        // This lets WindowGrid preserve valid external links and produce
+        // straight-through candidates when a real native member disappears.
+        let live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
+        let prune_result = self.window_chains.retain_members(&live_members);
+        let stale_alignment_anchors = self
+            .pending_window_chain_alignment
+            .iter()
+            .filter(|anchor| {
+                !live_members.contains(anchor) || !self.window_chains.is_chained(**anchor)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        for anchor in stale_alignment_anchors {
+            self.pending_window_chain_alignment.remove(&anchor);
+        }
+        self.pending_window_chain_alignment
+            .extend(prune_result.components_to_align.iter().copied());
+
+        self.rebuild_floating_part_window_grid(&desired);
+        let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
+        self.pending_window_grid_reconnections
+            .retain(|candidate| !rebuilt_links.contains(candidate));
+
+        prune_result
     }
 
     fn initial_panel_window_bounds(
