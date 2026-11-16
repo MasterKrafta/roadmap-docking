@@ -489,6 +489,7 @@ fn floating_host_snapshot(
 
 
 /// Identity of a permanent Floating window that renders exactly one Core member.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FloatingPartKind {
     Header { column: NodeId },
@@ -667,9 +668,9 @@ impl FloatingPartHost {
         else {
             return root;
         };
-        let Some(mut presentations) = snapshot.group_presentations.get(&group_id).cloned() else {
+        if !snapshot.group_presentations.contains_key(&group_id) {
             return root;
-        };
+        }
 
         let transferred_panels = self.controller.update(cx, |controller, _| {
             controller.transferred_panel_views_from(window.window_handle().window_id())
@@ -680,10 +681,9 @@ impl FloatingPartHost {
         );
         let mut rendered_presentations = snapshot.group_presentations.clone();
         transfer.apply_to_group_presentations(&mut rendered_presentations);
-        let Some(rendered_presentation) = rendered_presentations.get(&group_id) else {
+        let Some(presentations) = rendered_presentations.get(&group_id) else {
             return root;
         };
-        presentations = rendered_presentation.clone();
 
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window.window_handle().window_id())
@@ -791,7 +791,7 @@ impl FloatingPartHost {
                 local_strip,
                 &local_headers,
                 local_overflow,
-                &presentations,
+                presentations,
                 Point::ZERO,
                 snapshot.metrics,
                 0.0,
