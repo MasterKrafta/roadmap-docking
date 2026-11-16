@@ -2892,6 +2892,12 @@ impl FloatingWindowManager {
         }
 
         self.window_chains = next_chains;
+        // The reconnect merges formerly separate components. Collapse their
+        // pending anchors to the new edge's stable target so the same HWNDs do
+        // not receive competing position-correction passes.
+        for member in members {
+            self.pending_window_chain_alignment.remove(&member);
+        }
         self.pending_window_chain_alignment.insert(candidate.from);
         Some(true)
     }
