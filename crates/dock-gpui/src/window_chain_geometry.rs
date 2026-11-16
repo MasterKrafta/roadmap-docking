@@ -489,15 +489,6 @@ pub(crate) fn native_resize_bottom_edge_delta(
     delta.is_finite().then_some(delta)
 }
 
-fn opposite_grid_direction(direction: WindowGridDirection) -> WindowGridDirection {
-    match direction {
-        WindowGridDirection::Left => WindowGridDirection::Right,
-        WindowGridDirection::Right => WindowGridDirection::Left,
-        WindowGridDirection::Above => WindowGridDirection::Below,
-        WindowGridDirection::Below => WindowGridDirection::Above,
-    }
-}
-
 fn direction_from_member(
     link: WindowGridLink,
     member: FloatingGroupId,
@@ -505,7 +496,7 @@ fn direction_from_member(
     if link.from == member {
         Some(link.direction)
     } else if link.to == member {
-        Some(opposite_grid_direction(link.direction))
+        Some(link.direction.opposite())
     } else {
         None
     }
