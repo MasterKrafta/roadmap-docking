@@ -13,6 +13,7 @@ use dock_core::{FloatingGroupId, NodeId};
 /// composition implementation. New Floating hosts will use Header and Group, so
 /// a Core FloatingGroupId is no longer overloaded as the identity of every HWND.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[allow(dead_code)] // Header and Group variants are consumed by the dedicated-window stage.
 pub(crate) enum WindowGridMember {
     FloatingComposition(FloatingGroupId),
     Header(NodeId),
