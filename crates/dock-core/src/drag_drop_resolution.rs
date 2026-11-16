@@ -2372,7 +2372,7 @@ fn panel_and_group_drags_can_stack_into_a_floating_column() {
 
     let (source_panel, source_panel_node) =
         builder.panel(key("floating-vertical-source-panel"), constraints());
-    let (remaining_panel, remaining_panel_node) =
+    let (_remaining_panel, remaining_panel_node) =
         builder.panel(key("floating-vertical-source-remaining"), constraints());
     let source_group = builder.tabs(
         vec![source_panel_node, remaining_panel_node],
