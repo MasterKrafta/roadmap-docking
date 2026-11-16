@@ -925,6 +925,13 @@ impl FloatingWindowManager {
             .and_then(|member| self.registry.members.get(member))
     }
 
+    fn all_native_window_entries(&self) -> impl Iterator<Item = &PanelWindowEntry> {
+        self.registry
+            .windows
+            .values()
+            .chain(self.registry.members.values())
+    }
+
     /// Reads each HWND's actual outer frame, DWM-visible horizontal frame,
     /// client rectangle and monitor scale. Core bounds supply the fallback only
     /// while a persistent native host has not been created yet.
@@ -1141,7 +1148,7 @@ impl FloatingWindowManager {
         is_managed_foreground_window(
             window,
             self.main_native_window,
-            self.registry.windows.values().map(|entry| entry.native_window),
+            self.all_native_window_entries().map(|entry| entry.native_window),
             None,
         )
     }
@@ -1847,7 +1854,7 @@ impl FloatingWindowManager {
         };
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window { known.push(main); }
-        known.extend(self.registry.windows.values().filter_map(|entry| {
+        known.extend(self.all_native_window_entries().filter_map(|entry| {
             let native_window = entry.native_window?;
             let is_moving_member = self
                 .native_move_windows
@@ -1991,12 +1998,14 @@ impl FloatingWindowManager {
         let Some(main_native_window) = self.main_native_window else {
             return Some(DockingWindowAtPoint::ForeignWindow);
         };
-        let mut known_windows = Vec::with_capacity(self.registry.windows.len() + 1);
+        let mut known_windows = Vec::with_capacity(
+            self.registry.windows.len() + self.registry.members.len() + 1,
+        );
 
         if excluded_source_window != Some(main_window_id) {
             known_windows.push(main_native_window);
         }
-        known_windows.extend(self.registry.windows.values().filter_map(|entry| {
+        known_windows.extend(self.all_native_window_entries().filter_map(|entry| {
             (entry.visibility == PanelWindowVisibility::Visible
                 && Some(entry.window_id) != excluded_source_window)
                 .then_some(entry.native_window)
@@ -2023,7 +2032,7 @@ impl FloatingWindowManager {
                 .or(Some(DockingWindowAtPoint::ForeignWindow));
         }
 
-        let Some(entry) = self.registry.windows.values().find(|entry| {
+        let Some(entry) = self.all_native_window_entries().find(|entry| {
             entry.visibility == PanelWindowVisibility::Visible
                 && entry.native_window == Some(target_native)
         }) else {
@@ -2051,7 +2060,7 @@ impl FloatingWindowManager {
             return false;
         };
         let mut known = vec![main];
-        known.extend(self.registry.windows.values().filter_map(|entry| {
+        known.extend(self.all_native_window_entries().filter_map(|entry| {
             (entry.visibility == PanelWindowVisibility::Visible)
                 .then_some(entry.native_window)
                 .flatten()
