@@ -1189,6 +1189,17 @@ mod native_z_order_tests {
             floating_grid_members_in_native_front_to_back(&members, links),
             Some(vec![b, a, c, d])
         );
+        for member in [a, b, c, d] {
+            let selected_members = grids.members_for(member);
+            let selected_links = grids
+                .links_for(member)
+                .expect("every T-shaped member resolves to the same grid");
+            assert_eq!(
+                floating_grid_members_in_native_front_to_back(&selected_members, selected_links),
+                Some(vec![b, a, c, d]),
+                "the move snapshot order must not depend on which member starts the drag"
+            );
+        }
         assert_eq!(
             floating_groups_in_native_z_order(&[(a, 1), (b, 2), (c, 3), (d, 4)], &grids),
             vec![d, c, a, b]
