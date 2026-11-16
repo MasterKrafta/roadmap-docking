@@ -1390,29 +1390,25 @@ fn floating_horizontal_composition_drop_zones_target_the_branch_under_pointer() 
         Some(DropTarget::Tabs { group: right_group, index: 1 })
     );
 
-    for (x, expected_group, edge, zone) in [
+    for (x, expected_group, zone) in [
         (
             rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
             left_group,
-            DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
             rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
             right_group,
-            DropZone::Top,
             DropZone::FloatingTop,
         ),
         (
             rects.columns.iter().find(|entry| entry.column == left_column).unwrap().rect.origin.x + 100.0,
             left_group,
-            DropZone::Bottom,
             DropZone::FloatingBottom,
         ),
         (
             rects.columns.iter().find(|entry| entry.column == right_column).unwrap().rect.origin.x + 100.0,
             right_group,
-            DropZone::Bottom,
             DropZone::FloatingBottom,
         ),
     ] {
