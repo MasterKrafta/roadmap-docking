@@ -1024,8 +1024,6 @@ impl DragHostManager {
             None
         };
         let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
-        let can_adopt_existing_window = restored_free_area_bounds.is_some();
-
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
                 let _ = controller.cancel_pointer_interaction();
@@ -1172,22 +1170,9 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            if can_adopt_existing_window
-                && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
-                && self.adopt_active_drag_host_to_floating(id, target_group, cx)
-            {
-                if let Some((anchor, direction)) = chain_join {
-                    self.join_created_groups_to_chain(
-                        id,
-                        anchor,
-                        &created_groups,
-                        direction,
-                        cx,
-                    );
-                }
-                return;
-            }
-
+            // Permanent content now belongs to dedicated Group windows. Keep DragHost
+            // temporary and always use the two-phase handoff; adopting its HWND as a
+            // full-composition host would mount the same PanelViews in two windows.
             if let Some((anchor, direction)) = chain_join {
                 // Resolve the new Core FloatingGroup before linking its HWND.
                 // The DragHost is adopted above when possible; this handoff is
