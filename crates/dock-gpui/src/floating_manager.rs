@@ -2683,7 +2683,9 @@ impl FloatingWindowManager {
             _ if moving_windows.len() > 1 => {
                 // A chain header can move the chain, but cannot detach one
                 // member by dropping it into Main or onto empty desktop space.
-                let bounds = self.native_bounds_for_move_windows(&moving_windows, cx);
+                let bounds = self
+                    .native_bounds_for_move_windows(&moving_windows, cx)
+                    .and_then(|window_bounds| core_floating_bounds_from_grid_members(&window_bounds));
                 match bounds {
                     Some(bounds) => self.controller.update(cx, |controller, controller_cx| {
                         controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
@@ -3089,19 +3091,6 @@ impl FloatingWindowManager {
                 (!entry.window.is_available(cx)).then_some(*panel)
             })
             .collect::<Vec<_>>();
-        for group in &groups {
-            if !self.window_chains.is_chained(window_grid_member(group.id)) {
-                continue;
-            }
-            let Some(panel) = next_hosts.get(&group.id).copied() else {
-                continue;
-            };
-            let host_changed = previous_hosts.get(&group.id).copied() != Some(panel);
-            let host_lost = unavailable_panels.contains(&panel);
-            if host_changed || host_lost {
-                self.pending_window_chain_alignment.insert(window_grid_member(group.id));
-            }
-        }
         for panel in unavailable_panels {
             self.release_panel_window(panel, cx);
         }
@@ -3302,6 +3291,8 @@ impl FloatingWindowManager {
         // are not eligible for reconnection validation until this pass finishes.
         self.synchronize_native_z_order(&groups, &active_hosts, &transferred_panels);
         self.synchronize_native_part_z_order(&groups);
+
+        let live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
 
         // Reconnect a straight-through pair only after its surviving native
         // hosts are visible and the proposed complete grid passes geometry
@@ -4547,7 +4538,7 @@ impl FloatingWindowManager {
         let previous_part_members_by_group =
             std::mem::replace(&mut self.part_members_by_group, members_by_group);
 
-        for spec in desired {
+        for spec in desired.iter().copied() {
             if !self.registry.members.contains_key(&spec.member) {
                 if let Some(entry) = self.create_part_window(spec, cx) {
                     self.registry.members.insert(spec.member, entry);
