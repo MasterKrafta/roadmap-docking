@@ -474,25 +474,192 @@ pub(crate) fn native_resize_right_edge_delta(
     delta.is_finite().then_some(delta)
 }
 
-/// Shifts only members after the resized window. Origins are physical desktop
-/// pixels; every member's own logical dimensions stay intact.
-pub(crate) fn shift_window_chain_after_resize(
-    mut bounds: Vec<(FloatingGroupId, Rect)>,
-    resized_group: FloatingGroupId,
-    right_edge_delta: f32,
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
-    if !right_edge_delta.is_finite() {
+/// Returns the change in a resized window's bottom edge in physical pixels.
+pub(crate) fn native_resize_bottom_edge_delta(
+    previous: Rect,
+    actual: Rect,
+    scale_factor: f32,
+) -> Option<f32> {
+    if !scale_factor.is_finite() || scale_factor <= 0.0 {
         return None;
     }
-    let resized_index = bounds
+    let previous_bottom = previous.origin.y + previous.size.height * scale_factor;
+    let actual_bottom = actual.origin.y + actual.size.height * scale_factor;
+    let delta = actual_bottom - previous_bottom;
+    delta.is_finite().then_some(delta)
+}
+
+fn opposite_grid_direction(direction: WindowGridDirection) -> WindowGridDirection {
+    match direction {
+        WindowGridDirection::Left => WindowGridDirection::Right,
+        WindowGridDirection::Right => WindowGridDirection::Left,
+        WindowGridDirection::Above => WindowGridDirection::Below,
+        WindowGridDirection::Below => WindowGridDirection::Above,
+    }
+}
+
+fn direction_from_member(
+    link: WindowGridLink,
+    member: FloatingGroupId,
+) -> Option<WindowGridDirection> {
+    if link.from == member {
+        Some(link.direction)
+    } else if link.to == member {
+        Some(opposite_grid_direction(link.direction))
+    } else {
+        None
+    }
+}
+
+fn collect_window_grid_region(
+    seeds: &[FloatingGroupId],
+    resized_group: FloatingGroupId,
+    adjacency: &HashMap<FloatingGroupId, Vec<FloatingGroupId>>,
+    mut belongs_to_region: impl FnMut(FloatingGroupId) -> bool,
+) -> HashSet<FloatingGroupId> {
+    let mut visited = HashSet::new();
+    let mut pending = VecDeque::new();
+
+    for seed in seeds {
+        if *seed != resized_group && belongs_to_region(*seed) && visited.insert(*seed) {
+            pending.push_back(*seed);
+        }
+    }
+
+    while let Some(current) = pending.pop_front() {
+        if let Some(neighbours) = adjacency.get(&current) {
+            for neighbour in neighbours {
+                if *neighbour != resized_group
+                    && !visited.contains(neighbour)
+                    && belongs_to_region(*neighbour)
+                {
+                    visited.insert(*neighbour);
+                    pending.push_back(*neighbour);
+                }
+            }
+        }
+    }
+
+    visited
+}
+
+/// Reflows only the eastern and southern regions connected to the resized
+/// window's corresponding edges. Origins are physical desktop pixels; every
+/// neighbouring window keeps its own logical size and DPI scale.
+///
+/// The east region is anchored to the resized HWND's DWM-visible right edge.
+/// Each south branch is anchored to that branch's first lower client top, so a
+/// resize of an upper-left window does not move an unrelated lower-right branch.
+pub(crate) fn shift_window_grid_after_resize(
+    mut bounds: Vec<(FloatingGroupId, Rect)>,
+    frames: &[NativeFrameGeometry],
+    links: &[WindowGridLink],
+    resized_group: FloatingGroupId,
+    right_edge_delta: f32,
+    bottom_edge_delta: f32,
+) -> Option<Vec<(FloatingGroupId, Rect)>> {
+    if !right_edge_delta.is_finite()
+        || !bottom_edge_delta.is_finite()
+        || bounds.len() != frames.len()
+    {
+        return None;
+    }
+
+    let indices = bounds
         .iter()
-        .position(|(group, _)| *group == resized_group)?;
-    for (_, member_bounds) in bounds.iter_mut().skip(resized_index + 1) {
-        member_bounds.origin.x += right_edge_delta;
-        if !member_bounds.origin.x.is_finite() {
+        .enumerate()
+        .map(|(index, (group, rect))| {
+            let valid_rect = rect.origin.x.is_finite()
+                && rect.origin.y.is_finite()
+                && rect.size.width.is_finite()
+                && rect.size.width > 0.0
+                && rect.size.height.is_finite()
+                && rect.size.height > 0.0;
+            (valid_rect && frames[index].is_valid())
+                .then_some((*group, index))
+        })
+        .collect::<Option<HashMap<_, _>>>()?;
+    if indices.len() != bounds.len() {
+        return None;
+    }
+    let resized_index = *indices.get(&resized_group)?;
+
+    let mut adjacency = HashMap::<FloatingGroupId, Vec<FloatingGroupId>>::new();
+    let mut right_seeds = Vec::new();
+    let mut below_seeds = Vec::new();
+    for link in links {
+        if link.from == link.to
+            || !indices.contains_key(&link.from)
+            || !indices.contains_key(&link.to)
+        {
+            return None;
+        }
+        adjacency.entry(link.from).or_default().push(link.to);
+        adjacency.entry(link.to).or_default().push(link.from);
+
+        match direction_from_member(*link, resized_group) {
+            Some(WindowGridDirection::Right) => right_seeds.push(
+                if link.from == resized_group { link.to } else { link.from },
+            ),
+            Some(WindowGridDirection::Below) => below_seeds.push(
+                if link.from == resized_group { link.to } else { link.from },
+            ),
+            _ => {}
+        }
+    }
+
+    let visible_right = bounds[resized_index].1.origin.x
+        + frames[resized_index].outer_width
+        - frames[resized_index].visible_right_inset;
+    if !visible_right.is_finite() {
+        return None;
+    }
+    let east_region = collect_window_grid_region(
+        &right_seeds,
+        resized_group,
+        &adjacency,
+        |member| {
+            let index = indices[&member];
+            let visible_left = bounds[index].1.origin.x + frames[index].visible_left_inset;
+            visible_left.is_finite() && visible_left >= visible_right - 1.5
+        },
+    );
+
+    let mut south_region = HashSet::new();
+    for seed in below_seeds {
+        let seed_index = *indices.get(&seed)?;
+        let branch_top = bounds[seed_index].1.origin.y + frames[seed_index].client_top_inset;
+        if !branch_top.is_finite() {
+            return None;
+        }
+        let branch = collect_window_grid_region(
+            &[seed],
+            resized_group,
+            &adjacency,
+            |member| {
+                let index = indices[&member];
+                let client_top = bounds[index].1.origin.y + frames[index].client_top_inset;
+                client_top.is_finite() && client_top >= branch_top - 1.5
+            },
+        );
+        south_region.extend(branch);
+    }
+
+    for (member, member_bounds) in bounds.iter_mut() {
+        if *member == resized_group {
+            continue;
+        }
+        if east_region.contains(member) {
+            member_bounds.origin.x += right_edge_delta;
+        }
+        if south_region.contains(member) {
+            member_bounds.origin.y += bottom_edge_delta;
+        }
+        if !member_bounds.origin.x.is_finite() || !member_bounds.origin.y.is_finite() {
             return None;
         }
     }
+
     Some(bounds)
 }
 
@@ -1081,57 +1248,174 @@ mod window_grid_bounds_tests {
 }
 
 #[cfg(test)]
-mod native_resize_chain_geometry_tests {
-    use super::{native_resize_right_edge_delta, shift_window_chain_after_resize};
+mod native_resize_grid_geometry_tests {
+    use super::{
+        NativeFrameGeometry, native_resize_bottom_edge_delta, native_resize_right_edge_delta,
+        shift_window_grid_after_resize,
+    };
+    use crate::window_chain::{WindowGridDirection, WindowGridLink};
     use dock_core::{FloatingGroupId, Point, Rect, Size};
     use slotmap::SlotMap;
 
-    fn groups() -> (SlotMap<FloatingGroupId, ()>, [FloatingGroupId; 3]) {
+    fn groups(count: usize) -> (SlotMap<FloatingGroupId, ()>, Vec<FloatingGroupId>) {
         let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let groups = [ids.insert(()), ids.insert(()), ids.insert(())];
+        let groups = (0..count).map(|_| ids.insert(())).collect();
         (ids, groups)
     }
 
-    #[test]
-    fn right_edge_resize_moves_later_windows_by_physical_width_delta_only() {
-        let (_ids, [a, b, c]) = groups();
-        let before = Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0));
-        let actual = Rect::new(Point::new(100.0, 20.0), Size::new(340.0, 400.0));
-        let delta = native_resize_right_edge_delta(before, actual, 1.5)
-            .expect("valid monitor scale");
-        assert_eq!(delta, 60.0);
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
+        Rect::new(Point::new(x, y), Size::new(width, height))
+    }
 
-        let bounds = vec![
-            (a, Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0))),
-            (b, actual),
-            (c, Rect::new(Point::new(760.0, 20.0), Size::new(220.0, 320.0))),
-        ];
-        let shifted = shift_window_chain_after_resize(bounds, b, delta)
-            .expect("resized member must belong to chain");
-        assert_eq!(shifted[0].1.origin, Point::new(100.0, 20.0));
-        assert_eq!(shifted[1].1.origin, Point::new(100.0, 20.0));
-        assert_eq!(shifted[2].1.origin, Point::new(820.0, 20.0));
-        assert_eq!(shifted[2].1.size, Size::new(220.0, 320.0));
+    fn frame(width: f32, height: f32, scale: f32) -> NativeFrameGeometry {
+        NativeFrameGeometry::without_frame_size(Size::new(width, height), scale)
+            .expect("valid frame geometry")
+    }
+
+    fn link(
+        from: FloatingGroupId,
+        to: FloatingGroupId,
+        direction: WindowGridDirection,
+    ) -> WindowGridLink {
+        WindowGridLink { from, to, direction }
     }
 
     #[test]
-    fn left_edge_resize_with_anchored_right_edge_does_not_move_neighbours() {
-        let before = Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0));
-        let actual = Rect::new(Point::new(160.0, 20.0), Size::new(260.0, 400.0));
-        assert_eq!(native_resize_right_edge_delta(before, actual, 1.5), Some(0.0));
+    fn right_edge_resize_moves_only_the_eastern_connected_region() {
+        let (_ids, ids) = groups(4);
+        let [a, b, c, d] = ids.as_slice() else { panic!("four groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 50.0, 40.0)),
+            (*c, rect(0.0, 70.0, 100.0, 40.0)),
+            (*d, rect(100.0, 30.0, 50.0, 50.0)),
+        ];
+        let frames = vec![
+            frame(100.0, 80.0, 1.0),
+            frame(50.0, 40.0, 1.0),
+            frame(100.0, 40.0, 1.0),
+            frame(50.0, 50.0, 1.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*a, *c, WindowGridDirection::Below),
+            link(*b, *d, WindowGridDirection::Below),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *a, 24.0, 0.0)
+            .expect("valid right-side grid region");
+        assert_eq!(shifted[0].1.origin, Point::new(0.0, 0.0));
+        assert_eq!(shifted[1].1.origin, Point::new(124.0, 0.0));
+        assert_eq!(shifted[2].1.origin, Point::new(0.0, 70.0));
+        assert_eq!(shifted[3].1.origin, Point::new(124.0, 30.0));
+        assert_eq!(shifted[3].1.size, Size::new(50.0, 50.0));
     }
 
     #[test]
-    fn resizing_last_member_does_not_change_earlier_windows() {
-        let (_ids, [a, b, c]) = groups();
+    fn bottom_edge_resize_moves_only_the_southern_branch_and_its_row() {
+        let (_ids, ids) = groups(5);
+        let [a, b, c, d, e] = ids.as_slice() else { panic!("five groups"); };
         let bounds = vec![
-            (a, Rect::new(Point::new(100.0, 20.0), Size::new(300.0, 400.0))),
-            (b, Rect::new(Point::new(400.0, 20.0), Size::new(240.0, 360.0))),
-            (c, Rect::new(Point::new(640.0, 20.0), Size::new(220.0, 320.0))),
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 50.0, 80.0)),
+            (*c, rect(0.0, 70.0, 100.0, 40.0)),
+            (*d, rect(100.0, 70.0, 50.0, 60.0)),
+            (*e, rect(100.0, 120.0, 50.0, 40.0)),
         ];
-        let shifted = shift_window_chain_after_resize(bounds.clone(), c, 80.0)
-            .expect("last member must belong to chain");
-        assert_eq!(shifted, bounds);
+        let frames = vec![
+            frame(100.0, 80.0, 1.0),
+            frame(50.0, 80.0, 1.0),
+            frame(100.0, 40.0, 1.0),
+            frame(50.0, 60.0, 1.0),
+            frame(50.0, 40.0, 1.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*a, *c, WindowGridDirection::Below),
+            link(*c, *d, WindowGridDirection::Right),
+            link(*d, *e, WindowGridDirection::Below),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *a, 0.0, 18.0)
+            .expect("valid lower grid region");
+        assert_eq!(shifted[0].1.origin, Point::new(0.0, 0.0));
+        assert_eq!(shifted[1].1.origin, Point::new(100.0, 0.0));
+        assert_eq!(shifted[2].1.origin, Point::new(0.0, 88.0));
+        assert_eq!(shifted[3].1.origin, Point::new(100.0, 88.0));
+        assert_eq!(shifted[4].1.origin, Point::new(100.0, 138.0));
+        assert_eq!(shifted[4].1.size, Size::new(50.0, 40.0));
+    }
+
+    #[test]
+    fn corner_resize_combines_axis_offsets_without_changing_sizes() {
+        let (_ids, ids) = groups(5);
+        let [a, b, c, d, e] = ids.as_slice() else { panic!("five groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 50.0, 40.0)),
+            (*c, rect(0.0, 70.0, 100.0, 40.0)),
+            (*d, rect(100.0, 30.0, 50.0, 50.0)),
+            (*e, rect(0.0, 120.0, 100.0, 40.0)),
+        ];
+        let frames = vec![
+            frame(100.0, 80.0, 1.0),
+            frame(50.0, 40.0, 1.0),
+            frame(100.0, 40.0, 1.0),
+            frame(50.0, 50.0, 1.0),
+            frame(100.0, 40.0, 1.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*a, *c, WindowGridDirection::Below),
+            link(*b, *d, WindowGridDirection::Below),
+            link(*c, *e, WindowGridDirection::Below),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *a, 12.0, 20.0)
+            .expect("valid corner resize regions");
+        assert_eq!(shifted[1].1.origin, Point::new(112.0, 0.0));
+        assert_eq!(shifted[2].1.origin, Point::new(0.0, 90.0));
+        assert_eq!(shifted[3].1.origin, Point::new(112.0, 30.0));
+        assert_eq!(shifted[4].1.origin, Point::new(0.0, 140.0));
+        assert_eq!(shifted[3].1.size, Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn mixed_dpi_grid_members_shift_by_the_same_physical_delta() {
+        let (_ids, ids) = groups(3);
+        let [a, b, c] = ids.as_slice() else { panic!("three groups"); };
+        let bounds = vec![
+            (*a, rect(0.0, 0.0, 100.0, 80.0)),
+            (*b, rect(100.0, 0.0, 50.0, 40.0)),
+            (*c, rect(200.0, 0.0, 30.0, 40.0)),
+        ];
+        let frames = vec![
+            frame(100.0, 80.0, 1.0),
+            frame(50.0, 40.0, 2.0),
+            frame(30.0, 40.0, 1.0),
+        ];
+        let links = vec![
+            link(*a, *b, WindowGridDirection::Right),
+            link(*b, *c, WindowGridDirection::Right),
+        ];
+
+        let shifted = shift_window_grid_after_resize(bounds, &frames, &links, *a, 15.0, 0.0)
+            .expect("mixed-DPI grid must remain valid");
+        assert_eq!(shifted[1].1.origin.x, 115.0);
+        assert_eq!(shifted[2].1.origin.x, 215.0);
+        assert_eq!(shifted[1].1.size, Size::new(50.0, 40.0));
+    }
+
+    #[test]
+    fn right_and_bottom_edge_deltas_use_the_accepted_physical_size() {
+        let before = rect(100.0, 50.0, 300.0, 200.0);
+        let actual = rect(100.0, 50.0, 340.0, 230.0);
+        assert_eq!(native_resize_right_edge_delta(before, actual, 1.5), Some(60.0));
+        assert_eq!(native_resize_bottom_edge_delta(before, actual, 1.5), Some(45.0));
+
+        let left_top = rect(160.0, 70.0, 260.0, 180.0);
+        assert_eq!(native_resize_right_edge_delta(before, left_top, 1.5), Some(0.0));
+        assert_eq!(native_resize_bottom_edge_delta(before, left_top, 1.5), Some(0.0));
     }
 }
 
