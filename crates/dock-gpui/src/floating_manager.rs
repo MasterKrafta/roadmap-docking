@@ -1175,6 +1175,16 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
+        // Protect metric updates from the moment Windows enters its modal sizing
+        // loop, even before the first size delta opens the Core history transaction.
+        let Some(session_started) = self.controller.update(cx, |controller, _| {
+            controller.begin_native_resize_session()
+        }) else {
+            return false;
+        };
+        if !session_started {
+            return false;
+        }
         self.native_resize = Some(NativeResizeSession {
             group,
             window_id,
@@ -1477,12 +1487,13 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) {
         self.native_resize = None;
-        if state.transaction_started {
-            self.controller.update(cx, |controller, controller_cx| {
+        self.controller.update(cx, |controller, controller_cx| {
+            if state.transaction_started {
                 controller.finish_native_resize_transaction();
-                controller_cx.notify();
-            });
-        }
+            }
+            controller.end_native_resize_session();
+            controller_cx.notify();
+        });
 
         // A resize can finish on a monitor with a different DPI. Re-read the
         // final window scale after the modal loop has exited and resize the
