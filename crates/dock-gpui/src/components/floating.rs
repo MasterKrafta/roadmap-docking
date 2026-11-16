@@ -506,6 +506,7 @@ pub(crate) struct FloatingPartHost {
     floating_group: FloatingGroupId,
     part: FloatingPartKind,
     theme: Theme,
+    manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
     open_context_menu: Option<FloatingHostOpenMenu>,
 }
@@ -517,12 +518,14 @@ impl FloatingPartHost {
         floating_group: FloatingGroupId,
         column: NodeId,
         theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
     ) -> Self {
         Self::new(
             controller,
             floating_group,
             FloatingPartKind::Header { column },
             theme,
+            manager,
         )
     }
 
@@ -532,12 +535,14 @@ impl FloatingPartHost {
         column: NodeId,
         group: NodeId,
         theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
     ) -> Self {
         Self::new(
             controller,
             floating_group,
             FloatingPartKind::Group { column, group },
             theme,
+            manager,
         )
     }
 
@@ -546,12 +551,14 @@ impl FloatingPartHost {
         floating_group: FloatingGroupId,
         part: FloatingPartKind,
         theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
     ) -> Self {
         Self {
             controller,
             floating_group,
             part,
             theme,
+            manager,
             controller_observed: false,
             open_context_menu: None,
         }
@@ -787,6 +794,38 @@ impl FloatingPartHost {
                 (local, view)
             })
             .collect::<Vec<_>>();
+        let rendered_panels = panel_rects
+            .iter()
+            .filter_map(|(rect, view)| view.as_ref().map(|_| rect.panel))
+            .collect::<HashSet<_>>();
+        let window_id = window.window_handle().window_id();
+        let handoff_panels = self.manager.upgrade().and_then(|manager| {
+            manager.update(cx, |manager, manager_cx| {
+                manager.pending_drag_host_handoff_panels(
+                    self.floating_group,
+                    window_id,
+                    manager_cx,
+                )
+            })
+        });
+        if let Some(required_panels) = handoff_panels.filter(|required| {
+            required.iter().all(|panel| rendered_panels.contains(panel))
+        }) {
+            let manager = self.manager.clone();
+            let floating_group = self.floating_group;
+            window.on_next_frame(move |_, app| {
+                if let Some(manager) = manager.upgrade() {
+                    let _ = manager.update(app, |manager, manager_cx| {
+                        manager.notify_drag_host_handoff_rendered(
+                            floating_group,
+                            window_id,
+                            &required_panels,
+                            manager_cx,
+                        );
+                    });
+                }
+            });
+        }
 
         root = root
             .child(DockGroupView::render_core(
