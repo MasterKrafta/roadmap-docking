@@ -30,7 +30,7 @@ use crate::{
         floating_grid_members_in_native_front_to_back,
         window_grid_members_in_native_z_order as grid_window_members_in_native_z_order,
         native_resize_right_edge_delta, native_resize_bottom_edge_delta,
-        shift_window_grid_after_resize,
+        shift_window_grid_after_resize, floating_part_outer_bounds,
     },
 };
 
@@ -810,13 +810,12 @@ impl FloatingWindowManager {
         fallback_scale: Option<f32>,
     ) -> Option<Rect> {
         let frame = self.native_frame_geometry(native_window, fallback_scale)?;
-        let client_origin = Point::new(
-            spec.floating_origin.x + spec.local_origin.x * frame.scale_factor,
-            spec.floating_origin.y + spec.local_origin.y * frame.scale_factor,
-        );
-        client_origin.validate().ok()?;
-        let client_rect = Rect::new(client_origin, spec.bounds.size);
-        frame.outer_bounds_for_client_rect(client_rect)
+        floating_part_outer_bounds(
+            spec.floating_origin,
+            spec.local_origin,
+            spec.bounds.size,
+            frame,
+        )
     }
 
     /// Returns each member's measured native frame using its own HWND and DPI.
