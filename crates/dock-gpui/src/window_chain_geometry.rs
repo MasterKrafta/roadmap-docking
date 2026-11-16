@@ -143,6 +143,7 @@ impl NativeFrameGeometry {
     }
 
     /// Horizontal-only compatibility helper for tests without a real HWND.
+    #[cfg(test)]
     pub(crate) fn without_frame(outer_width: f32) -> Option<Self> {
         Self::without_frame_size(Size::new(outer_width, 1.0), 1.0)
     }
@@ -184,6 +185,7 @@ impl NativeFrameGeometry {
 
 /// Keeps the anchor at its drop position and aligns a horizontal chain by its
 /// DWM-visible edges. Each member retains its own Core size.
+#[cfg(test)]
 pub(crate) fn arrange_contiguous_window_chain_bounds(
     mut bounds: Vec<(FloatingGroupId, Rect)>,
     frames: &[NativeFrameGeometry],
