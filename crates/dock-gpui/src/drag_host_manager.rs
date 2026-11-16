@@ -834,11 +834,12 @@ impl DragHostManager {
         )
         .then_some(source_window_id)
         .flatten();
-        let target_window = floating_manager.update(cx, |manager, _| {
+        let target_window = floating_manager.update(cx, |manager, manager_cx| {
             manager.docking_window_at_point(
                 cursor,
                 native_drag_host,
                 excluded_source_window,
+                manager_cx,
             )
         });
         let source_point = floating_manager.update(cx, |manager, _| {
