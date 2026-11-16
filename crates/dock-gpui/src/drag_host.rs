@@ -30,6 +30,15 @@ impl DragHostId {
     }
 }
 
+/// Identifies one permanent part-window when a Floating composition is split into HWNDs.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DockWindowPart {
+    /// Header window belonging to one Core Column.
+    Header { column: NodeId },
+    /// Content window belonging to one Core Group.
+    Group { group: NodeId },
+}
+
 /// Describes the runtime purpose of a native window used by the dock adapter.
 ///
 /// This is not a Core model type. In particular, `Dragging` identifies a
@@ -43,6 +52,13 @@ pub enum DockWindowRole {
     Floating {
         /// Core identity of the composition hosted by this window.
         group: FloatingGroupId,
+    },
+    /// A permanent Header or Group window within a Floating composition.
+    FloatingPart {
+        /// Core identity of the containing composition.
+        group: FloatingGroupId,
+        /// Identity of the exact Header or Group HWND under the pointer.
+        part: DockWindowPart,
     },
     /// A temporary window used only while a dock object is being dragged.
     Dragging {
@@ -63,6 +79,13 @@ pub enum DragSourceHost {
     Floating {
         /// Core identity of the source floating composition.
         group: FloatingGroupId,
+    },
+    /// Content originated in one permanent Header/Group part window.
+    FloatingPart {
+        /// Core identity of the containing floating composition.
+        group: FloatingGroupId,
+        /// Exact persistent window that initiated the content gesture.
+        part: DockWindowPart,
     },
 }
 
@@ -424,6 +447,13 @@ mod tests {
             dragging,
             DockWindowRole::Floating {
                 group: FloatingGroupId::null(),
+            }
+        );
+        assert_ne!(
+            dragging,
+            DockWindowRole::FloatingPart {
+                group: FloatingGroupId::null(),
+                part: super::DockWindowPart::Group { group: dock_core::NodeId::null() },
             }
         );
     }

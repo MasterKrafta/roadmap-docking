@@ -1698,6 +1698,7 @@ impl Render for FloatingHost {
                         let drag = FloatingTabDrag {
                             source_window_id: input_window_id,
                             source_group: group,
+                            source_part: None,
                             panel: press.panel,
                             press_origin: press.origin,
                             layout_version: press.layout_version,
@@ -2053,6 +2054,7 @@ impl Render for FloatingHost {
                         let drag = FloatingTabDrag {
                             source_window_id: input_window_id,
                             source_group: group,
+                            source_part: None,
                             panel: press.panel,
                             press_origin: press.origin,
                             layout_version: press.layout_version,

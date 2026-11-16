@@ -20,7 +20,7 @@ use platform::{
 };
 
 use crate::{
-    DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
+    DockController, DockEvent, DockTheme, DockWindowPart, DragHostManager, DragSourceHost,
     components::{FloatingHost, floating::{FloatingPartHost, FloatingPartKind}},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
@@ -273,6 +273,13 @@ pub(crate) enum DockingWindowAtPoint {
         window_id: WindowId,
         point: Point,
     },
+    /// The pointer in one permanent Header/Group HWND, translated to Core coordinates.
+    FloatingPart {
+        group: FloatingGroupId,
+        window_id: WindowId,
+        part: DockWindowPart,
+        point: Point,
+    },
 }
 
 impl DockingWindowAtPoint {
@@ -280,6 +287,9 @@ impl DockingWindowAtPoint {
         match self {
             Self::Main { .. } => Some(crate::DockWindowRole::Main),
             Self::Floating { group, .. } => Some(crate::DockWindowRole::Floating { group }),
+            Self::FloatingPart { group, part, .. } => {
+                Some(crate::DockWindowRole::FloatingPart { group, part })
+            },
             Self::ForeignWindow => None,
         }
     }
@@ -555,6 +565,21 @@ struct NativeResizeSession {
 
 fn window_grid_member(group: FloatingGroupId) -> WindowGridMember {
     WindowGridMember::floating_composition(group)
+}
+
+fn window_grid_member_for_part(part: DockWindowPart) -> WindowGridMember {
+    match part {
+        DockWindowPart::Header { column } => WindowGridMember::Header(column),
+        DockWindowPart::Group { group } => WindowGridMember::Group(group),
+    }
+}
+
+fn dock_window_part_for_member(member: WindowGridMember) -> Option<DockWindowPart> {
+    match member {
+        WindowGridMember::Header(column) => Some(DockWindowPart::Header { column }),
+        WindowGridMember::Group(group) => Some(DockWindowPart::Group { group }),
+        WindowGridMember::FloatingComposition(_) => None,
+    }
 }
 fn core_floating_bounds_from_grid_members(
     bounds: &[(WindowGridMember, Rect)],
@@ -1168,6 +1193,30 @@ impl FloatingWindowManager {
     ) -> Option<Rect> {
         bounds.validate_non_empty().ok()?;
         let native_window = self.panel_window_for_group(source_group)?.native_window?;
+        self.screen_bounds_from_floating_native_window(native_window, bounds)
+    }
+
+    /// Converts bounds from an exact Header/Group host into physical screen coordinates.
+    pub(crate) fn screen_bounds_from_floating_part(
+        &self,
+        source_group: FloatingGroupId,
+        part: DockWindowPart,
+        bounds: Rect,
+    ) -> Option<Rect> {
+        bounds.validate_non_empty().ok()?;
+        let member = window_grid_member_for_part(part);
+        let entry = self.registry.members.get(&member)?;
+        if entry.host_group != Some(source_group) {
+            return None;
+        }
+        self.screen_bounds_from_floating_native_window(entry.native_window?, bounds)
+    }
+
+    fn screen_bounds_from_floating_native_window(
+        &self,
+        native_window: NativeWindowId,
+        bounds: Rect,
+    ) -> Option<Rect> {
         let client = self.native_ops.client_origin(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         let origin = DockGeometry::screen_position_from_host_local(
@@ -2129,10 +2178,18 @@ impl FloatingWindowManager {
             ) else {
                 return Some(DockingWindowAtPoint::ForeignWindow);
             };
-            return Some(DockingWindowAtPoint::Floating {
-                group,
-                window_id: entry.window_id,
-                point,
+            return Some(match dock_window_part_for_member(*member) {
+                Some(part) => DockingWindowAtPoint::FloatingPart {
+                    group,
+                    window_id: entry.window_id,
+                    part,
+                    point,
+                },
+                None => DockingWindowAtPoint::Floating {
+                    group,
+                    window_id: entry.window_id,
+                    point,
+                },
             });
         }
 
@@ -2191,6 +2248,23 @@ impl FloatingWindowManager {
                 }
                 self.core_point_for_main(screen)
             }
+            DragSourceHost::FloatingPart { group, part } => {
+                let member = window_grid_member_for_part(part);
+                let entry = self.registry.members.get(&member)?;
+                if entry.host_group != Some(group)
+                    || source_window_id.is_some_and(|id| id != entry.window_id)
+                {
+                    return None;
+                }
+                self.core_point_for_floating_member(
+                    member,
+                    group,
+                    entry.window_id,
+                    entry.native_window?,
+                    screen,
+                    cx,
+                )
+            }
             DragSourceHost::Floating { group } => {
                 if let Some((member, entry)) = self.registry.members.iter().find(|(_, entry)| {
                     source_window_id.is_some_and(|id| id == entry.window_id)
@@ -2226,6 +2300,9 @@ impl FloatingWindowManager {
             DragSourceHost::Main => self.screen_bounds_from_main_local(bounds),
             DragSourceHost::Floating { group } => {
                 self.screen_bounds_from_floating_local(group, bounds)
+            }
+            DragSourceHost::FloatingPart { group, part } => {
+                self.screen_bounds_from_floating_part(group, part, bounds)
             }
         }
     }

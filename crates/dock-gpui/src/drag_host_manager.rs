@@ -40,7 +40,8 @@ fn source_layout_rects(
 ) -> Option<dock_core::LayoutRects> {
     match source_host {
         DragSourceHost::Main => Some(controller.geometry().ok()?.clone()),
-        DragSourceHost::Floating { group } => {
+        DragSourceHost::Floating { group }
+        | DragSourceHost::FloatingPart { group, .. } => {
             Some(controller.floating_geometry(source_window_id, group).ok()?.clone())
         }
     }
@@ -67,8 +68,13 @@ fn floating_window_chain_target(
         return None;
     }
 
-    let (Some(target), Some(DockWindowRole::Floating { group })) = (target, target_role) else {
+    let Some(target) = target else {
         return None;
+    };
+    let group = match target_role {
+        Some(DockWindowRole::Floating { group })
+        | Some(DockWindowRole::FloatingPart { group, .. }) => group,
+        _ => return None,
     };
     // A content drop on any side of another Floating window creates a separate
     // FloatingGroup and joins its native HWND to WindowGrid. Plain Top/Bottom
@@ -873,6 +879,11 @@ impl DragHostManager {
                                 group,
                                 window_id,
                                 point,
+                            }) | Some(DockingWindowAtPoint::FloatingPart {
+                                group,
+                                window_id,
+                                point,
+                                ..
                             }),
                         ) => controller
                             .prepare_floating_window_drop_resolver(window_id, group, source)
@@ -900,7 +911,8 @@ impl DragHostManager {
                 target_window
                     .and_then(|target| match target {
                         DockingWindowAtPoint::Main { point, .. }
-                        | DockingWindowAtPoint::Floating { point, .. } => Some(point),
+                        | DockingWindowAtPoint::Floating { point, .. }
+                        | DockingWindowAtPoint::FloatingPart { point, .. } => Some(point),
                         DockingWindowAtPoint::ForeignWindow => None,
                     })
                     .unwrap_or(source_point)
