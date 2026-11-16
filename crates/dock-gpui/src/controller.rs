@@ -444,7 +444,7 @@ impl DockController {
     /// transaction: pointer baselines and DragSession constraints were captured
     /// against the previous values. The caller publishes the queued event after
     /// this method returns.
-    pub fn update_metrics(
+    pub fn set_metrics(
         &mut self,
         metrics: DockMetrics,
     ) -> Result<bool, DockControllerConfigError> {
