@@ -499,6 +499,38 @@ fn floating_part_internal_links(
     links
 }
 
+fn floating_part_boundary_member_from_members(
+    members: &[WindowGridMember],
+    side: WindowGridDirection,
+) -> Option<WindowGridMember> {
+    let first_header = members
+        .iter()
+        .find(|member| matches!(member, WindowGridMember::Header(_)))
+        .copied();
+    let last_header = members
+        .iter()
+        .rev()
+        .find(|member| matches!(member, WindowGridMember::Header(_)))
+        .copied();
+    let first_group = members
+        .iter()
+        .find(|member| matches!(member, WindowGridMember::Group(_)))
+        .copied();
+    let last_group = members
+        .iter()
+        .rev()
+        .find(|member| matches!(member, WindowGridMember::Group(_)))
+        .copied();
+
+    match side {
+        WindowGridDirection::Left | WindowGridDirection::Above => {
+            first_header.or(first_group)
+        }
+        WindowGridDirection::Right => last_header.or(last_group),
+        WindowGridDirection::Below => last_group.or(last_header),
+    }
+}
+
 fn floating_part_boundary_member(
     specs: &[FloatingPartWindowSnapshot],
     floating_group: FloatingGroupId,
@@ -507,26 +539,9 @@ fn floating_part_boundary_member(
     let members = specs
         .iter()
         .filter(|spec| spec.floating_group == floating_group)
+        .map(|spec| spec.member)
         .collect::<Vec<_>>();
-    let first_header = members.iter().find_map(|spec| {
-        matches!(spec.kind, FloatingPartKind::Header { .. }).then_some(spec.member)
-    });
-    let last_header = members.iter().rev().find_map(|spec| {
-        matches!(spec.kind, FloatingPartKind::Header { .. }).then_some(spec.member)
-    });
-    let first_group = members.iter().find_map(|spec| {
-        matches!(spec.kind, FloatingPartKind::Group { .. }).then_some(spec.member)
-    });
-    let last_group = members.iter().rev().find_map(|spec| {
-        matches!(spec.kind, FloatingPartKind::Group { .. }).then_some(spec.member)
-    });
-
-    match side {
-        WindowGridDirection::Left => first_header.or(first_group),
-        WindowGridDirection::Right => last_header.or(last_group),
-        WindowGridDirection::Above => first_header.or(first_group),
-        WindowGridDirection::Below => last_group.or(last_header),
-    }
+    floating_part_boundary_member_from_members(&members, side)
 }
 
 #[derive(Clone, Copy)]
@@ -690,32 +705,10 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         side: WindowGridDirection,
     ) -> Option<WindowGridMember> {
-        let members = self.part_members_by_group.get(&group)?;
-        let first_header = members
-            .iter()
-            .find(|member| matches!(member, WindowGridMember::Header(_)))
-            .copied();
-        let last_header = members
-            .iter()
-            .rev()
-            .find(|member| matches!(member, WindowGridMember::Header(_)))
-            .copied();
-        let first_group = members
-            .iter()
-            .find(|member| matches!(member, WindowGridMember::Group(_)))
-            .copied();
-        let last_group = members
-            .iter()
-            .rev()
-            .find(|member| matches!(member, WindowGridMember::Group(_)))
-            .copied();
-
-        match side {
-            WindowGridDirection::Left => first_header.or(first_group),
-            WindowGridDirection::Right => last_header.or(last_group),
-            WindowGridDirection::Above => first_header.or(first_group),
-            WindowGridDirection::Below => last_group.or(last_header),
-        }
+        floating_part_boundary_member_from_members(
+            self.part_members_by_group.get(&group)?,
+            side,
+        )
     }
 
     fn migrate_window_grid_link(
@@ -1072,7 +1065,7 @@ impl FloatingWindowManager {
         bounds: Vec<(WindowGridMember, Rect)>,
         links: &[WindowGridLink],
         anchor: WindowGridMember,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> Option<Vec<(WindowGridMember, Rect)>> {
         let frames = self.frame_geometries_for_bounds(&bounds)?;
         arrange_grid_geometry_bounds(bounds, &frames, links, anchor)
