@@ -257,7 +257,7 @@ impl Render for DockHost {
         match dock_metrics_from_theme(self.theme.metrics) {
             Ok(metrics) => {
                 self.controller.update(cx, |controller, controller_cx| {
-                    match controller.update_metrics(metrics) {
+                    match controller.set_metrics(metrics) {
                         Ok(true) => {
                             controller.flush_events(controller_cx);
                             controller_cx.notify();
