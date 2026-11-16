@@ -1119,9 +1119,7 @@ impl FloatingWindowManager {
             known.push(main);
         }
         known.extend(
-            self.registry
-                .windows
-                .values()
+            self.all_native_window_entries()
                 .filter_map(|entry| entry.native_window),
         );
 
@@ -3392,9 +3390,9 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Notifies and invalidates all currently visible floating composition hosts.
+    /// Notifies and invalidates every visible Floating Header/Group host.
     pub(crate) fn redraw_visible_hosts(&self, cx: &mut Context<Self>) {
-        let hosts = self
+        let legacy_hosts = self
             .registry
             .windows
             .iter()
@@ -3404,11 +3402,26 @@ impl FloatingWindowManager {
             .map(|(panel, entry)| (*panel, entry.window))
             .collect::<Vec<_>>();
 
-        for (panel, window) in hosts {
+        for (panel, window) in legacy_hosts {
             if let Err(error) = window.notify_host(cx) {
-                tracing::debug!(?panel, %error, "could not notify a visible FloatingHost");
+                tracing::debug!(?panel, %error, "could not notify a legacy FloatingHost");
             }
             self.request_native_redraw(panel);
+        }
+
+        let member_hosts = self
+            .registry
+            .members
+            .iter()
+            .filter(|(_, entry)| entry.visibility == PanelWindowVisibility::Visible)
+            .map(|(member, entry)| (*member, entry.window))
+            .collect::<Vec<_>>();
+
+        for (member, window) in member_hosts {
+            if let Err(error) = window.notify_host(cx) {
+                tracing::debug!(?member, %error, "could not notify a visible Floating part host");
+            }
+            self.request_member_redraw(member);
         }
     }
 
