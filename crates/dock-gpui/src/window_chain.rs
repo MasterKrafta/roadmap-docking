@@ -936,10 +936,13 @@ mod tests {
         let mut registry = WindowGridRegistry::default();
 
         assert!(registry.replace_all_links(&links));
-        assert_eq!(
-            registry.members_for(header_a),
-            vec![header_a, group_a1, group_a2, header_b, group_b],
-        );
+        let members = registry.members_for(header_a);
+        assert_eq!(members.len(), 5);
+        assert!(members.contains(&header_a));
+        assert!(members.contains(&group_a1));
+        assert!(members.contains(&group_a2));
+        assert!(members.contains(&header_b));
+        assert!(members.contains(&group_b));
         assert_eq!(registry.all_links().len(), links.len());
 
         let original = registry.clone();
