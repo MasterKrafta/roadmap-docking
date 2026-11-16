@@ -489,7 +489,6 @@ fn floating_host_snapshot(
 
 
 /// Identity of a permanent Floating window that renders exactly one Core member.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FloatingPartKind {
     Header { column: NodeId },
@@ -498,9 +497,8 @@ pub(crate) enum FloatingPartKind {
 
 /// Root view for one detached Header or Group window.
 ///
-/// The existing FloatingHost remains the transitional full-composition host
-/// until FloatingWindowManager switches its registry in the next stage.
-#[allow(dead_code)]
+/// The existing FloatingHost remains the legacy full-composition renderer;
+/// permanent Floating windows are created by FloatingWindowManager as parts.
 pub(crate) struct FloatingPartHost {
     controller: Entity<DockController>,
     floating_group: FloatingGroupId,
@@ -511,7 +509,6 @@ pub(crate) struct FloatingPartHost {
     open_context_menu: Option<FloatingHostOpenMenu>,
 }
 
-#[allow(dead_code)]
 impl FloatingPartHost {
     pub(crate) fn new_header(
         controller: Entity<DockController>,
