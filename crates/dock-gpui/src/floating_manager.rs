@@ -1987,10 +1987,11 @@ impl FloatingWindowManager {
     /// Finds the topmost managed target and converts the screen point into that target's
     /// own Core-local logical coordinates. A foreign topmost window is reported distinctly.
     pub(crate) fn docking_window_at_point(
-        &self,
+        &mut self,
         screen: PhysicalPoint,
         drag_host: NativeWindowId,
         excluded_source_window: Option<WindowId>,
+        cx: &mut Context<Self>,
     ) -> Option<DockingWindowAtPoint> {
         let Some(main_window_id) = self.host_registry.main_window_id else {
             return Some(DockingWindowAtPoint::ForeignWindow);
@@ -2032,7 +2033,31 @@ impl FloatingWindowManager {
                 .or(Some(DockingWindowAtPoint::ForeignWindow));
         }
 
-        let Some(entry) = self.all_native_window_entries().find(|entry| {
+        if let Some((member, entry)) = self.registry.members.iter().find(|(_, entry)| {
+            entry.visibility == PanelWindowVisibility::Visible
+                && entry.native_window == Some(target_native)
+        }) {
+            let Some(group) = entry.host_group else {
+                return Some(DockingWindowAtPoint::ForeignWindow);
+            };
+            let Some(point) = self.core_point_for_floating_member(
+                *member,
+                group,
+                entry.window_id,
+                target_native,
+                screen,
+                cx,
+            ) else {
+                return Some(DockingWindowAtPoint::ForeignWindow);
+            };
+            return Some(DockingWindowAtPoint::Floating {
+                group,
+                window_id: entry.window_id,
+                point,
+            });
+        }
+
+        let Some(entry) = self.registry.windows.values().find(|entry| {
             entry.visibility == PanelWindowVisibility::Visible
                 && entry.native_window == Some(target_native)
         }) else {
@@ -2127,6 +2152,35 @@ impl FloatingWindowManager {
         let client = self.native_ops.client_origin(window).ok()?;
         let scale = self.native_ops.scale_factor(window).ok()?;
         DockGeometry::host_local_point_from_screen(screen, client, Point::ZERO, scale)
+    }
+
+    fn core_point_for_floating_member(
+        &self,
+        member: WindowGridMember,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        native_window: NativeWindowId,
+        screen: PhysicalPoint,
+        cx: &mut Context<Self>,
+    ) -> Option<Point> {
+        let local = self.core_point_for_floating(native_window, screen)?;
+        let origin = self.controller.update(cx, |controller, _| {
+            let rects = controller.floating_geometry(window_id, group).ok()?;
+            match member {
+                WindowGridMember::Header(column) => rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .map(|rect| rect.rect.origin),
+                WindowGridMember::Group(group) => rects
+                    .groups
+                    .iter()
+                    .find(|rect| rect.group == group)
+                    .map(|rect| rect.rect.origin),
+                WindowGridMember::FloatingComposition(_) => None,
+            }
+        })?;
+        Some(Point::new(local.x + origin.x, local.y + origin.y))
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
