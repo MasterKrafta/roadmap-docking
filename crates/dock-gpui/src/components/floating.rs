@@ -1834,6 +1834,21 @@ impl FloatingPartHost {
     }
 }
 
+pub(crate) fn floating_group_and_column_for_group(
+    layout: &dock_core::Layout,
+    group: NodeId,
+) -> Option<(FloatingGroupId, NodeId)> {
+    // The column field is not read for the Group variant; the shared resolver
+    // derives the actual owner Column from the current Layout tree.
+    floating_part_owner_and_column(
+        layout,
+        FloatingPartKind::Group {
+            column: group,
+            group,
+        },
+    )
+}
+
 fn floating_part_owner_and_column(
     layout: &dock_core::Layout,
     part: FloatingPartKind,
