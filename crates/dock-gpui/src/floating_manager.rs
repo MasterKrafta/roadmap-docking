@@ -2982,6 +2982,12 @@ impl FloatingWindowManager {
             self.cancel_native_move(state, cx);
             return;
         }
+        if state.source_group.is_some()
+            && matches!(state.drop_target, Some(NativeMoveTarget::RejectedGroupDrop))
+        {
+            self.cancel_native_move(state, cx);
+            return;
+        }
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
@@ -3515,7 +3521,7 @@ impl FloatingWindowManager {
         });
         for member in moving_windows {
             if let Err(error) = self.native_ops.move_window(member.native_window, member.cancel_origin) {
-                tracing::warn!(?state.group, moving_group = ?member.group, %error, "could not restore floating chain member after Escape");
+                tracing::warn!(?state.group, moving_group = ?member.group, %error, "could not restore floating chain member after cancellation");
             }
         }
         cx.notify();
