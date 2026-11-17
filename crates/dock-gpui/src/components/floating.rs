@@ -1887,6 +1887,14 @@ impl Render for FloatingPartHost {
                 let show_close_button = self.manager.upgrade().is_some_and(|manager| {
                     manager.update(cx, |manager, _| manager.is_rightmost_header(column))
                 });
+                let pointer_header_rect = Rect::new(
+                    column_rect.rect.origin,
+                    dock_core::Size::new(
+                        column_rect.rect.size.width,
+                        snapshot.metrics.column_header_height,
+                    ),
+                );
+                let pointer_column_rect = ColumnRect::new(column, pointer_header_rect);
                 let pointer_input = render_floating_pointer_input(
                     self.floating_group,
                     self.manager.clone(),
@@ -1895,8 +1903,8 @@ impl Render for FloatingPartHost {
                     Some(snapshot.floating.rect),
                     HashMap::new(),
                     Some((
-                        snapshot.floating.rect,
-                        vec![*column_rect],
+                        pointer_header_rect,
+                        vec![pointer_column_rect],
                         Vec::new(),
                         snapshot.metrics,
                         show_close_button,
