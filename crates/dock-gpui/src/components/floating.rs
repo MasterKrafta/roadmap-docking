@@ -53,6 +53,10 @@ use super::{
     splitter::SplitterView,
 };
 
+#[path = "floating/floating_host_open_menu.rs"]
+mod floating_host_open_menu;
+use floating_host_open_menu::FloatingHostOpenMenu;
+
 /// Content view for one native floating window.
 ///
 /// The root already owns the native window bounds and local coordinate origin.
@@ -289,13 +293,6 @@ struct FloatingTabPress {
 struct FloatingGroupPress {
     group: NodeId,
     layout_version: u64,
-}
-
-#[derive(Clone)]
-struct FloatingHostOpenMenu {
-    target: ContextMenuTarget,
-    anchor: Point,
-    open_submenu: Option<usize>,
 }
 
 struct FloatingHostSnapshot {
