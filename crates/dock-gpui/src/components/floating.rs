@@ -87,6 +87,7 @@ impl FloatingWindowContent {
         context_menu: GroupMenuToggle,
         middle_click_closes_tabs: bool,
         controller: Entity<DockController>,
+        manager: WeakEntity<FloatingWindowManager>,
         theme: Theme,
     ) -> impl IntoElement {
         let origin = Point::ZERO;
@@ -249,6 +250,17 @@ impl FloatingWindowContent {
         root = root.child(PanelHost::render(loose_panels, origin, theme));
 
         if !hide_header {
+            let close_group = floating.group;
+            let manager_for_close = manager.clone();
+            let close_action = Box::new(move |app: &mut App| {
+                if let Some(manager) = manager_for_close.upgrade() {
+                    let _ = manager.update(app, |manager, manager_cx| {
+                        if let Err(error) = manager.close_window_grid(close_group, manager_cx) {
+                            tracing::warn!(%error, ?close_group, "could not close the Floating WindowGrid");
+                        }
+                    });
+                }
+            });
             root = root.child(DockCompositionView::render_header(
                 format!("floating-composition-{:?}", floating.group),
                 floating.rect,
@@ -256,6 +268,7 @@ impl FloatingWindowContent {
                 metrics,
                 theme,
                 true,
+                Some(close_action),
             ));
         }
 
@@ -1916,6 +1929,17 @@ impl Render for FloatingPartHost {
                     Some(DockWindowPart::Header { column }),
                     column_rect.rect.origin,
                 );
+                let close_group = self.floating_group;
+                let manager_for_close = self.manager.clone();
+                let close_action = Box::new(move |app: &mut App| {
+                    if let Some(manager) = manager_for_close.upgrade() {
+                        let _ = manager.update(app, |manager, manager_cx| {
+                            if let Err(error) = manager.close_window_grid(close_group, manager_cx) {
+                                tracing::warn!(%error, ?close_group, "could not close the Floating WindowGrid");
+                            }
+                        });
+                    }
+                });
                 let mut root = root
                     .child(pointer_input)
                     .child(DockCompositionView::render_header(
@@ -1925,6 +1949,7 @@ impl Render for FloatingPartHost {
                         snapshot.metrics,
                         self.theme,
                         show_close_button,
+                        Some(close_action),
                     ));
                 let manager_for_escape = self.manager.clone();
                 let controller_for_escape = self.controller.clone();
@@ -2770,6 +2795,7 @@ impl Render for FloatingHost {
             toggle_context_menu,
             self.middle_click_closes_tabs,
             self.controller.clone(),
+            self.manager.clone(),
             self.theme,
         ));
 
