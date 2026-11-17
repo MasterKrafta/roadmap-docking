@@ -26,39 +26,27 @@ use super::{
     scroll::map_hit_test_point,
 };
 
-/// A click candidate derived from one Core hit-test result and retained until
-/// pointer-up. The release hit is recomputed; HitResult itself is never cached.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PointerPress {
-    target: PointerPressTarget,
-    layout_version: u64,
-}
+mod main_drag_host_kind;
+mod pointer_click_intent;
+mod pointer_down_intent;
+mod pointer_event_state;
+mod pointer_press;
+mod pointer_press_target;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PointerPressTarget {
-    TabHeader { group: NodeId, panel: PanelId },
-    TabStrip { group: NodeId },
-    OverflowButton { group: NodeId },
-}
+use self::{
+    main_drag_host_kind::MainDragHostKind,
+    pointer_click_intent::PointerClickIntent,
+    pointer_down_intent::PointerDownIntent,
+    pointer_press_target::PointerPressTarget,
+};
+pub(crate) use self::{
+    pointer_event_state::PointerEventState,
+    pointer_press::PointerPress,
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PointerDownIntent {
-    TabHeaderCandidate { group: NodeId, panel: PanelId },
-    GroupCandidate { group: NodeId },
-    FlyoutPanelCandidate { panel: PanelId },
-    Resize,
-    OverflowButton { group: NodeId },
-    DismissFlyout,
-    None,
-}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PointerClickIntent {
-    ActivateTab { group: NodeId, panel: PanelId },
-    CollapseGroup { group: NodeId },
-    OpenOverflowMenu { group: NodeId },
-    None,
-}
+
+
 
 fn pointer_press_target_for_hit(hit: HitResult) -> Option<PointerPressTarget> {
     match hit {
@@ -114,13 +102,6 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
     }
 }
 
-/// Shared pointer state retained by DockHost across rerenders.
-pub(crate) struct PointerEventState {
-    pub(crate) manager: Entity<FloatingWindowManager>,
-    pub(crate) drag_host_manager: Entity<DragHostManager>,
-    pub(crate) pointer_capture: Rc<Cell<Option<HitboxId>>>,
-    pub(crate) pointer_press: Rc<Cell<Option<PointerPress>>>,
-}
 
 /// Installs the DockHost-level mouse event pipeline. Core HitResult is the
 /// only source of dock gesture intent; components keep only explicit button
@@ -716,14 +697,6 @@ fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPay
     }
 }
 
-/// Checks whether the active drag has reached the point where content must move to DragHost.
-/// PanelTab and GroupGrip leave their source zones; FlyoutPanel and DockArea start at threshold.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MainDragHostKind {
-    Panel,
-    Group,
-    DockArea,
-}
 
 /// Starts a temporary DragHost when a Main-host gesture leaves its source surface.
 /// MouseMove and MouseUp share this transition path; MouseUp still updates the
