@@ -1562,6 +1562,50 @@ fn handle_floating_escape(
     DockInteractionCoordinator::cancel_on_escape(controller, window, pointer_capture, app);
     app.stop_propagation();
 }
+fn observe_floating_focus_loss<T: 'static>(
+    cx: &mut Context<T>,
+    focus_handle: &FocusHandle,
+    window: &mut Window,
+    controller: Entity<DockController>,
+    manager: WeakEntity<FloatingWindowManager>,
+    tab_press: Rc<Cell<Option<FloatingTabPress>>>,
+    group_press: Rc<Cell<Option<FloatingGroupPress>>>,
+    pointer_capture: Rc<Cell<Option<HitboxId>>>,
+) {
+    cx.on_focus_out(focus_handle, window, move |_host, _event, window, _app| {
+        // on_focus_out is FnMut: clone the captured state for this event before
+        // scheduling the one-shot callback on the next frame.
+        let controller = controller.clone();
+        let manager = manager.clone();
+        let tab_press = tab_press.clone();
+        let group_press = group_press.clone();
+        let pointer_capture = pointer_capture.clone();
+
+        // Focus can change while FloatingWindowManager is hiding or
+        // reconciling native windows. Defer its state query until the
+        // current window/manager update has unwound.
+        window.on_next_frame(move |window, app| {
+            let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                manager.update(app, |manager, manager_cx| {
+                    manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                })
+            });
+            if preserve_interaction {
+                return;
+            }
+            DockInteractionCoordinator::cancel_on_focus_loss(
+                &controller,
+                window,
+                &pointer_capture,
+                app,
+            );
+            tab_press.set(None);
+            group_press.set(None);
+        });
+    })
+    .detach();
+}
+
 /// A Floating containing exactly one Group and one Panel can move as a whole.
 /// Detaching its only tab/group would only create a replacement window.
 fn floating_has_single_tab_dock(
@@ -1964,35 +2008,16 @@ impl Render for FloatingPartHost {
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
         if !self.focus_observed {
-            let controller = self.controller.clone();
-            let manager = self.manager.clone();
-            let tab_press = self.tab_press.clone();
-            let group_press = self.group_press.clone();
-            let pointer_capture = self.pointer_capture.clone();
-            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, _app| {
-                // Focus can change while FloatingWindowManager is hiding or
-                // reconciling native windows. Defer its state query until the
-                // current window/manager update has unwound.
-                window.on_next_frame(move |window, app| {
-                    let preserve_interaction = manager.upgrade().is_some_and(|manager| {
-                        manager.update(app, |manager, manager_cx| {
-                            manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
-                        })
-                    });
-                    if preserve_interaction {
-                        return;
-                    }
-                    DockInteractionCoordinator::cancel_on_focus_loss(
-                        &controller,
-                        window,
-                        &pointer_capture,
-                        app,
-                    );
-                    tab_press.set(None);
-                    group_press.set(None);
-                });
-            })
-            .detach();
+            observe_floating_focus_loss(
+                cx,
+                &focus_handle,
+                window,
+                self.controller.clone(),
+                self.manager.clone(),
+                self.tab_press.clone(),
+                self.group_press.clone(),
+                self.pointer_capture.clone(),
+            );
             self.focus_observed = true;
         }
         if !self.manager_observed {
@@ -2609,34 +2634,16 @@ impl Render for FloatingHost {
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
         if !self.focus_observed {
-            let controller = self.controller.clone();
-            let manager = self.manager.clone();
-            let tab_press = self.tab_press.clone();
-            let group_press = self.group_press.clone();
-            let pointer_capture = self.pointer_capture.clone();
-            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, _app| {
-                // A native focus change may be caused by FloatingWindowManager
-                // itself. Never synchronously update that manager from this event.
-                window.on_next_frame(move |window, app| {
-                    let preserve_interaction = manager.upgrade().is_some_and(|manager| {
-                        manager.update(app, |manager, manager_cx| {
-                            manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
-                        })
-                    });
-                    if preserve_interaction {
-                        return;
-                    }
-                    DockInteractionCoordinator::cancel_on_focus_loss(
-                        &controller,
-                        window,
-                        &pointer_capture,
-                        app,
-                    );
-                    tab_press.set(None);
-                    group_press.set(None);
-                });
-            })
-            .detach();
+            observe_floating_focus_loss(
+                cx,
+                &focus_handle,
+                window,
+                self.controller.clone(),
+                self.manager.clone(),
+                self.tab_press.clone(),
+                self.group_press.clone(),
+                self.pointer_capture.clone(),
+            );
             self.focus_observed = true;
         }
 
