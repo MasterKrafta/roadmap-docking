@@ -1545,7 +1545,7 @@ impl FloatingWindowManager {
             .find(|spec| {
                 spec.member == member && spec.floating_group == floating_group
             })
-        }).ok().flatten();
+        });
         let bounds = spec
             .and_then(|spec| {
                 self.part_outer_bounds_for_target(spec, native_window, Some(scale))
@@ -3237,6 +3237,11 @@ impl FloatingWindowManager {
             }) => {
                 return Err(dock_core::CommandError::InvalidTarget {
                     reason: "a Floating Group cannot use FreeArea inside another Floating window",
+                });
+            }
+            _ => {
+                return Err(dock_core::CommandError::InvalidTarget {
+                    reason: "the Floating Group move resolved to an unsupported native drop target",
                 });
             }
         }
