@@ -741,11 +741,10 @@ impl FloatingZoneContext<'_> {
         {
             return Ok(());
         }
-        // A PanelTab/GroupGrip dropped on an outer edge of a multi-window
-        // Floating composition must be routed to WindowGrid by GPUI. A simple
-        // one-Group window, and a whole Composition drop, use Core's cardinal
-        // edge operation instead. Horizontal Floating compositions also keep
-        // branch-specific outer edges as WindowGrid targets.
+        // External PanelTab/GroupGrip drops use WindowGrid targets at the
+        // outer edges of horizontal compositions and Photoshop multi-Group
+        // stacks. Drops within the same composition, whole-Composition drops,
+        // and ordinary vertical stacks use Core's cardinal edge operations.
         let target_floating_root = self.layout.floating_groups().find_map(|(_, floating)| {
             let root = self.layout.dock_area(floating.area)?.root;
             contains_node(self.tree_index, root, target_group).then_some(root)
