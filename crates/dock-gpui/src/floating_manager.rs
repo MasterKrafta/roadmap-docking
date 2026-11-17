@@ -50,6 +50,7 @@ pub enum PanelWindowVisibility {
 enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
     Part(WindowHandle<FloatingPartHost>),
+    DragHost(WindowHandle<crate::drag_host_manager::DragHostSurface>),
 }
 
 impl PanelWindowHandle {
@@ -57,6 +58,7 @@ impl PanelWindowHandle {
         match self {
             Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
             Self::Part(window) => window.update(cx, |_, _, _| ()).is_ok(),
+            Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
         }
     }
 
@@ -72,7 +74,9 @@ impl PanelWindowHandle {
                     host_cx.notify();
                 })
                 .map_err(|error| error.to_string()),
-            Self::Part(_) => Err("Floating part windows have immutable Core ownership".into()),
+            Self::Part(_) | Self::DragHost(_) => {
+                Err("Floating part windows have immutable Core ownership".into())
+            }
         }
     }
 
@@ -83,6 +87,9 @@ impl PanelWindowHandle {
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
             Self::Part(window) => window
+                .update(cx, |_, _, host_cx| host_cx.notify())
+                .map_err(|error| error.to_string()),
+            Self::DragHost(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
         }
@@ -97,6 +104,9 @@ impl PanelWindowHandle {
                 });
             }
             Self::Part(window) => {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
+            }
+            Self::DragHost(window) => {
                 let _ = window.update(cx, |_, window, _| window.remove_window());
             }
         }
@@ -1493,6 +1503,62 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) {
         self.ensure_native_resize_session(group, window_id, cx);
+    }
+
+    /// Adopts the already-visible Main-origin DragHost HWND as the permanent
+    /// Floating Group member. The caller changes its root surface to FloatingPartHost
+    /// before publishing LayoutChanged, so reconciliation never creates a second HWND.
+    pub(crate) fn adopt_drag_host_group_window(
+        &mut self,
+        group: NodeId,
+        floating_group: FloatingGroupId,
+        window: WindowHandle<crate::drag_host_manager::DragHostSurface>,
+        window_id: WindowId,
+        native_window: NativeWindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let member = WindowGridMember::Group(group);
+        if self.registry.members.contains_key(&member)
+            || window.update(cx, |_, _, _| ()).is_err()
+        {
+            return false;
+        }
+
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0);
+        let Some(bounds) = self.native_ops.window_rect(native_window).ok().and_then(|outer| {
+            let client = self.native_ops.client_size(native_window).ok()?;
+            let scale = scale?;
+            DockGeometry::core_bounds_from_native(outer, client, scale)
+        }) else {
+            return false;
+        };
+        let Some(scale) = scale else {
+            return false;
+        };
+
+        self.registry.members.insert(
+            member,
+            PanelWindowEntry {
+                window: PanelWindowHandle::DragHost(window),
+                window_id,
+                native_window: Some(native_window),
+                bounds,
+                native_min_size: None,
+                native_horizontal_resize_min_widths: None,
+                native_left_resize_enabled: None,
+                native_top_resize_enabled: None,
+                native_scale_factor: Some(scale),
+                native_bounds_dirty: false,
+                resize_enabled: false,
+                host_group: Some(floating_group),
+                visibility: PanelWindowVisibility::Visible,
+            },
+        );
+        true
     }
 
     /// Samples current native bounds after the GPUI window-bounds observer fires.
