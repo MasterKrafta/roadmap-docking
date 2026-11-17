@@ -164,11 +164,11 @@ impl FloatingZoneContext<'_> {
 
         for target_group in target_groups {
             for edge in [DropZone::Top, DropZone::Bottom] {
-                // A whole Composition uses FloatingTop/FloatingBottom for its
-                // outer window boundaries. Main keeps one shared target per
-                // splitter; Floating compositions also expose Top edges for
-                // intermediate Groups, while the final shared boundary stays owned
-                // by the preceding Group's Bottom edge.
+                // A whole Composition uses the FloatingTop/FloatingBottom
+                // affordance kinds for its outer window boundaries. Main keeps one
+                // shared target per splitter; Floating compositions also expose Top
+                // affordances for intermediate Groups, while the final shared boundary
+                // stays owned by the preceding Group's Bottom edge.
                 if matches!(self.source, DropSource::Composition { .. })
                     && let Some(column_id) =
                         owner_column(self.layout, self.tree_index, target_group.group)
