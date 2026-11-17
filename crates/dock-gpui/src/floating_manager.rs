@@ -163,7 +163,7 @@ impl PanelWindowRegistry {
     pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
         match self.windows.get(&panel)?.window {
             PanelWindowHandle::Floating(window) => Some(window),
-            PanelWindowHandle::Part(_) => None,
+            PanelWindowHandle::Part(_) | PanelWindowHandle::DragHost(_) => None,
         }
     }
 
