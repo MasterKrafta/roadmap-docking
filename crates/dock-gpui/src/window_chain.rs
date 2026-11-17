@@ -5,32 +5,15 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use dock_core::{FloatingGroupId, NodeId};
-
 #[path = "window_chain/window_grid_member.rs"]
 mod window_grid_member;
 
 pub(crate) use window_grid_member::WindowGridMember;
 
-/// The side occupied by the target member relative to the source member.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum WindowGridDirection {
-    Left,
-    Right,
-    Above,
-    Below,
-}
+#[path = "window_chain/window_grid_direction.rs"]
+mod window_grid_direction;
 
-impl WindowGridDirection {
-    pub(crate) fn opposite(self) -> Self {
-        match self {
-            Self::Left => Self::Right,
-            Self::Right => Self::Left,
-            Self::Above => Self::Below,
-            Self::Below => Self::Above,
-        }
-    }
-}
+pub(crate) use window_grid_direction::WindowGridDirection;
 
 /// One directed description of an undirected physical adjacency.
 ///
