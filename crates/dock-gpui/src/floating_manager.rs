@@ -2508,11 +2508,7 @@ impl FloatingWindowManager {
                             && floating_chain_drop_target_is_supported(*target, true))
                 });
                 let target = target.map(|target| {
-                    if state.source_group.is_some() {
-                        controller.group_grip_drop_target(target)
-                    } else {
-                        target
-                    }
+                    target
                 });
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
@@ -2581,11 +2577,7 @@ impl FloatingWindowManager {
                     Ok(target) => target.filter(|target| {
                         !moving_chain || floating_chain_drop_target_is_supported(*target, false)
                     }).map(|target| {
-                        if state.source_group.is_some() {
-                            controller.group_grip_drop_target(target)
-                        } else {
-                            target
-                        }
+                        target
                     }),
                     Err(error) => {
                         tracing::debug!(
