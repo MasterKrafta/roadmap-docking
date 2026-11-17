@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     CommandError, CommandOutcome, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragState, DropTarget, FloatingGroupId, Node, NodeId, PanelId, PanelKey, Point, Rect,
+    DragState, DropTarget, FloatingGroupId, NodeId, PanelId, PanelKey, Point, Rect,
 };
 use gpui::{AnyView, App, AppContext, Context, Window};
 
