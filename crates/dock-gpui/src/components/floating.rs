@@ -65,6 +65,10 @@ use floating_tab_press::FloatingTabPress;
 mod floating_group_press;
 use floating_group_press::FloatingGroupPress;
 
+#[path = "floating/floating_host_snapshot.rs"]
+mod floating_host_snapshot;
+use floating_host_snapshot::FloatingHostSnapshot;
+
 /// Content view for one native floating window.
 ///
 /// The root already owns the native window bounds and local coordinate origin.
@@ -288,21 +292,6 @@ impl FloatingWindowContent {
     }
 }
 
-
-struct FloatingHostSnapshot {
-    rects: LayoutRects,
-    floating: FloatingGroupRect,
-    column_ids: HashSet<NodeId>,
-    column_groups: HashMap<NodeId, Vec<NodeId>>,
-    column_modes: HashMap<NodeId, ColumnMode>,
-    group_presentations: HashMap<NodeId, GroupPresentation>,
-    rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
-    metrics: DockMetrics,
-    drag_preview: Option<DragPreview>,
-    drag_zones: Vec<DropZoneRect>,
-    active_drop_zone: Option<dock_core::DropZoneRect>,
-    resize_preview: Option<ResizePreview>,
-}
 
 /// Floating tab drags transfer one Panel to DragHost after leaving the source strip
 /// or entering another docking window. The shared CompositionHeader moves the whole window.
