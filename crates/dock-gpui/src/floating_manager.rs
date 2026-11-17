@@ -2465,9 +2465,13 @@ impl FloatingWindowManager {
             // Permanent Floating Header/Group hosts are keyed by Core member,
             // not by the legacy PanelId composition registry.
             let typed_target = self.registry.members.iter().find_map(|(member, entry)| {
-                (entry.native_window == Some(target_window)
-                    && entry.visibility == PanelWindowVisibility::Visible)
-                    .then_some((*member, entry.host_group?, entry.window_id))
+                if entry.native_window == Some(target_window)
+                    && entry.visibility == PanelWindowVisibility::Visible
+                {
+                    Some((*member, entry.host_group?, entry.window_id))
+                } else {
+                    None
+                }
             });
             let legacy_target = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
                 let entry = self.registry.windows.get(panel)?;
@@ -2488,20 +2492,16 @@ impl FloatingWindowManager {
                 };
 
             let point = match target_member {
-                WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
-                    .registry
-                    .members
-                    .get(&target_member)
-                    .and_then(|entry| {
-                        self.core_point_for_floating_member(
-                            target_member,
-                            target_group,
-                            target_window_id,
-                            target_window,
-                            cursor,
-                            cx,
-                        )
-                    }),
+                WindowGridMember::Header(_) | WindowGridMember::Group(_) => {
+                    self.core_point_for_floating_member(
+                        target_member,
+                        target_group,
+                        target_window_id,
+                        target_window,
+                        cursor,
+                        cx,
+                    )
+                },
                 WindowGridMember::FloatingComposition(_) => {
                     self.core_point_for_floating(target_window, cursor)
                 }
@@ -6017,7 +6017,7 @@ mod floating_window_chain_drop_destination_tests {
         floating_chain_drop_target_is_supported, floating_window_chain_direction,
         floating_window_drop_destination, NativeMoveTarget,
     };
-    use crate::window_chain::WindowGridDirection;
+    use crate::window_chain::{WindowGridDirection, WindowGridMember};
     use dock_core::{DropTarget, DropZone, FloatingGroupId, NodeId, Point};
     use slotmap::Key;
 
@@ -6044,19 +6044,24 @@ mod floating_window_chain_drop_destination_tests {
             assert!(floating_chain_drop_target_is_supported(target, false));
             assert!(!floating_chain_drop_target_is_supported(target, true));
             assert!(matches!(
-                floating_window_drop_destination(FloatingGroupId::null(), target, Point::ZERO),
+                floating_window_drop_destination(FloatingGroupId::null(), target, Point::ZERO, true),
                 NativeMoveTarget::FloatingChain {
+                    anchor_member: actual_member,
                     direction: actual,
                     ..
-                } if actual == direction
+                } if actual == direction && actual_member == WindowGridMember::Group(group)
             ));
         }
 
         assert_eq!(floating_window_chain_direction(center), None);
         assert!(!floating_chain_drop_target_is_supported(center, false));
         assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), center, Point::ZERO),
+            floating_window_drop_destination(FloatingGroupId::null(), center, Point::ZERO, true),
             NativeMoveTarget::FloatingDock { target, .. } if target == center
+        ));
+        assert!(matches!(
+            floating_window_drop_destination(FloatingGroupId::null(), right, Point::ZERO, false),
+            NativeMoveTarget::FloatingDock { target, .. } if target == right
         ));
     }
 }
