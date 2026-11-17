@@ -7,8 +7,8 @@ mod tab;
 mod dock_column_view;
 mod dock_composition_view;
 
-use dock_core::{DockMetrics, GroupRect, Point, Rect};
-use gpui::{IntoElement, ParentElement, Styled, div, px, rgb};
+use dock_core::{DockMetrics, GroupRect, Point};
+use gpui::{InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
 use ui::Theme;
 
 pub use dock_column_view::DockColumnView;

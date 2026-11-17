@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     Axis, ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DragPreview, DropZoneRect,
-    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Point, Rect, SplitterRect,
+    FloatingGroupId, FlyoutState, GroupRect, NodeId, PanelRect, Rect, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{

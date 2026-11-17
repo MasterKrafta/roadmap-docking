@@ -1,6 +1,6 @@
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{Entity, HitboxId, ScrollHandle};
+use gpui::{Entity, HitboxId};
 
 use crate::{DragHostManager, FloatingWindowManager};
 

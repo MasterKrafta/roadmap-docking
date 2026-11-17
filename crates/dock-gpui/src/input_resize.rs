@@ -6,7 +6,9 @@ use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, ResizeInteraction};
 
+#[path = "input_resize/resize_preview.rs"]
 mod resize_preview;
+#[path = "input_resize/resize_preview_kind.rs"]
 mod resize_preview_kind;
 
 pub(crate) use resize_preview::ResizePreview;
