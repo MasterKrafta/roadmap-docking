@@ -26,13 +26,10 @@ mod window_grid;
 use window_grid::WindowGrid;
 
 
-/// Reconciliation details produced when stale WindowGrid members are pruned.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct WindowGridPruneResult {
-    pub(crate) removed_members: usize,
-    pub(crate) reconnect_candidates: Vec<WindowGridLink>,
-    pub(crate) components_to_align: Vec<WindowGridMember>,
-}
+#[path = "window_chain/window_grid_prune_result.rs"]
+mod window_grid_prune_result;
+
+pub(crate) use window_grid_prune_result::WindowGridPruneResult;
 
 /// Registry of all linked Floating window components.
 ///
