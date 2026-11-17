@@ -2804,7 +2804,7 @@ impl FloatingWindowManager {
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
-        if state.moving_column.is_some() && !state.threshold_crossed {
+        if state.source_header.is_some() && !state.threshold_crossed {
             self.cancel_native_move(state, cx);
             return;
         }
@@ -2813,9 +2813,10 @@ impl FloatingWindowManager {
         }
 
         let moving_windows = std::mem::take(&mut self.native_move_windows);
+        let moving_groups = floating_groups_in_move_order(&moving_windows);
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let mut docked_chain_into_main = false;
-        let mut floating_bounds = if state.moving_column.is_some() {
+        let mut floating_bounds = if state.source_header.is_some() || state.moving_column.is_some() {
             state.start_bounds
         } else {
             self.controller.update(cx, |controller, _| {
@@ -2823,12 +2824,13 @@ impl FloatingWindowManager {
             }).unwrap_or(state.start_bounds)
         };
 
-        if state.moving_column.is_some() {
-            if let Some(header) = moving_windows.iter().find(|member| member.native_window == state.native_window)
-                && let Ok(rect) = self.native_ops.window_rect(state.native_window)
+        if let Some(column) = state.source_header {
+            let header_member = WindowGridMember::Header(column);
+            if let Some(header) = moving_windows.iter().find(|member| member.member == header_member)
+                && let Ok(rect) = self.native_ops.window_rect(header.native_window)
             {
-                let dx = rect.left.saturating_sub(header.cancel_origin.x);
-                let dy = rect.top.saturating_sub(header.cancel_origin.y);
+                let dx = rect.left.saturating_sub(header.drag_origin.x);
+                let dy = rect.top.saturating_sub(header.drag_origin.y);
                 floating_bounds.origin = Point::new(
                     state.start_bounds.origin.x + dx as f32,
                     state.start_bounds.origin.y + dy as f32,
@@ -2852,79 +2854,88 @@ impl FloatingWindowManager {
             })
         } else {
             match state.drop_target {
-            Some(NativeMoveTarget::FloatingChain {
-                anchor,
-                direction,
-            }) => self.finish_floating_window_chain_move(
-                state.group,
-                anchor,
-                direction,
-                &moving_windows,
-                cx,
-            ),
-            Some(NativeMoveTarget::MainDock {
-                target: DropTarget::MainColumn { side, index },
-                ..
-            }) if moving_windows.len() > 1 => {
-                let ordered_groups = moving_windows
-                    .iter()
-                    .map(|moving| moving.group)
-                    .collect::<Vec<_>>();
-                match self.controller.update(cx, |controller, controller_cx| {
-                    controller.finish_floating_window_chain_dock_in(
-                        &ordered_groups,
-                        side,
-                        index,
-                        controller_cx,
+                Some(NativeMoveTarget::FloatingChain {
+                    anchor,
+                    anchor_member,
+                    direction,
+                }) => {
+                    let moving_member = state
+                        .source_header
+                        .map(WindowGridMember::Header)
+                        .unwrap_or_else(|| window_grid_member(state.group));
+                    self.finish_floating_window_chain_move(
+                        moving_member,
+                        anchor,
+                        anchor_member,
+                        direction,
+                        &moving_windows,
+                        cx,
                     )
-                }) {
-                    Ok(()) => {
-                        docked_chain_into_main = true;
-                        Ok(())
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            ?state.group,
-                            %error,
-                            "could not dock the Floating WindowChain into Main"
-                        );
-                        Err(error)
+                }
+                Some(NativeMoveTarget::MainDock {
+                    target: DropTarget::MainColumn { side, index },
+                    ..
+                }) if moving_groups.len() > 1 => {
+                    match self.controller.update(cx, |controller, controller_cx| {
+                        controller.finish_floating_window_chain_dock_in(
+                            &moving_groups,
+                            side,
+                            index,
+                            controller_cx,
+                        )
+                    }) {
+                        Ok(()) => {
+                            docked_chain_into_main = true;
+                            Ok(())
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                ?state.group,
+                                %error,
+                                "could not dock the Floating WindowGrid into Main"
+                            );
+                            Err(error)
+                        }
                     }
                 }
-            }
-            _ if moving_windows.len() > 1 => {
-                // A chain header can move the chain, but cannot detach one
-                // member by dropping it into Main or onto empty desktop space.
-                let bounds = self
-                    .native_bounds_for_move_windows(&moving_windows, cx)
-                    .and_then(|window_bounds| core_floating_bounds_from_grid_members(&window_bounds));
-                match bounds {
-                    Some(bounds) => self.controller.update(cx, |controller, controller_cx| {
-                        controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
-                    }),
-                    None => Err(dock_core::CommandError::InvalidTarget {
-                        reason: "could not read the final bounds of every window in the chain",
-                    }),
+                _ if moving_groups.len() > 1 => {
+                    // Every HWND has its own WindowGrid identity, but Core stores
+                    // one bounds rectangle per FloatingGroup. Apply the shared
+                    // native move delta once to each distinct Core composition.
+                    let bounds = self.floating_group_bounds_after_native_move(
+                        &moving_windows,
+                        cx,
+                    );
+                    match bounds {
+                        Some(bounds) => self.controller.update(cx, |controller, controller_cx| {
+                            controller.finish_floating_window_chain_move_in(
+                                &bounds,
+                                controller_cx,
+                            )
+                        }),
+                        None => Err(dock_core::CommandError::InvalidTarget {
+                            reason: "could not calculate one consistent move delta for every Core FloatingGroup in the WindowGrid",
+                        }),
+                    }
+                }
+                drop_target => {
+                    let dock_target = match drop_target {
+                        Some(NativeMoveTarget::MainDock { target, point })
+                        | Some(NativeMoveTarget::FloatingDock { target, point }) => {
+                            Some((target, point))
+                        }
+                        _ => None,
+                    };
+                    self.controller.update(cx, |controller, controller_cx| {
+                        controller.finish_floating_window_move_in(
+                            state.group,
+                            floating_bounds,
+                            dock_target,
+                            controller_cx,
+                        )
+                    })
                 }
             }
-            drop_target => {
-                let dock_target = match drop_target {
-                    Some(NativeMoveTarget::MainDock { target, point })
-                    | Some(NativeMoveTarget::FloatingDock { target, point }) => {
-                        Some((target, point))
-                    }
-                    _ => None,
-                };
-                self.controller.update(cx, |controller, controller_cx| {
-                    controller.finish_floating_window_move_in(
-                        state.group,
-                        floating_bounds,
-                        dock_target,
-                        controller_cx,
-                    )
-                })
-            }
-        }
         };
 
         if result.is_ok()
@@ -2934,17 +2945,13 @@ impl FloatingWindowManager {
         }
 
         if let Err(error) = result {
-            tracing::warn!(?state.group, %error, "could not commit native floating-window move");
+            tracing::warn!(?state.group, %error, "could not commit native Floating WindowGrid move");
             self.cancel_controller_move(cx);
-            for member in &moving_windows {
-                if state.moving_column.is_some() {
-                    if let Some(entry) = self.registry.members.values_mut()
-                        .find(|entry| entry.native_window == Some(member.native_window))
-                    {
-                        entry.native_bounds_dirty = true;
-                    }
+            for moving in &moving_windows {
+                if let Some(entry) = self.registry.members.get_mut(&moving.member) {
+                    entry.native_bounds_dirty = true;
                 } else {
-                    self.mark_group_native_bounds_dirty(member.group);
+                    self.mark_group_native_bounds_dirty(moving.group);
                 }
             }
             if moving_windows.is_empty() {
@@ -2953,16 +2960,19 @@ impl FloatingWindowManager {
             self.schedule_reconcile(cx);
         }
 
-        if state.moving_column.is_some() || matches!(
-            state.drop_target,
-            Some(NativeMoveTarget::FloatingDock { .. })
-                | Some(NativeMoveTarget::MainDock {
-                    target: DropTarget::MainColumn { .. },
-                    ..
-                })
-        ) {
-            // Docking or detaching changes which native windows own visible compositions.
-            // Reconcile after the active native-move update unwinds.
+        if state.moving_column.is_some()
+            || matches!(
+                state.drop_target,
+                Some(NativeMoveTarget::FloatingDock { .. })
+                    | Some(NativeMoveTarget::FloatingChain { .. })
+                    | Some(NativeMoveTarget::MainDock {
+                        target: DropTarget::MainColumn { .. },
+                        ..
+                    })
+            )
+        {
+            // Docking, detaching or joining a WindowGrid changes native ownership
+            // or its adjacency graph; reconcile after this manager update unwinds.
             self.schedule_reconcile(cx);
 
             if docked_chain_into_main {
@@ -2982,106 +2992,168 @@ impl FloatingWindowManager {
         cx.notify();
     }
 
-    fn native_bounds_for_move_windows(
+    /// Converts one native WindowGrid drag into one Core bounds update per
+    /// distinct FloatingGroup. Every native member must have moved by the same delta.
+    fn floating_group_bounds_after_native_move(
         &self,
         moving_windows: &[NativeMoveWindow],
         cx: &mut Context<Self>,
-    ) -> Option<Vec<(WindowGridMember, Rect)>> {
-        let mut bounds = self.controller.update(cx, |controller, _| {
-            moving_windows.iter().map(|moving| {
-                controller.layout().floating_group(moving.group)
-                    .map(|floating| (window_grid_member(moving.group), floating.bounds))
-            }).collect::<Option<Vec<_>>>()
-        })?;
-        for (index, moving) in moving_windows.iter().enumerate() {
-            if let Some(native_bounds) = self.core_bounds_from_native_window(moving.native_window) {
-                bounds[index].1 = native_bounds;
-            } else if let Ok(rect) = self.native_ops.window_rect(moving.native_window) {
-                bounds[index].1.origin = Point::new(rect.left as f32, rect.top as f32);
+    ) -> Option<Vec<(FloatingGroupId, Rect)>> {
+        let groups = floating_groups_in_move_order(moving_windows);
+        if groups.is_empty() {
+            return None;
+        }
+
+        let mut common_delta: Option<Point> = None;
+        for moving in moving_windows {
+            let rect = self.native_ops.window_rect(moving.native_window).ok()?;
+            let delta = Point::new(
+                rect.left.saturating_sub(moving.drag_origin.x) as f32,
+                rect.top.saturating_sub(moving.drag_origin.y) as f32,
+            );
+            if let Some(previous) = common_delta {
+                if (previous.x - delta.x).abs() > 1.0
+                    || (previous.y - delta.y).abs() > 1.0
+                {
+                    return None;
+                }
+            } else {
+                common_delta = Some(delta);
             }
         }
-        Some(bounds)
+        let delta = common_delta?;
+
+        self.controller.update(cx, |controller, _| {
+            groups
+                .into_iter()
+                .map(|group| {
+                    let mut bounds = controller.layout().floating_group(group)?.bounds;
+                    bounds.origin = Point::new(
+                        bounds.origin.x + delta.x,
+                        bounds.origin.y + delta.y,
+                    );
+                    Some((group, bounds))
+                })
+                .collect()
+        })
+    }
+
+    /// Converts arranged native-member bounds back into Core composition bounds.
+    /// All HWNDs owned by one FloatingGroup must require the same translation.
+    fn core_bounds_from_arranged_grid_members(
+        &self,
+        original: &[(WindowGridMember, Rect)],
+        arranged: &[(WindowGridMember, Rect)],
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<(FloatingGroupId, Rect)>> {
+        let mut translations = Vec::<(FloatingGroupId, Point)>::new();
+        for (member, next_bounds) in arranged {
+            let group = self.floating_group_for_member(*member)?;
+            let previous = original
+                .iter()
+                .find(|(candidate, _)| candidate == member)
+                .map(|(_, bounds)| *bounds)?;
+            let delta = Point::new(
+                next_bounds.origin.x - previous.origin.x,
+                next_bounds.origin.y - previous.origin.y,
+            );
+            if let Some((_, previous_delta)) =
+                translations.iter().find(|(candidate, _)| *candidate == group)
+            {
+                if (previous_delta.x - delta.x).abs() > 0.5
+                    || (previous_delta.y - delta.y).abs() > 0.5
+                {
+                    return None;
+                }
+            } else {
+                translations.push((group, delta));
+            }
+        }
+
+        self.controller.update(cx, |controller, _| {
+            translations
+                .into_iter()
+                .map(|(group, delta)| {
+                    let mut bounds = controller.layout().floating_group(group)?.bounds;
+                    bounds.origin = Point::new(
+                        bounds.origin.x + delta.x,
+                        bounds.origin.y + delta.y,
+                    );
+                    Some((group, bounds))
+                })
+                .collect()
+        })
     }
 
     fn finish_floating_window_chain_move(
         &mut self,
-        moving: FloatingGroupId,
+        moving_member: WindowGridMember,
         anchor: FloatingGroupId,
+        anchor_member: WindowGridMember,
         direction: WindowGridDirection,
         moving_windows: &[NativeMoveWindow],
         cx: &mut Context<Self>,
     ) -> Result<(), dock_core::CommandError> {
-        let moving_member = window_grid_member(moving);
-        let anchor_member = window_grid_member(anchor);
+        if self.floating_group_for_member(anchor_member) != Some(anchor) {
+            return Err(dock_core::CommandError::InvalidTarget {
+                reason: "the selected Floating drop target is no longer part of its WindowGrid",
+            });
+        }
+
         let mut next_chains = self.window_chains.clone();
-        if next_chains.members_for(moving_member).contains(&anchor_member) {
-            let window_bounds = self.native_bounds_for_move_windows(moving_windows, cx)
+        let moving_members = next_chains.members_for(moving_member);
+        if moving_members.contains(&anchor_member) {
+            let bounds = self
+                .floating_group_bounds_after_native_move(moving_windows, cx)
                 .ok_or(dock_core::CommandError::InvalidTarget {
-                    reason: "could not read the final bounds of every window in the existing WindowGrid",
-                })?;
-            let core_bounds = core_floating_bounds_from_grid_members(&window_bounds)
-                .ok_or(dock_core::CommandError::InvalidTarget {
-                    reason: "the current WindowGrid contains a member without a Core FloatingGroup",
+                    reason: "could not read consistent native bounds for the existing WindowGrid",
                 })?;
             return self.controller.update(cx, |controller, controller_cx| {
-                controller.finish_floating_window_chain_move_in(&core_bounds, controller_cx)
+                controller.finish_floating_window_chain_move_in(&bounds, controller_cx)
             });
         }
+
         if !next_chains.link_to_side(anchor_member, moving_member, direction) {
             return Err(dock_core::CommandError::InvalidTarget {
-                reason: "could not merge the source and target WindowGrids without an ambiguous connection",
+                reason: "could not join the moving WindowGrid at an unambiguous boundary",
             });
         }
+
         let members = next_chains.members_for(anchor_member);
-        let Some(member_bounds) = self.controller.update(cx, |controller, _| {
-            members.iter().map(|member| {
-                let group = member.floating_group()?;
-                controller.layout().floating_group(group).map(|floating| (*member, floating.bounds))
-            }).collect::<Option<Vec<_>>>()
-        }) else {
-            return Err(dock_core::CommandError::InvalidTarget {
-                reason: "window grid contains a member without a current Core FloatingGroup",
-            });
-        };
-        let member_bounds = match direction {
-            WindowGridDirection::Above | WindowGridDirection::Below => {
-                let minimum_width = self.floating_minimum_width(moving, cx)
-                    .ok_or(dock_core::CommandError::InvalidTarget {
-                        reason: "could not read the minimum width of the moving FloatingGroup",
-                    })?;
-                match_moving_window_width_to_target(member_bounds, anchor_member, moving_member, minimum_width)
-            }
-            WindowGridDirection::Left | WindowGridDirection::Right => Some(member_bounds),
-        }.ok_or(dock_core::CommandError::InvalidTarget {
-            reason: "could not normalize the Floating window bounds",
-        })?;
-        let links = next_chains.links_for(anchor_member)
+        let member_bounds = self
+            .native_bounds_for_grid_members(&members)
             .ok_or(dock_core::CommandError::InvalidTarget {
-                reason: "new Floating WindowGrid has no adjacency links",
-            })?.to_vec();
-        let bounds = self.arrange_window_grid_bounds(member_bounds, &links, anchor_member, cx)
-            .ok_or(dock_core::CommandError::InvalidTarget {
-                reason: "could not calculate native bounds for the Floating WindowGrid connection",
+                reason: "could not read the native bounds of every Header and Group in the joined WindowGrid",
             })?;
-        let core_bounds = core_floating_bounds_from_grid_members(&bounds)
+        let links = next_chains
+            .links_for(anchor_member)
             .ok_or(dock_core::CommandError::InvalidTarget {
-                reason: "the WindowGrid contains a member without a Core FloatingGroup",
+                reason: "the joined WindowGrid has no adjacency links",
+            })?
+            .to_vec();
+        let arranged_bounds = self
+            .arrange_window_grid_bounds(member_bounds.clone(), &links, anchor_member, cx)
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "could not calculate native bounds for the joined Floating WindowGrid",
             })?;
+        let core_bounds = self
+            .core_bounds_from_arranged_grid_members(
+                &member_bounds,
+                &arranged_bounds,
+                cx,
+            )
+            .ok_or(dock_core::CommandError::InvalidTarget {
+                reason: "the joined native members require inconsistent positions inside one Core FloatingGroup",
+            })?;
+
         let result = self.controller.update(cx, |controller, controller_cx| {
             controller.finish_floating_window_chain_move_in(&core_bounds, controller_cx)
         });
         if result.is_ok() {
             self.window_chains = next_chains;
             self.pending_window_chain_alignment.insert(anchor_member);
-            for member in members {
-                if let Some(group) = member.floating_group()
-                    && let Some(panel) = self.host_registry.panel_for_group(group)
-                    && let Some(mut entry) = self.registry.windows.remove(&panel)
-                {
-                    self.sync_native_resize_edge_policy(&mut entry, group);
-                    self.registry.windows.insert(panel, entry);
-                }
-            }
+            self.schedule_reconcile(cx);
+            self.schedule_pending_window_chain_alignment(cx);
         }
         result
     }
