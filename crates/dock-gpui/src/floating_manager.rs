@@ -2925,13 +2925,22 @@ impl FloatingWindowManager {
         }
 
         self.native_move = None;
+        let mut native_group_changed = false;
+        let mut restore_native_group = false;
         let result = if let Some(source_group) = state.source_group {
-            self.finish_native_group_move(
+            match self.finish_native_group_move(
                 state,
                 source_group,
                 &moving_windows,
                 cx,
-            )
+            ) {
+                Ok(changed) => {
+                    native_group_changed = changed;
+                    restore_native_group = !changed;
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            }
         } else {
             match state.drop_target {
                 Some(NativeMoveTarget::FloatingChain {
@@ -3018,7 +3027,22 @@ impl FloatingWindowManager {
             }
         };
 
-        if result.is_ok() && state.source_group.is_some() {
+        if result.is_ok() && restore_native_group {
+            for moving in &moving_windows {
+                if let Err(error) = self.native_ops.move_window(
+                    moving.native_window,
+                    moving.cancel_origin,
+                ) {
+                    tracing::warn!(
+                        ?state.group,
+                        moving_group = ?moving.group,
+                        %error,
+                        "could not restore Floating Group HWND after a Core no-op drop"
+                    );
+                }
+            }
+        }
+        if result.is_ok() && native_group_changed {
             self.detach_native_move_members_from_window_grid(&moving_windows);
         }
 
@@ -3079,7 +3103,25 @@ impl FloatingWindowManager {
         source_group: NodeId,
         moving_windows: &[NativeMoveWindow],
         cx: &mut Context<Self>,
-    ) -> Result<(), dock_core::CommandError> {
+    ) -> Result<bool, dock_core::CommandError> {
+        if let Some((target, point)) = state.drop_target.and_then(|drop| match drop {
+            NativeMoveTarget::MainDock { target, point }
+            | NativeMoveTarget::FloatingDock { target, point } => Some((target, point)),
+            NativeMoveTarget::FloatingChain { .. } => None,
+        }) {
+            return self.controller.update(cx, |controller, controller_cx| {
+                controller.finish_floating_group_drop_in(
+                    source_group,
+                    target,
+                    point,
+                    controller_cx,
+                )
+            });
+        }
+
+        // No managed docking window was under the cursor. Preserve the Stage 4
+        // behavior: create a new Floating for the Group, or keep its whole Column
+        // when it is the only Group in that Column.
         let column = state.source_column.ok_or(dock_core::CommandError::InvalidTarget {
             reason: "the source Column for the Floating Group move is no longer available",
         })?;
@@ -3138,7 +3180,8 @@ impl FloatingWindowManager {
                 bounds,
                 controller_cx,
             )
-        })
+        })?;
+        Ok(true)
     }
 
     /// Removes only the native members that have been extracted by the GroupGrip move.
