@@ -303,8 +303,6 @@ struct NativeMoveSession {
     drop_target: Option<NativeMoveTarget>,
     /// Header HWND that initiated this gesture, independent of move scope.
     source_header: Option<NodeId>,
-    /// Set only when the gesture intentionally extracts one Core Column.
-    moving_column: Option<NodeId>,
 }
 
 #[derive(Clone)]
@@ -572,15 +570,6 @@ fn previous_member_floating_group(
         WindowGridMember::FloatingComposition(group) => Some(group),
         WindowGridMember::Header(_) | WindowGridMember::Group(_) => previous_owners.get(&member).copied(),
     }
-}
-
-fn floating_column_window_members(
-    column: NodeId,
-    groups: &[NodeId],
-) -> Vec<WindowGridMember> {
-    std::iter::once(WindowGridMember::Header(column))
-        .chain(groups.iter().copied().map(WindowGridMember::Group))
-        .collect()
 }
 
 fn window_grid_member(group: FloatingGroupId) -> WindowGridMember {
@@ -2009,7 +1998,6 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
             source_header: Some(column),
-            moving_column: None,
         });
         self.schedule_native_move(cx, group, source_window_id);
         true
@@ -2234,9 +2222,7 @@ impl FloatingWindowManager {
             }
         }
 
-        if state.moving_column.is_none() {
-            self.update_native_drop_target(&mut state, cursor, cx);
-        }
+        self.update_native_drop_target(&mut state, cursor, cx);
         self.native_move = Some(state);
         if !self.native_ops.left_button_down().unwrap_or(false) {
             self.finish_native_move(state, cx);
@@ -2695,7 +2681,7 @@ impl FloatingWindowManager {
         let moving_groups = floating_groups_in_move_order(&moving_windows);
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let mut docked_chain_into_main = false;
-        let mut floating_bounds = if state.source_header.is_some() || state.moving_column.is_some() {
+        let mut floating_bounds = if state.source_header.is_some() {
             state.start_bounds
         } else {
             self.controller.update(cx, |controller, _| {
@@ -2722,17 +2708,7 @@ impl FloatingWindowManager {
         }
 
         self.native_move = None;
-        let result = if let Some(column) = state.moving_column {
-            self.controller.update(cx, |controller, controller_cx| {
-                controller.finish_floating_column_move_in(
-                    state.group,
-                    column,
-                    floating_bounds,
-                    controller_cx,
-                )
-            })
-        } else {
-            match state.drop_target {
+        let result = match state.drop_target {
                 Some(NativeMoveTarget::FloatingChain {
                     anchor,
                     anchor_member,
@@ -2814,14 +2790,7 @@ impl FloatingWindowManager {
                         )
                     })
                 }
-            }
-        };
-
-        if result.is_ok()
-            && let Some(column) = state.moving_column
-        {
-            self.detach_column_from_window_grid(column, cx);
-        }
+            };
 
         if let Err(error) = result {
             tracing::warn!(?state.group, %error, "could not commit native Floating WindowGrid move");
@@ -4608,32 +4577,6 @@ impl FloatingWindowManager {
     }
 
     /// Detaches one selected Column stack from every previous WindowGrid neighbour.
-    fn detach_column_from_window_grid(
-        &mut self,
-        column: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let groups = self.controller.update(cx, |controller, _| {
-            match controller.layout().node(column)? {
-                Node::Column(column) => Some(column.groups.clone()),
-                _ => None,
-            }
-        });
-        let Some(groups) = groups else {
-            return;
-        };
-        let members = floating_column_window_members(column, &groups);
-        let members_set = members.iter().copied().collect::<HashSet<_>>();
-        for member in members {
-            self.window_chains.remove_member(member);
-        }
-        self.pending_window_grid_reconnections.retain(|link| {
-            !members_set.contains(&link.from) && !members_set.contains(&link.to)
-        });
-        self.pending_window_chain_alignment
-            .retain(|member| !members_set.contains(member));
-    }
-
     /// Rebuilds internal Header/Group edges from Core and preserves only links
     /// that were external both before and after the current Layout transition.
     fn rebuild_floating_part_window_grid(
@@ -6011,29 +5954,6 @@ mod floating_chain_drop_target_tests {
             zone: DropZone::Right,
         };
         assert!(floating_chain_drop_target_is_supported(right, false));
-    }
-}
-
-#[cfg(test)]
-mod floating_column_member_tests {
-    use super::floating_column_window_members;
-    use crate::window_chain::WindowGridMember;
-    use dock_core::NodeId;
-    use slotmap::SlotMap;
-
-    #[test]
-    fn moving_a_column_collects_only_its_header_and_ordered_groups() {
-        let mut nodes = SlotMap::<NodeId, ()>::with_key();
-        let column = nodes.insert(());
-        let groups = [nodes.insert(()), nodes.insert(())];
-        assert_eq!(
-            floating_column_window_members(column, &groups),
-            vec![
-                WindowGridMember::Header(column),
-                WindowGridMember::Group(groups[0]),
-                WindowGridMember::Group(groups[1]),
-            ],
-        );
     }
 }
 
