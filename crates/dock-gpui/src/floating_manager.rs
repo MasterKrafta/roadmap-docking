@@ -2808,17 +2808,15 @@ impl FloatingWindowManager {
             self.schedule_reconcile(cx);
         }
 
-        if state.moving_column.is_some()
-            || matches!(
-                state.drop_target,
-                Some(NativeMoveTarget::FloatingDock { .. })
-                    | Some(NativeMoveTarget::FloatingChain { .. })
-                    | Some(NativeMoveTarget::MainDock {
-                        target: DropTarget::MainColumn { .. },
-                        ..
-                    })
-            )
-        {
+        if matches!(
+            state.drop_target,
+            Some(NativeMoveTarget::FloatingDock { .. })
+                | Some(NativeMoveTarget::FloatingChain { .. })
+                | Some(NativeMoveTarget::MainDock {
+                    target: DropTarget::MainColumn { .. },
+                    ..
+                })
+        ) {
             // Docking, detaching or joining a WindowGrid changes native ownership
             // or its adjacency graph; reconcile after this manager update unwinds.
             self.schedule_reconcile(cx);
