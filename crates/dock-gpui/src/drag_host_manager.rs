@@ -24,7 +24,7 @@ use dock_core::{
 use crate::{
     components::{
         context_menu::GroupMenuToggle,
-        floating::FloatingPartHost,
+        floating::{floating_group_and_column_for_group, FloatingPartHost},
         MainDockView,
         PanelHost,
     },
@@ -69,52 +69,6 @@ fn dock_area_drag_uses_free_area(target_window: Option<DockingWindowAtPoint>) ->
         target_window,
         None | Some(DockingWindowAtPoint::ForeignWindow)
     )
-}
-
-fn floating_group_and_column_for_group(
-    layout: &dock_core::Layout,
-    group: NodeId,
-) -> Option<(FloatingGroupId, NodeId)> {
-    fn contains(layout: &dock_core::Layout, root: NodeId, target: NodeId) -> bool {
-        if root == target {
-            return true;
-        }
-        match layout.node(root) {
-            Some(Node::Split(split)) => split
-                .children
-                .iter()
-                .any(|child| contains(layout, *child, target)),
-            Some(Node::Column(column)) => column
-                .groups
-                .iter()
-                .any(|child| contains(layout, *child, target)),
-            Some(Node::Tabs(tabs)) => tabs
-                .children
-                .iter()
-                .any(|child| contains(layout, *child, target)),
-            Some(Node::Panel(_)) | None => false,
-        }
-    }
-
-    if !matches!(layout.node(group), Some(Node::Tabs(_))) {
-        return None;
-    }
-
-    for (floating_group, floating) in layout.floating_groups() {
-        let Some(area) = layout.dock_area(floating.area) else {
-            continue;
-        };
-        if !contains(layout, area.root, group) {
-            continue;
-        }
-        let column = layout.nodes().find_map(|(column_id, node)| {
-            matches!(node, Node::Column(column) if column.groups.contains(&group))
-                .then_some(column_id)
-                .filter(|column_id| contains(layout, area.root, *column_id))
-        })?;
-        return Some((floating_group, column));
-    }
-    None
 }
 
 fn floating_window_chain_target(
