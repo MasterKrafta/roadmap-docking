@@ -21,14 +21,16 @@ use crate::{
 };
 
 use super::{
-    context_menu::{
-        ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
-        GroupMenuToggle,
-    },
     floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_part_owner_and_column, handle_floating_escape, observe_floating_focus_loss,
     render_floating_pointer_input, FloatingHostOpenMenu, FloatingHostSnapshot, FloatingPartKind,
     FloatingTabPress, FloatingGroupPress,
+};
+use super::super::{
+    context_menu::{
+        ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
+        GroupMenuToggle,
+    },
     panel_host::PanelHost,
 };
 
