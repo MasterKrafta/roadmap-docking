@@ -1826,10 +1826,10 @@ impl FloatingPartHost {
     }
 }
 
-fn floating_group_for_part_node(
+fn floating_part_owner_and_column(
     layout: &dock_core::Layout,
-    target: NodeId,
-) -> Option<FloatingGroupId> {
+    part: FloatingPartKind,
+) -> Option<(FloatingGroupId, NodeId)> {
     fn contains(layout: &dock_core::Layout, root: NodeId, target: NodeId) -> bool {
         if root == target {
             return true;
@@ -1851,9 +1851,26 @@ fn floating_group_for_part_node(
         }
     }
 
-    layout.floating_groups().find_map(|(group, floating)| {
+    let part_node = match part {
+        FloatingPartKind::Header { column } => column,
+        FloatingPartKind::Group { group, .. } => group,
+    };
+
+    layout.floating_groups().find_map(|(floating_group, floating)| {
         let area = layout.dock_area(floating.area)?;
-        contains(layout, area.root, target).then_some(group)
+        if !contains(layout, area.root, part_node) {
+            return None;
+        }
+
+        let column = match part {
+            FloatingPartKind::Header { column } => column,
+            FloatingPartKind::Group { group, .. } => layout.nodes().find_map(|(column_id, node)| {
+                matches!(node, Node::Column(column) if column.groups.contains(&group))
+                    .then_some(column_id)
+                    .filter(|column_id| contains(layout, area.root, *column_id))
+            })?,
+        };
+        Some((floating_group, column))
     })
 }
 
@@ -1866,16 +1883,18 @@ impl Render for FloatingPartHost {
         }
 
         // A preserved Group HWND can become part of a different Core FloatingGroup
-        // after a direct GroupGrip extraction. Resolve the current owner by NodeId,
-        // rather than keeping the creation-time FloatingGroupId forever.
-        let part_node = match self.part {
-            FloatingPartKind::Header { column } => column,
-            FloatingPartKind::Group { group, .. } => group,
-        };
-        if let Some(current_group) = self.controller.update(cx, |controller, _| {
-            floating_group_for_part_node(controller.layout(), part_node)
+        // and Column after a direct GroupGrip extraction. Resolve both identities from
+        // the current Layout so geometry and hit-testing follow the unchanged HWND.
+        if let Some((current_group, current_column)) = self.controller.update(cx, |controller, _| {
+            floating_part_owner_and_column(controller.layout(), self.part)
         }) {
             self.floating_group = current_group;
+            if let FloatingPartKind::Group { group, .. } = self.part {
+                self.part = FloatingPartKind::Group {
+                    column: current_column,
+                    group,
+                };
+            }
         }
 
         let window_id = window.window_handle().window_id();
