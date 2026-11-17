@@ -61,6 +61,10 @@ use floating_host_open_menu::FloatingHostOpenMenu;
 mod floating_tab_press;
 use floating_tab_press::FloatingTabPress;
 
+#[path = "floating/floating_group_press.rs"]
+mod floating_group_press;
+use floating_group_press::FloatingGroupPress;
+
 /// Content view for one native floating window.
 ///
 /// The root already owns the native window bounds and local coordinate origin.
@@ -284,12 +288,6 @@ impl FloatingWindowContent {
     }
 }
 
-
-#[derive(Clone, Copy)]
-struct FloatingGroupPress {
-    group: NodeId,
-    layout_version: u64,
-}
 
 struct FloatingHostSnapshot {
     rects: LayoutRects,
