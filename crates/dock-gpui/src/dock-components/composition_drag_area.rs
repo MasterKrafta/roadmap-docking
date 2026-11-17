@@ -50,10 +50,13 @@ impl CompositionDragArea {
             return false;
         }
 
+        // collapse_button_left is expressed in the Composition's local
+        // coordinates, matching the button's position inside its header.
+        let local_x = point.x - area_rect.origin.x;
         columns.iter().all(|column| {
             let collapse_left =
                 Self::collapse_button_left(area_rect, *column, button_width, show_close_button);
-            point.x < collapse_left || point.x >= collapse_left + button_width
+            local_x < collapse_left || local_x >= collapse_left + button_width
         })
     }
 
