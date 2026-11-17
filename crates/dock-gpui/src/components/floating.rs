@@ -1969,23 +1969,28 @@ impl Render for FloatingPartHost {
             let tab_press = self.tab_press.clone();
             let group_press = self.group_press.clone();
             let pointer_capture = self.pointer_capture.clone();
-            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
-                let preserve_interaction = manager.upgrade().is_some_and(|manager| {
-                    manager.update(app, |manager, manager_cx| {
-                        manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
-                    })
+            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, _app| {
+                // Focus can change while FloatingWindowManager is hiding or
+                // reconciling native windows. Defer its state query until the
+                // current window/manager update has unwound.
+                window.on_next_frame(move |window, app| {
+                    let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                        manager.update(app, |manager, manager_cx| {
+                            manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                        })
+                    });
+                    if preserve_interaction {
+                        return;
+                    }
+                    DockInteractionCoordinator::cancel_on_focus_loss(
+                        &controller,
+                        window,
+                        &pointer_capture,
+                        app,
+                    );
+                    tab_press.set(None);
+                    group_press.set(None);
                 });
-                if preserve_interaction {
-                    return;
-                }
-                DockInteractionCoordinator::cancel_on_focus_loss(
-                    &controller,
-                    window,
-                    &pointer_capture,
-                    app,
-                );
-                tab_press.set(None);
-                group_press.set(None);
             })
             .detach();
             self.focus_observed = true;
@@ -2457,6 +2462,8 @@ pub struct FloatingHost {
     native_resize_observation_pending: bool,
     controller_observed: bool,
     manager_observed: bool,
+    hide_header: bool,
+    hide_header_query_pending: bool,
     middle_click_closes_tabs: bool,
     /// Root focus boundary for cancelling gestures when this PanelWindow loses app focus.
     root_focus_handle: Option<FocusHandle>,
@@ -2509,6 +2516,8 @@ impl FloatingHost {
             native_resize_observation_pending: false,
             controller_observed: false,
             manager_observed: false,
+            hide_header: false,
+            hide_header_query_pending: false,
             middle_click_closes_tabs: true,
             root_focus_handle: None,
             focus_observed: false,
@@ -2605,23 +2614,27 @@ impl Render for FloatingHost {
             let tab_press = self.tab_press.clone();
             let group_press = self.group_press.clone();
             let pointer_capture = self.pointer_capture.clone();
-            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, app| {
-                let preserve_interaction = manager.upgrade().is_some_and(|manager| {
-                    manager.update(app, |manager, manager_cx| {
-                        manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
-                    })
+            cx.on_focus_out(&focus_handle, window, move |_host, _event, window, _app| {
+                // A native focus change may be caused by FloatingWindowManager
+                // itself. Never synchronously update that manager from this event.
+                window.on_next_frame(move |window, app| {
+                    let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                        manager.update(app, |manager, manager_cx| {
+                            manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                        })
+                    });
+                    if preserve_interaction {
+                        return;
+                    }
+                    DockInteractionCoordinator::cancel_on_focus_loss(
+                        &controller,
+                        window,
+                        &pointer_capture,
+                        app,
+                    );
+                    tab_press.set(None);
+                    group_press.set(None);
                 });
-                if preserve_interaction {
-                    return;
-                }
-                DockInteractionCoordinator::cancel_on_focus_loss(
-                    &controller,
-                    window,
-                    &pointer_capture,
-                    app,
-                );
-                tab_press.set(None);
-                group_press.set(None);
             })
             .detach();
             self.focus_observed = true;
@@ -2656,9 +2669,26 @@ impl Render for FloatingHost {
                 None
             }
         };
-        let hide_header = self.manager.upgrade().is_some_and(|manager| {
-            manager.update(cx, |manager, _| manager.hide_floating_header(group))
-        });
+        if !self.hide_header_query_pending {
+            self.hide_header_query_pending = true;
+            let manager = self.manager.clone();
+            let host = cx.entity().downgrade();
+            window.on_next_frame(move |_, app| {
+                let hide_header = manager.upgrade().is_some_and(|manager| {
+                    manager.update(app, |manager, _| manager.hide_floating_header(group))
+                });
+                if let Some(host) = host.upgrade() {
+                    host.update(app, |host, host_cx| {
+                        host.hide_header_query_pending = false;
+                        if host.group == Some(group) && host.hide_header != hide_header {
+                            host.hide_header = hide_header;
+                            host_cx.notify();
+                        }
+                    });
+                }
+            });
+        }
+        let hide_header = self.hide_header;
 
         let mut root = div()
             .id(format!("floating-host-root-{:?}", group))
@@ -2771,34 +2801,36 @@ impl Render for FloatingHost {
             });
         }
 
-        // A DragHost handoff completes only after this persistent host has
-        // built a frame that can mount every transferred active PanelView.
-        let handoff_panels = self.manager.upgrade().and_then(|manager| {
-            manager.update(cx, |manager, manager_cx| {
+        // Query and confirm handoff only after this render/update has unwound.
+        // The manager can notify this legacy host while reconciling a Drop.
+        let rendered_panels = panel_views
+            .iter()
+            .filter_map(|(rect, view)| view.as_ref().map(|_| rect.panel))
+            .collect::<HashSet<_>>();
+        let handoff_manager = self.manager.clone();
+        window.on_next_frame(move |_, app| {
+            let Some(manager) = handoff_manager.upgrade() else {
+                return;
+            };
+            let Some(required_panels) = manager.update(app, |manager, manager_cx| {
                 manager.pending_drag_host_handoff_panels(group, window_id, manager_cx)
-            })
+            }) else {
+                return;
+            };
+            if required_panels
+                .iter()
+                .all(|panel| rendered_panels.contains(panel))
+            {
+                let _ = manager.update(app, |manager, manager_cx| {
+                    manager.notify_drag_host_handoff_rendered(
+                        group,
+                        window_id,
+                        &required_panels,
+                        manager_cx,
+                    );
+                });
+            }
         });
-        if let Some(required_panels) = handoff_panels.filter(|required| {
-            required.iter().all(|panel| {
-                panel_views
-                    .iter()
-                    .all(|(rect, view)| rect.panel != *panel || view.is_some())
-            })
-        }) {
-            let manager = self.manager.clone();
-            window.on_next_frame(move |_, app| {
-                if let Some(manager) = manager.upgrade() {
-                    let _ = manager.update(app, |manager, manager_cx| {
-                        manager.notify_drag_host_handoff_rendered(
-                            group,
-                            window_id,
-                            &required_panels,
-                            manager_cx,
-                        );
-                    });
-                }
-            });
-        }
 
         let rendered_groups = snapshot
             .rects
