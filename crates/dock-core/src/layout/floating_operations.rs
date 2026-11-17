@@ -186,10 +186,10 @@ impl Layout {
         })
     }
 
-    /// Reassigns the removed middle Group's height equally to its immediate
-    /// Main-column neighbours. Edge extraction deliberately keeps the existing
-    /// ratio normalization: all remaining Groups expand while preserving their
-    /// relative heights.
+    /// Reassigns the removed middle Group's weight to its expanded immediate
+    /// Main-column neighbours, equally when both can grow. Edge extraction keeps
+    /// the existing ratio normalization so every remaining expanded Group grows
+    /// while preserving its relative height.
     fn main_group_ratios_after_group_float(
         &self,
         group: NodeId,
