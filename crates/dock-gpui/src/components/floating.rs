@@ -1767,6 +1767,7 @@ pub(crate) struct FloatingPartHost {
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
     manager_observed: bool,
+    show_close_button: bool,
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
@@ -1776,6 +1777,14 @@ pub(crate) struct FloatingPartHost {
 }
 
 impl FloatingPartHost {
+    pub(crate) fn set_show_close_button(&mut self, show: bool) -> bool {
+        if self.show_close_button == show {
+            return false;
+        }
+        self.show_close_button = show;
+        true
+    }
+
     pub(crate) fn new_header(
         controller: Entity<DockController>,
         floating_group: FloatingGroupId,
@@ -1824,6 +1833,7 @@ impl FloatingPartHost {
             manager,
             controller_observed: false,
             manager_observed: false,
+            show_close_button: false,
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
@@ -2033,9 +2043,7 @@ impl Render for FloatingPartHost {
                     ),
                 );
                 let local_column = ColumnRect::new(column, header_rect);
-                let show_close_button = self.manager.upgrade().is_some_and(|manager| {
-                    manager.update(cx, |manager, _| manager.is_rightmost_header(column))
-                });
+                let show_close_button = self.show_close_button;
                 let pointer_header_rect = Rect::new(
                     column_rect.rect.origin,
                     dock_core::Size::new(
