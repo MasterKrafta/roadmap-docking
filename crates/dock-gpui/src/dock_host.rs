@@ -12,6 +12,11 @@ use gpui::{
     prelude::InteractiveElement as _, px, rgb,
 };
 
+#[path = "dock_host/open_context_menu.rs"]
+mod open_context_menu;
+
+use self::open_context_menu::OpenContextMenu;
+
 use crate::{
     dock_metrics_from_theme, DockController, DockControllerConfigError, DockTheme,
     DragHostManager, FloatingWindowManager,
@@ -68,13 +73,6 @@ pub struct DockHost {
     floating_manager_attached: bool,
     drag_host_manager: Option<Entity<DragHostManager>>,
     drag_host_manager_attached: bool,
-}
-
-#[derive(Clone)]
-struct OpenContextMenu {
-    target: ContextMenuTarget,
-    anchor: Point,
-    open_submenu: Option<usize>,
 }
 
 impl DockHost {
