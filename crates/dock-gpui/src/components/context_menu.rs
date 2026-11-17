@@ -1,146 +1,23 @@
-use std::rc::Rc;
+mod context_menu_callbacks;
+mod context_menu_entry;
+mod context_menu_item;
+mod context_menu_target;
 
-use dock_core::{NodeId, PanelId, Point, Rect};
+pub use context_menu_callbacks::{
+    ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
+};
+pub use context_menu_entry::ContextMenuEntry;
+pub use context_menu_item::ContextMenuItem;
+pub(crate) use context_menu_target::{
+    ContextMenuTarget, ContextMenuToggle, GroupMenuToggle,
+};
+
+use dock_core::{Point, Rect};
 use gpui::{
-    App, IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img,
+    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, div, img,
     prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
-
-/// The source of a DockHost context menu.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ContextMenuTarget {
-    Group(NodeId),
-    Tab { group: NodeId, panel: PanelId },
-    Column(NodeId),
-    Overflow(NodeId),
-}
-
-/// Opens or toggles one of the DockHost context menus.
-pub(crate) type ContextMenuToggle = Rc<dyn Fn(ContextMenuTarget, Point, &mut App)>;
-
-/// Callback shared by the existing group and overflow component interfaces.
-pub(crate) type GroupMenuToggle = ContextMenuToggle;
-
-/// Called when a menu is dismissed.
-pub type ContextMenuDismiss = Rc<dyn Fn(&mut App)>;
-
-/// Updates the single open first-level submenu.
-pub type ContextMenuSubmenuToggle = Rc<dyn Fn(Option<usize>, &mut App)>;
-
-type ContextMenuAction = Rc<dyn Fn(&mut App)>;
-
-/// Callbacks owned by the host while a context menu is open.
-#[derive(Clone)]
-pub struct ContextMenuCallbacks {
-    pub on_submenu: ContextMenuSubmenuToggle,
-    pub on_dismiss: ContextMenuDismiss,
-}
-
-/// A reusable action row in a context menu.
-#[derive(Clone)]
-pub struct ContextMenuItem {
-    label: SharedString,
-    hotkey: Option<SharedString>,
-    icon: Option<SharedString>,
-    disabled: bool,
-    selected: bool,
-    action: Option<ContextMenuAction>,
-}
-
-impl ContextMenuItem {
-    /// Creates an enabled action item.
-    pub fn new(label: impl Into<SharedString>, action: impl Fn(&mut App) + 'static) -> Self {
-        Self {
-            label: label.into(),
-            hotkey: None,
-            icon: None,
-            disabled: false,
-            selected: false,
-            action: Some(Rc::new(action)),
-        }
-    }
-
-    /// Creates an item that is visible but cannot be activated.
-    pub fn disabled(label: impl Into<SharedString>) -> Self {
-        Self {
-            label: label.into(),
-            hotkey: None,
-            icon: None,
-            disabled: true,
-            selected: false,
-            action: None,
-        }
-    }
-
-    /// Adds a right-aligned keyboard shortcut caption.
-    pub fn with_hotkey(mut self, hotkey: impl Into<SharedString>) -> Self {
-        self.hotkey = Some(hotkey.into());
-        self
-    }
-
-    /// Adds a small image icon before the label.
-    pub fn with_icon(mut self, icon: impl Into<SharedString>) -> Self {
-        self.icon = Some(icon.into());
-        self
-    }
-
-    /// Marks the row as the currently selected option.
-    pub fn selected(mut self, selected: bool) -> Self {
-        self.selected = selected;
-        self
-    }
-}
-
-/// One row, separator, or first-level submenu in a context menu.
-#[derive(Clone)]
-pub enum ContextMenuEntry {
-    Item(ContextMenuItem),
-    Separator,
-    Submenu {
-        label: SharedString,
-        hotkey: Option<SharedString>,
-        disabled: bool,
-        entries: Vec<ContextMenuEntry>,
-    },
-}
-
-impl From<ContextMenuItem> for ContextMenuEntry {
-    fn from(item: ContextMenuItem) -> Self {
-        Self::Item(item)
-    }
-}
-
-impl ContextMenuEntry {
-    /// Adds a horizontal separator.
-    pub fn separator() -> Self {
-        Self::Separator
-    }
-
-    /// Adds a submenu. Submenus are intentionally limited to one level.
-    pub fn submenu(
-        label: impl Into<SharedString>,
-        hotkey: Option<SharedString>,
-        entries: Vec<ContextMenuEntry>,
-    ) -> Self {
-        Self::Submenu {
-            label: label.into(),
-            hotkey,
-            disabled: false,
-            entries,
-        }
-    }
-
-    /// Adds a visible but unavailable submenu.
-    pub fn disabled_submenu(label: impl Into<SharedString>) -> Self {
-        Self::Submenu {
-            label: label.into(),
-            hotkey: None,
-            disabled: true,
-            entries: Vec::new(),
-        }
-    }
-}
 
 /// Universal popup menu used by group, tab, column, and tab-overflow controls.
 ///
