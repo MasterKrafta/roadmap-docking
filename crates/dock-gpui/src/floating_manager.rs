@@ -1356,6 +1356,41 @@ impl FloatingWindowManager {
             .unwrap_or(true)
     }
 
+    /// Closes every Core FloatingGroup represented by the connected native WindowGrid.
+    ///
+    /// WindowGrid identifies physical Header/Group HWNDs; the existing ownership
+    /// map resolves those members back to their Core FloatingGroup identities.
+    /// Commands are filtered against the live Layout so a repeated click is harmless.
+    pub(crate) fn close_window_grid(
+        &mut self,
+        group: FloatingGroupId,
+        cx: &mut Context<Self>,
+    ) -> Result<(), dock_core::CommandError> {
+        let anchor = self.grid_anchor_member_for_group(group);
+        let mut groups = Vec::new();
+        for member in self.window_chains.members_for(anchor) {
+            if let Some(member_group) = self.floating_group_for_member(member)
+                && !groups.contains(&member_group)
+            {
+                groups.push(member_group);
+            }
+        }
+        if !groups.contains(&group) {
+            groups.push(group);
+        }
+
+        self.controller.update(cx, |controller, controller_cx| {
+            let commands = groups
+                .into_iter()
+                .filter(|group| controller.layout().floating_group(*group).is_some())
+                .map(|group| DockCommand::CloseFloatingGroup { group })
+                .collect();
+            controller
+                .dispatch_sequence_in(commands, controller_cx)
+                .map(|_| ())
+        })
+    }
+
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
         self.native_move
             .is_some_and(|state| state.group == group && state.hide_header)
