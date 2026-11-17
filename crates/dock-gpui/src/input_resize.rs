@@ -6,6 +6,12 @@ use gpui::{App, Entity, WindowId};
 
 use crate::{DockController, ResizeInteraction};
 
+mod resize_preview;
+mod resize_preview_kind;
+
+pub(crate) use resize_preview::ResizePreview;
+pub(crate) use resize_preview_kind::ResizePreviewKind;
+
 /// Starts a Core resize transaction from Main geometry.
 pub(crate) fn begin_resize_hit(
     controller: &Entity<DockController>,
@@ -318,24 +324,6 @@ fn signed_outer_width_delta(pointer_delta: f32, left_dock: bool) -> f32 {
     } else {
         -pointer_delta
     }
-}
-
-/// Visual-only geometry for the active resize. A splitter preview is a thin
-/// guide line; flyout resizing uses an outline of the future bounds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ResizePreviewKind {
-    SplitterLine,
-    BoundsOutline,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ResizePreview {
-    pub rect: Rect,
-    pub kind: ResizePreviewKind,
-    /// A column scroll owner whose content coordinates must be translated.
-    pub scroll_owner: Option<NodeId>,
-    /// Identifies the original splitter whose static line is hidden during drag.
-    pub splitter: Option<(NodeId, usize, Axis)>,
 }
 
 pub(crate) fn resize_preview_for_interaction(
