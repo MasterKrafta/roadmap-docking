@@ -542,6 +542,28 @@ fn render_floating_pointer_input(
                                 .then_some((dock_group, controller.layout().version()))
                         });
                         if let Some((dock_group, layout_version)) = group_candidate {
+                            // A typed Floating Group owns a permanent HWND. Move that HWND
+                            // directly; do not start DragHost or transfer its cached PanelViews.
+                            let is_source_group_window = matches!(
+                                source_part,
+                                Some(DockWindowPart::Group { group: source_group })
+                                    if source_group == dock_group
+                            );
+                            if is_source_group_window
+                                && let Some(manager) = manager_for_down.upgrade()
+                                && manager.update(app, |manager, manager_cx| {
+                                    manager.begin_existing_floating_group_move(
+                                        group,
+                                        dock_group,
+                                        point,
+                                        manager_cx,
+                                    )
+                                })
+                            {
+                                app.stop_propagation();
+                                return;
+                            }
+
                             let is_single_tab_floating = controller_for_down.update(
                                 app,
                                 |controller, _| {
