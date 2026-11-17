@@ -57,4 +57,28 @@ impl ContextMenuItem {
         self.selected = selected;
         self
     }
+    pub(super) fn label(&self) -> &SharedString {
+        &self.label
+    }
+
+    pub(super) fn hotkey(&self) -> Option<&SharedString> {
+        self.hotkey.as_ref()
+    }
+
+    pub(super) fn icon(&self) -> Option<&SharedString> {
+        self.icon.as_ref()
+    }
+
+    pub(super) fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
+    pub(super) fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    pub(super) fn action(&self) -> Option<Rc<dyn Fn(&mut App)>> {
+        self.action.clone()
+    }
+
 }

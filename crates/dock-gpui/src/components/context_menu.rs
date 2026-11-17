@@ -231,20 +231,20 @@ fn render_entry(
                 .items_center()
                 .gap(px(8.0))
                 .px(px(theme.metrics.popup_menu_horizontal_padding))
-                .text_color(rgb(if item.disabled {
+                .text_color(rgb(if item.is_disabled() {
                     theme.colors.muted_text
                 } else {
                     theme.colors.primary_text
                 }))
-                .bg(rgb(if item.selected {
+                .bg(rgb(if item.is_selected() {
                     theme.colors.popup_menu_selected
                 } else {
                     theme.colors.popup_menu_background
                 }));
 
-            if let Some(icon) = item.icon.clone() {
+            if let Some(icon) = item.icon().cloned() {
                 row = row.child(img(icon).size(px(14.0)).flex_none());
-            } else if item.selected {
+            } else if item.is_selected() {
                 row = row.child(
                     div()
                         .w(px(14.0))
@@ -261,10 +261,10 @@ fn render_entry(
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(item.label.clone()),
+                    .child(item.label().clone()),
             );
 
-            if let Some(hotkey) = item.hotkey.clone() {
+            if let Some(hotkey) = item.hotkey().cloned() {
                 row = row.child(
                     div()
                         .flex_none()
@@ -273,9 +273,9 @@ fn render_entry(
                 );
             }
 
-            if item.disabled {
+            if item.is_disabled() {
                 row.opacity(0.62).cursor_not_allowed()
-            } else if let Some(action) = item.action.clone() {
+            } else if let Some(action) = item.action() {
                 let dismiss = on_dismiss.clone();
                 row.cursor_pointer()
                     .hover(|style| style.bg(rgb(theme.colors.popup_menu_hover)))
