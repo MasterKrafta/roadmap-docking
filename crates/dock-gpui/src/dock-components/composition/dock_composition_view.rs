@@ -11,7 +11,10 @@ use gpui::{
 };
 use ui::Theme;
 
-use crate::{DockController, dock_components::GroupPresentation};
+use crate::{
+    DockController,
+    dock_components::{active_panels_for_groups, GroupPresentation},
+};
 
 use super::{CloseCompositionAction, CompositionHeader, DockColumnView};
 
