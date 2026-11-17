@@ -2117,7 +2117,6 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
             source_header: None,
-            moving_column: None,
         });
         self.schedule_native_move(cx, group, window_id);
         if hide_header {
