@@ -7,5 +7,5 @@ pub(super) struct FloatingRectCacheKey {
     pub(super) group: FloatingGroupId,
     pub(super) layout_version: u64,
     pub(super) metrics_revision: u64,
-    pub(super) chrome: dock_core::ChromeMode,
+    pub(super) chrome: ChromeMode,
 }
