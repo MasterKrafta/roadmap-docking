@@ -3088,24 +3088,43 @@ impl FloatingWindowManager {
         moving_windows: &[NativeMoveWindow],
         cx: &mut Context<Self>,
     ) -> Result<bool, dock_core::CommandError> {
-        if let Some((target, point)) = state.drop_target.and_then(|drop| match drop {
-            NativeMoveTarget::MainDock { target, point }
-            | NativeMoveTarget::FloatingDock { target, point } => Some((target, point)),
-            NativeMoveTarget::FloatingChain { .. } => None,
-        }) {
-            return self.controller.update(cx, |controller, controller_cx| {
-                controller.finish_floating_group_drop_in(
-                    source_group,
-                    target,
-                    point,
-                    controller_cx,
-                )
-            });
+        match state.drop_target {
+            Some(NativeMoveTarget::MainDock { target, point })
+            | Some(NativeMoveTarget::FloatingDock { target, point })
+                if target != DropTarget::FreeArea =>
+            {
+                return self.controller.update(cx, |controller, controller_cx| {
+                    controller.finish_floating_group_drop_in(
+                        source_group,
+                        target,
+                        point,
+                        controller_cx,
+                    )
+                });
+            }
+            Some(NativeMoveTarget::FloatingChain { .. }) => {
+                return Err(dock_core::CommandError::InvalidTarget {
+                    reason: "a GroupGrip move must use a logical Core drop target, not a physical WindowGrid join",
+                });
+            }
+            Some(NativeMoveTarget::MainDock {
+                target: DropTarget::FreeArea,
+                ..
+            })
+            | None => {}
+            Some(NativeMoveTarget::FloatingDock {
+                target: DropTarget::FreeArea,
+                ..
+            }) => {
+                return Err(dock_core::CommandError::InvalidTarget {
+                    reason: "a Floating Group cannot use FreeArea inside another Floating window",
+                });
+            }
         }
 
-        // No managed docking window was under the cursor. Preserve the Stage 4
-        // behavior: create a new Floating for the Group, or keep its whole Column
-        // when it is the only Group in that Column.
+        // No managed docking zone was selected, or the Main resolver selected
+        // its Canvas FreeArea. Preserve the Stage 4 behavior: create a new
+        // Floating for the Group, or keep its whole Column when it is the only Group.
         let column = state.source_column.ok_or(dock_core::CommandError::InvalidTarget {
             reason: "the source Column for the Floating Group move is no longer available",
         })?;
