@@ -741,23 +741,14 @@ impl FloatingZoneContext<'_> {
         {
             return Ok(());
         }
-        // Generic keeps its established FloatingTop/FloatingBottom targets.
-        // In Photoshop, a direct Tabs-root window uses Core's cardinal edge
-        // target, while Column compositions retain the special WindowGrid edge.
-        let target_is_direct_tabs_root = self.layout.floating_groups().any(|(_, floating)| {
-            self.layout
-                .dock_area(floating.area)
-                .is_some_and(|area| area.root == target_group)
-        });
-        let use_core_edge_target = self.layout.profile() == Profile::Photoshop
-            && matches!(self.source, DropSource::Panel { .. } | DropSource::Group { .. })
-            && target_is_direct_tabs_root;
-        let target_edge = if use_core_edge_target { edge } else { kind };
+        // FloatingTop/FloatingBottom describe the visual affordance only.
+        // Core docking commands consume the corresponding cardinal edge, so
+        // keep the target semantic independent from the rendered zone kind.
         push_zone(
             self.zones,
             DropTarget::GroupEdge {
                 group: target_group,
-                zone: target_edge,
+                zone: edge,
             },
             kind,
             rect,
