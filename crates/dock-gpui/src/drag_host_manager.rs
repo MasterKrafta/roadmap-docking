@@ -1211,17 +1211,18 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            // A Main-origin GroupGrip or PanelTab tear-off can reuse its DragHost
-            // HWND as the new permanent Group host. Resolve the resulting Group by
-            // its preserved NodeId (GroupGrip) or the transferred PanelId (PanelTab).
-            // When a PanelTab is merged into an existing Group, adoption is rejected
-            // because that Group already has its own HWND; the safe two-phase handoff
-            // below then gives the PanelView to the existing target window.
+            // Main-origin GroupGrip and detached PanelTab gestures can reuse
+            // their DragHost HWND as the new permanent Group host. PanelTab promotion
+            // works from Main and Floating; GroupGrip still uses the direct native HWND
+            // path when its source is Floating. Resolve the resulting Group by its
+            // preserved NodeId (GroupGrip) or transferred PanelId (PanelTab).
+            // A PanelTab merged into an existing Group is rejected by adoption because
+            // that Group already has its own HWND; the safe handoff below serves it.
             if defer_layout_events_until_parts_ready
-                && source_host == Some(DragSourceHost::Main)
-                && matches!(
-                    drag_handle,
-                    Some(DragHandle::GroupGrip | DragHandle::PanelTab)
+                && (
+                    drag_handle == Some(DragHandle::PanelTab)
+                    || (source_host == Some(DragSourceHost::Main)
+                        && drag_handle == Some(DragHandle::GroupGrip))
                 )
             {
                 let destination = self.controller.update(cx, |controller, _| {
@@ -1242,7 +1243,7 @@ impl DragHostManager {
                 }).ok().flatten();
                 if let Some((owner, column, group)) = destination
                     && owner == target_group
-                    && self.promote_main_content_to_floating(
+                    && self.promote_drag_host_content_to_floating(
                         id,
                         target_group,
                         column,
@@ -1318,7 +1319,7 @@ impl DragHostManager {
         }
     }
 
-    fn promote_main_content_to_floating(
+    fn promote_drag_host_content_to_floating(
         &mut self,
         id: DragHostId,
         floating_group: FloatingGroupId,
