@@ -1542,7 +1542,7 @@ impl FloatingWindowManager {
             .find(|spec| {
                 spec.member == member && spec.floating_group == floating_group
             })
-        });
+        }).ok().flatten();
         let bounds = spec
             .and_then(|spec| {
                 self.part_outer_bounds_for_target(spec, native_window, Some(scale))
