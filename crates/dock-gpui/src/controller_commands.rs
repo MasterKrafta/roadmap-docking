@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dock_core::{
     CommandError, CommandOutcome, DockCommand, DragDropAction, DragDropRequest, DragHandle,
-    DragState, DropTarget, FloatingGroupId, NodeId, PanelId, PanelKey, Point, Rect,
+    DragState, DropTarget, FloatingGroupId, Node, NodeId, PanelId, PanelKey, Point, Rect,
 };
 use gpui::{AnyView, App, AppContext, Context, Window};
 
@@ -495,6 +495,77 @@ impl DockController {
         }
 
         self.finish_native_window_move_transaction(before_panels, previous_version, cx)
+    }
+
+    /// Commits a GroupGrip drop resolved by the shared Core drop resolver.
+    ///
+    /// A GroupTabs target always appends the complete source Group after the
+    /// target's existing tabs. The returned bool is false for an explicit Core no-op.
+    pub(crate) fn finish_floating_group_drop_in(
+        &mut self,
+        source_group: NodeId,
+        target: DropTarget,
+        point: Point,
+        cx: &mut Context<Self>,
+    ) -> Result<bool, CommandError> {
+        if !self.native_window_move_transaction_active {
+            return Err(CommandError::InvalidValue {
+                field: "native_floating_group_move",
+                reason: "there is no active native Floating Group move transaction",
+            });
+        }
+        if self.drag.session().handle() != Some(DragHandle::GroupGrip) {
+            return Err(CommandError::InvalidValue {
+                field: "native_floating_group_move",
+                reason: "the active native Floating Group move is not a GroupGrip gesture",
+            });
+        }
+
+        let origin = match self.drag.session().state() {
+            DragState::Dragging {
+                payload: dock_core::DragPayload::Group { group },
+                origin,
+                ..
+            } if group == source_group => origin,
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "the active GroupGrip gesture no longer matches its source Group",
+                });
+            }
+        };
+
+        let target = match target {
+            DropTarget::GroupTabs { group, .. } => {
+                let Some(Node::Tabs(tabs)) = self.layout.node(group) else {
+                    return Err(CommandError::InvalidTarget {
+                        reason: "a GroupTabs drop target must reference a Tabs node",
+                    });
+                };
+                DropTarget::GroupTabs {
+                    group,
+                    index: tabs.children.len(),
+                }
+            }
+            target => target,
+        };
+        let request = DragDropRequest {
+            payload: dock_core::DragPayload::Group { group: source_group },
+            handle: DragHandle::GroupGrip,
+            origin,
+            point,
+            target: Some(target),
+            floating_bounds: None,
+        };
+        match self.layout.resolve_drag_drop(&request, &self.metrics)? {
+            DragDropAction::NoOp => {
+                self.finish_native_window_move_commands(std::iter::empty(), cx)?;
+                Ok(false)
+            }
+            DragDropAction::Command(command) => {
+                self.finish_native_window_move_commands(std::iter::once(command), cx)?;
+                Ok(true)
+            }
+        }
     }
 
     /// Returns every Column in a moved Floating WindowChain to one Main DockArea.
