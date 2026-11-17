@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use dock_core::{DropTarget, FloatingGroupId, PanelId, Point, Rect};
 use gpui::{Subscription, WindowHandle, WindowId};
 use platform::{NativeWindowFrameState, NativeWindowId};

@@ -4,34 +4,24 @@
 //! FloatingWindowManager. It hosts the existing source presentation and routes
 //! drop feedback to the persistent Main/Floating window under the cursor.
 
-use std::{collections::{HashMap, HashSet}, rc::Rc, time::Duration};
+use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use gpui::{
-    AnyView, AppContext, Bounds, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window,
-    WindowBounds, WindowHandle, WindowId, WindowKind, WindowOptions, div, point, px, rgb, size,
+    AnyView, Bounds, Context, Entity, Subscription, Window, WindowBounds, WindowHandle,
+    WindowId, WindowKind, WindowOptions, point, px, size,
 };
-use platform::{NativeError, NativeKey, NativeWindowFrameState, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
+use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, CommandValue, DockMetrics, DockSide,
-    DragDropAction,
-    DragHandle, DragPayload, DragState, DropTarget, FloatingGroupId, GroupRect, Node, NodeId, PanelId,
-    PanelRect, Point, Rect, Size, SplitterRect, TabHeaderRect, TabOverflowRect, TabStripRect,
-    VerticalOverflow,
+    ColumnRect, CommandValue, DockSide, DragDropAction, DragHandle, DragPayload, DragState,
+    DropTarget, FloatingGroupId, Node, NodeId, PanelId, PanelRect, Point, Rect, Size,
 };
 
 use crate::{
     components::{
-        context_menu::GroupMenuToggle,
         floating::{
             floating_group_and_column_for_group, floating_group_column_for_panel, FloatingPartHost,
         },
-        MainDockView,
-        PanelHost,
-    },
-    dock_components::{
-        collect_group_presentations, DockGroupView, GroupPresentation,
     },
     floating_manager::{floating_window_chain_direction, DockingWindowAtPoint},
     geometry::DockGeometry,

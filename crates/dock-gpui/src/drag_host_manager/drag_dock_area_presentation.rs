@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, rc::Rc};
+use std::collections::{HashMap, HashSet};
 
 use gpui::AnyView;
 
@@ -9,7 +9,7 @@ use dock_core::{
 
 use crate::dock_components::GroupPresentation;
 
-struct DragDockAreaPresentation {
+pub(super) struct DragDockAreaPresentation {
     pub(super) columns: Vec<ColumnRect>,
     pub(super) groups: Vec<GroupRect>,
     pub(super) panels: Vec<(PanelRect, Option<AnyView>)>,
