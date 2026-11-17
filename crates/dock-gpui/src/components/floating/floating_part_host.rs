@@ -13,7 +13,7 @@ use ui::Theme;
 
 use crate::{
     dock_components::{
-        active_panels_for_groups, DockCompositionView, DockGroupView, GroupPresentation,
+        active_panels_for_groups, DockCompositionView, DockGroupView,
         PanelTransferPresentation,
     },
     dock_host::{build_context_menu_entries, context_menu_target_exists},

@@ -1,4 +1,4 @@
-use dock_core::{DropTarget, FloatingGroupId, PanelId, Point, Rect};
+use dock_core::{DropTarget, PanelId, Point, Rect};
 use gpui::{Subscription, WindowHandle, WindowId};
 use platform::{NativeWindowFrameState, NativeWindowId};
 

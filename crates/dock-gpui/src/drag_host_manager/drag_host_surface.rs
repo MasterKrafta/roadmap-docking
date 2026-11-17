@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, rc::Rc};
 
 use dock_core::{
-    ColumnRect, DockSide, DragPayload, GroupRect, Node, NodeId, PanelId, PanelRect, Point, Rect,
+    ColumnRect, DockSide, DragPayload, GroupRect, Node, NodeId, PanelId, PanelRect,
     Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };

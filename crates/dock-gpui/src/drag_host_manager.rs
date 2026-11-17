@@ -7,14 +7,14 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use gpui::{
-    AnyView, Bounds, Context, Entity, Subscription, Window, WindowBounds, WindowHandle,
+    Bounds, Context, Entity, Window, WindowBounds, WindowHandle,
     WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
     ColumnRect, CommandValue, DockSide, DragDropAction, DragHandle, DragPayload, DragState,
-    DropTarget, FloatingGroupId, Node, NodeId, PanelId, PanelRect, Point, Rect, Size,
+    DropTarget, FloatingGroupId, Node, NodeId, PanelId, Point, Rect, Size,
 };
 
 use crate::{

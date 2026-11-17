@@ -5,11 +5,13 @@ use std::{
 };
 
 use dock_core::{
-    ColumnRect, ComputeRectsError, DockCommand, DockMetrics, FloatingGroupId, Node, NodeId,
+    ColumnDisplayItem, ColumnRect, ComputeRectsError, DockCommand, DockMetrics, FloatingGroupId,
+    Node, NodeId,
     PanelId, Point, Rect, SplitterRect,
 };
 use gpui::{
-    Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, KeyDownEvent,
+    App, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
+    KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, WeakEntity, Window, WindowId, canvas,
     prelude::InteractiveElement as _,
 };
@@ -65,7 +67,7 @@ pub use floating_host::FloatingHost;
 
 #[path = "floating/floating_window_content.rs"]
 mod floating_window_content;
-pub(super) use floating_window_content::FloatingWindowContent;
+use floating_window_content::FloatingWindowContent;
 
 /// Floating tab drags transfer one Panel to DragHost after leaving the source strip
 /// or entering another docking window. The shared CompositionHeader moves the whole window.
