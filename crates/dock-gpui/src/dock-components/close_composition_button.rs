@@ -1,4 +1,7 @@
-use gpui::{App, IntoElement, InteractiveElement, ParentElement, Styled, div, px, rgb};
+use gpui::{
+    App, IntoElement, InteractiveElement, ParentElement, StatefulInteractiveElement, Styled, div,
+    px, rgb,
+};
 use ui::Theme;
 
 pub(crate) type CloseCompositionAction = Box<dyn Fn(&mut App) + 'static>;
