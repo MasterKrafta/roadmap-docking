@@ -2,7 +2,7 @@
 
 > Статус: рабочая фиксация согласованного поведения и поэтапной реализации по состоянию на 17 ноября 2026 года.
 >
-> Это не окончательная техническая спецификация: детали следующих этапов уточняются по мере проверки исходников. Этапы 1–4 внесены в `main` и ожидают локальной проверки. Сборка и тесты агентом не запускались.
+> Это не окончательная техническая спецификация: детали следующих этапов уточняются по мере проверки исходников. Этапы 1–5 внесены в `main` и ожидают локальной проверки. Сборка и тесты агентом не запускались.
 
 ## 1. От чего отталкиваемся
 
@@ -634,11 +634,22 @@ flowchart TD
 
 ### Этап 5. Стыковка Floating Group и сохранение её HWND
 
-**Основные файлы:** `crates/dock-gpui/src/floating_manager.rs`, `components/floating.rs`, `input_drag.rs`, `drag_host_manager.rs`; Core сначала повторно проверить в `crates/dock-core/src/layout/drop_handling.rs`, `group_operations.rs` и `floating_operations.rs`.
+**Статус:** прямой GroupGrip-перенос из typed Floating Group-host теперь передаёт найденную drop-зону и точку в существующий Core `resolve_drag_drop`. Для Main используется текущий Main resolver, для другого Floating — его собственный resolver. Физическое присоединение WindowGrid не выполняется для GroupGrip: после Core-команды перемещаются только нужные HWND, а их внутренние связи пересобираются по новому Layout. Для `FreeArea` и отпускания на рабочем столе сохранён путь Stage 4 — создание отдельного Floating с прежними размерами. Изменения внесены в `main`; этап ожидает локальной проверки, сборка и тесты не запускались.
 
-**Что сделать:** перестать подменять Group edge Drop на физическое создание отдельной FloatingGroup там, где требуется логическая стыковка. Передавать настоящую Drop Zone в Core: верх/низ — `SplitGroup`, левая/правая граница — создание/перенос Column, TabStrip — `MergeGroup` с добавлением вкладок в конец. При переходе между Floating-композициями сохранить Group HWND по NodeId и обновить его FloatingGroup-владельца/источник геометрии; для `FloatingPartHost` сейчас это отдельная проблема, так как владелец передаётся при создании и считается неизменным. После успешного commit только тогда сдвигать соседние Group и закрывать/создавать Header по новой структуре.
+Core уже содержит необходимые операции, поэтому его код не менялся:
+- верх/низ — `SplitGroup`;
+- левая/правая границы — `SplitGroup`, а в Photoshop Column создаётся вокруг перемещённой Group;
+- внутренняя граница Floating-колонок — `FloatingColumnInsertion`, обрабатываемая Core как новая Column;
+- TabStrip — `MergeGroup`. Полная полоса вкладок уже создаёт Core-цель `GroupTabs` с индексом конца списка; GPUI не дублирует это правило;
+- Main Column / ColumnSlot / RailSlot — существующие команды переноса группы в Core.
 
-**Готово, когда:** все допустимые зоны Main/Floating дают логический результат из Core; существующий HWND Group сохраняется при переносе туда, где Group остаётся отдельной; при TabStrip-слиянии исчезает только исходная Group и её окно, а вкладки оказываются в конце целевой Group в прежнем порядке; при отмене дерево и HWND восстанавливаются.
+После успешной Core-команды WindowGrid удаляет только перемещённые исходные member-связи. Reconciliation сохраняет существующий Group HWND по NodeId, обновляет его `FloatingGroupId` и геометрию; `FloatingPartHost` получает актуальные владельца и Column из Layout. Если Core удалил исходный Group при `MergeGroup`, закрывается только его HWND, целевая Group и её HWND остаются. При Core NoOp исходные HWND возвращаются на `cancel_origin`, а прежняя WindowGrid не меняется. При ошибке Core транзакция отменяется и исходные HWND восстанавливаются.
+
+**Основные файлы:** `crates/dock-gpui/src/floating_manager.rs`, `controller_commands.rs`, `components/floating.rs`; используются без изменений `crates/dock-core/src/layout/drop_handling.rs`, `group_operations.rs`, `compute_drop_zones/drop_zone_shared.rs` и existing Floating-part reconciliation. `input_drag.rs` и `drag_host_manager.rs` не менялись: typed Floating GroupGrip использует прямой native путь, а Main-origin GroupGrip остаётся в сценарии Этапа 6.
+
+**Что сделано:** переиспользованы Core `resolve_drag_drop`, `DropZoneResolver`, `SplitGroup`, `MergeGroup`, `MoveGroupToMainColumn`, `NativeMoveSession`, `NativeMoveWindow` и reconciliation typed part windows. Отдельный набор drop-зон, дублирующее правило вставки TabStrip, логическое дерево или новый механизм отмены не создавались.
+
+**Готово, когда:** допустимые зоны Main/Floating выполняют логические Core-команды; отдельная Group сохраняет прежний HWND; TabStrip добавляет все её вкладки в конец и закрывает только исходное окно Group; NoOp/ошибка/отмена не оставляют изменённого Layout или смещённых исходных HWND.
 
 ### Этап 6. Перенос из Main с передачей временного HWND
 
