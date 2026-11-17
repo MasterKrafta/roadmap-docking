@@ -44,10 +44,6 @@ pub(crate) use self::{
     pointer_press::PointerPress,
 };
 
-
-
-
-
 fn pointer_press_target_for_hit(hit: HitResult) -> Option<PointerPressTarget> {
     match hit {
         HitResult::TabHeader { group, panel, .. } => {
@@ -101,7 +97,6 @@ fn pointer_click_intent_for_hit(hit: HitResult, click_count: usize) -> PointerCl
         _ => PointerClickIntent::None,
     }
 }
-
 
 /// Installs the DockHost-level mouse event pipeline. Core HitResult is the
 /// only source of dock gesture intent; components keep only explicit button
@@ -696,7 +691,6 @@ fn drag_host_transition_enabled_for(handle: Option<DragHandle>, payload: DragPay
         _ => false,
     }
 }
-
 
 /// Starts a temporary DragHost when a Main-host gesture leaves its source surface.
 /// MouseMove and MouseUp share this transition path; MouseUp still updates the
