@@ -1316,6 +1316,14 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
+    /// Only the rightmost Header in a connected WindowGrid owns the close control.
+    pub(crate) fn is_rightmost_header(&self, column: NodeId) -> bool {
+        !self.window_chains.has_neighbor_on_side(
+            WindowGridMember::Header(column),
+            WindowGridDirection::Right,
+        )
+    }
+
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
         self.native_move
             .is_some_and(|state| state.group == group && state.hide_header)
