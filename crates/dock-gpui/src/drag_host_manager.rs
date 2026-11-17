@@ -22,7 +22,12 @@ use dock_core::{
 };
 
 use crate::{
-    components::{context_menu::GroupMenuToggle, MainDockView, PanelHost},
+    components::{
+        context_menu::GroupMenuToggle,
+        floating::FloatingPartHost,
+        MainDockView,
+        PanelHost,
+    },
     dock_components::{
         collect_group_presentations, DockGroupView, GroupPresentation,
     },
@@ -64,6 +69,52 @@ fn dock_area_drag_uses_free_area(target_window: Option<DockingWindowAtPoint>) ->
         target_window,
         None | Some(DockingWindowAtPoint::ForeignWindow)
     )
+}
+
+fn floating_group_and_column_for_group(
+    layout: &dock_core::Layout,
+    group: NodeId,
+) -> Option<(FloatingGroupId, NodeId)> {
+    fn contains(layout: &dock_core::Layout, root: NodeId, target: NodeId) -> bool {
+        if root == target {
+            return true;
+        }
+        match layout.node(root) {
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| contains(layout, *child, target)),
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .any(|child| contains(layout, *child, target)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| contains(layout, *child, target)),
+            Some(Node::Panel(_)) | None => false,
+        }
+    }
+
+    if !matches!(layout.node(group), Some(Node::Tabs(_))) {
+        return None;
+    }
+
+    for (floating_group, floating) in layout.floating_groups() {
+        let Some(area) = layout.dock_area(floating.area) else {
+            continue;
+        };
+        if !contains(layout, area.root, group) {
+            continue;
+        }
+        let column = layout.nodes().find_map(|(column_id, node)| {
+            matches!(node, Node::Column(column) if column.groups.contains(&group))
+                .then_some(column_id)
+                .filter(|column_id| contains(layout, area.root, *column_id))
+        })?;
+        return Some((floating_group, column));
+    }
+    None
 }
 
 fn floating_window_chain_target(
@@ -114,6 +165,9 @@ struct ActiveDragHost {
     panels: Vec<PanelId>,
     grab_offset: Point,
     frame_state: Option<NativeWindowFrameState>,
+    /// Remembers whether DragHost began with its native frame removed. A promoted
+    /// Group HWND must keep the same borderless style after bounds measurement.
+    frame_was_removed: bool,
     visible: bool,
     drop_target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
@@ -430,6 +484,7 @@ impl DragHostManager {
                     render_detached_tab,
                     drag_content_size: logical_size,
                     handoff_placeholder: false,
+                    promoted_part: None,
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -586,6 +641,7 @@ impl DragHostManager {
         }
 
         let visible = panels.is_empty();
+        let frame_was_removed = frame_state.is_some();
         if visible
             && let Err(error) = self.native_ops.show_no_activate(native_window)
         {
@@ -604,6 +660,7 @@ impl DragHostManager {
             panels: panels.clone(),
             grab_offset,
             frame_state,
+            frame_was_removed,
             visible,
             drop_target: None,
             target_role: None,
@@ -1198,9 +1255,55 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            // Permanent content now belongs to dedicated Group windows. Keep DragHost
-            // temporary and always use the two-phase handoff; adopting its HWND as a
-            // full-composition host would mount the same PanelViews in two windows.
+            // Main-origin GroupGrip keeps its Core Group node when it is floated or
+            // split into another Floating composition. In that case the DragHost HWND
+            // can become that exact Group's permanent host; merges are excluded because
+            // Core removes the source Group node and the target HWND must remain.
+            if defer_layout_events_until_parts_ready
+                && source_host == Some(DragSourceHost::Main)
+                && drag_handle == Some(DragHandle::GroupGrip)
+            {
+                let source_group = self.controller.update(cx, |controller, _| {
+                    let session = controller.drag().host_session()?;
+                    match session.payload() {
+                        DragPayload::Group { group } => Some(group),
+                        _ => None,
+                    }
+                }).ok().flatten();
+                let destination = source_group.and_then(|group| {
+                    self.controller.update(cx, |controller, _| {
+                        floating_group_and_column_for_group(controller.layout(), group)
+                            .map(|(owner, column)| (group, owner, column))
+                    }).ok().flatten()
+                });
+                if let Some((group, owner, column)) = destination
+                    && owner == target_group
+                    && self.promote_main_group_to_floating(
+                        id,
+                        target_group,
+                        column,
+                        group,
+                        cx,
+                    )
+                {
+                    // Registration happens before publication, so reconciliation sees
+                    // the adopted HWND and creates only the missing Header windows.
+                    self.flush_controller_events(cx);
+                    if let Some((anchor, direction)) = chain_join {
+                        self.join_created_groups_to_chain(
+                            id,
+                            anchor,
+                            &created_groups,
+                            direction,
+                            cx,
+                        );
+                    }
+                    return;
+                }
+            }
+
+            // Tab-strip merges and any unsupported promotion retain the existing
+            // safe two-phase PanelView handoff to the surviving destination Group host.
             if let Some((anchor, direction)) = chain_join {
                 // Resolve the new Core FloatingGroup before linking its WindowGrid
                 // members, then hand the transported PanelViews to their Group hosts.
@@ -1249,6 +1352,129 @@ impl DragHostManager {
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
         }
+    }
+
+    fn promote_main_group_to_floating(
+        &mut self,
+        id: DragHostId,
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        group: NodeId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((window, window_id, native_window, panels, frame_was_removed, frame_state)) =
+            self.active
+                .as_ref()
+                .filter(|active| active.id == id)
+                .map(|active| (
+                    active.window,
+                    active.window_id,
+                    active.native_window,
+                    active.panels.clone(),
+                    active.frame_was_removed,
+                    active.frame_state,
+                ))
+        else {
+            return false;
+        };
+        let Some(manager) = self.floating_manager.clone() else {
+            return false;
+        };
+
+        // FreeArea / WindowGrid releases measure the normal window frame before
+        // building Core bounds. Restore the DragHost's original borderless style
+        // before reusing it as a permanent Group part.
+        if frame_was_removed && frame_state.is_none() {
+            let restored_frame = match self.native_ops.remove_window_frame(native_window) {
+                Ok(state) => state,
+                Err(error) => {
+                    tracing::warn!(
+                        ?id,
+                        %error,
+                        "could not restore the borderless style before promoting DragHost"
+                    );
+                    return false;
+                }
+            };
+            if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
+                active.frame_state = Some(restored_frame);
+            }
+            if let Err(error) = window.update(cx, |_, window, app| window.bounds_changed(app)) {
+                tracing::warn!(
+                    ?id,
+                    %error,
+                    "could not refresh the promoted DragHost window bounds"
+                );
+                return false;
+            }
+        }
+
+        let controller = self.controller.clone();
+        let theme = self.theme;
+        let manager_weak = manager.downgrade();
+        let promoted = window.update(cx, |surface, _, host_cx| {
+            if surface.promoted_part.is_some() {
+                return false;
+            }
+            surface.promoted_part = Some(host_cx.new(|_| {
+                FloatingPartHost::new_group(
+                    controller,
+                    floating_group,
+                    column,
+                    group,
+                    theme,
+                    manager_weak,
+                )
+            }));
+            host_cx.notify();
+            true
+        });
+        if !matches!(promoted, Ok(true)) {
+            return false;
+        }
+
+        let adopted = manager
+            .update(cx, |manager, manager_cx| {
+                manager.adopt_drag_host_group_window(
+                    group,
+                    floating_group,
+                    window,
+                    window_id,
+                    native_window,
+                    manager_cx,
+                )
+            })
+            .unwrap_or(false);
+        if !adopted {
+            let _ = window.update(cx, |surface, _, host_cx| {
+                surface.promoted_part = None;
+                host_cx.notify();
+            });
+            return false;
+        }
+
+        // The root now renders the same Group in the same HWND. Release the
+        // transport claim only after switching the surface, then let Main render
+        // the committed Core layout without its old Group placeholder.
+        self.controller.update(cx, |controller, controller_cx| {
+            controller.drag_mut().clear_transport_host(id);
+            for panel in &panels {
+                controller.finish_panel_view_transfer(*panel);
+            }
+            controller.drag_mut().finish_host_session();
+            controller_cx.notify();
+        });
+
+        if let Some(mut active) = self.active.take() {
+            if active.id == id {
+                drop(active.source_detach_subscription.take());
+            } else {
+                self.active = Some(active);
+                return false;
+            }
+        }
+        cx.notify();
+        true
     }
 
     fn join_created_groups_to_chain(
@@ -1849,6 +2075,9 @@ pub(crate) struct DragHostSurface {
     render_detached_tab: bool,
     drag_content_size: Size,
     handoff_placeholder: bool,
+    /// When Main-origin GroupGrip succeeds, this same HWND becomes the permanent
+    /// Floating Group host instead of being replaced by a second native window.
+    promoted_part: Option<Entity<FloatingPartHost>>,
 }
 
 struct DragGroupPresentation {
@@ -1909,7 +2138,7 @@ fn translate_rect(rect: Rect, origin: Point) -> Rect {
 }
 
 impl Render for DragHostSurface {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.controller_observed {
             let controller = self.controller.clone();
             cx.observe(&controller, |_, _, host_cx| host_cx.notify())
@@ -1922,6 +2151,10 @@ impl Render for DragHostSurface {
             .size_full()
             .overflow_hidden()
             .bg(rgb(self.theme.colors.window_background));
+
+        if let Some(promoted_part) = self.promoted_part.clone() {
+            return root.child(promoted_part);
+        }
 
         if self.handoff_placeholder {
             return root;
