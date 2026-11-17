@@ -32,6 +32,7 @@ pub use tab::DockTab;
 pub use header::{
     CloseCompositionButton, CollapseColumnButton, CompositionDragArea, CompositionHeader,
 };
+pub(crate) use header::CloseCompositionAction;
 pub(crate) use group::DockGroupView;
 
 /// Renders one Column containing one or more vertically stacked Groups.
@@ -396,8 +397,17 @@ impl DockCompositionView {
         metrics: DockMetrics,
         theme: Theme,
         show_close_button: bool,
+        close_action: Option<CloseCompositionAction>,
     ) -> impl IntoElement {
-        CompositionHeader::render(id, area_rect, columns, metrics, theme, show_close_button)
+        CompositionHeader::render(
+            id,
+            area_rect,
+            columns,
+            metrics,
+            theme,
+            show_close_button,
+            close_action,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
