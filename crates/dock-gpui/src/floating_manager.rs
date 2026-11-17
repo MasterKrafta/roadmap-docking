@@ -4998,6 +4998,13 @@ impl FloatingWindowManager {
                 }
             }
 
+            // A persistent Header/Group HWND may survive a Core Float operation
+            // while its FloatingGroup owner changes. Keep the registry owner in sync
+            // with the current Layout snapshot instead of the original creation owner.
+            if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                entry.host_group = Some(spec.floating_group);
+            }
+
             let current = self.registry.members.get(&spec.member).map(|entry| {
                 (entry.bounds, entry.native_bounds_dirty, entry.native_window, entry.native_scale_factor)
             });
