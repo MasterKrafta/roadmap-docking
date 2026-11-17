@@ -80,6 +80,27 @@ impl PanelWindowHandle {
         }
     }
 
+    /// Updates the cached close-button ownership for a permanent Header host.
+    ///
+    /// Rendering a FloatingPartHost must not update FloatingWindowManager: a
+    /// reconciliation can notify that host while this manager is already updating.
+    fn set_header_close_button(
+        &self,
+        show: bool,
+        cx: &mut Context<FloatingWindowManager>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Part(window) => window
+                .update(cx, |host, _, host_cx| {
+                    if host.set_show_close_button(show) {
+                        host_cx.notify();
+                    }
+                })
+                .map_err(|error| error.to_string()),
+            Self::Floating(_) | Self::DragHost(_) => Ok(()),
+        }
+    }
+
     /// Requests a redraw from the exact GPUI window that owns this host.
     fn notify_host(&self, cx: &mut Context<FloatingWindowManager>) -> Result<(), String> {
         match self {
@@ -5319,6 +5340,31 @@ impl FloatingWindowManager {
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
                 .retain(|candidate| !rebuilt_links.contains(candidate));
+        }
+
+        // Resolve the single X owner after the typed WindowGrid has been rebuilt.
+        // Cache the result on each Header host so its Render implementation never
+        // re-enters this manager merely to decide whether to show the close button.
+        let header_windows = self
+            .registry
+            .members
+            .iter()
+            .filter_map(|(member, entry)| {
+                let WindowGridMember::Header(column) = member else {
+                    return None;
+                };
+                Some((*column, entry.window))
+            })
+            .collect::<Vec<_>>();
+        for (column, window) in header_windows {
+            let show_close_button = self.is_rightmost_header(column);
+            if let Err(error) = window.set_header_close_button(show_close_button, cx) {
+                tracing::debug!(
+                    ?column,
+                    %error,
+                    "could not update the Floating Header close-button owner"
+                );
+            }
         }
 
         prune_result
