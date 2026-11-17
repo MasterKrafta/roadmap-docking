@@ -497,6 +497,20 @@ impl DockController {
         self.finish_native_window_move_transaction(before_panels, previous_version, cx)
     }
 
+    /// Converts a GroupGrip tab-strip hit into an append-at-end target.
+    pub(crate) fn group_grip_drop_target(&self, target: DropTarget) -> DropTarget {
+        let DropTarget::GroupTabs { group, .. } = target else {
+            return target;
+        };
+        let Some(Node::Tabs(tabs)) = self.layout.node(group) else {
+            return target;
+        };
+        DropTarget::GroupTabs {
+            group,
+            index: tabs.children.len(),
+        }
+    }
+
     /// Commits a GroupGrip drop resolved by the shared Core drop resolver.
     ///
     /// A GroupTabs target always appends the complete source Group after the
@@ -534,20 +548,7 @@ impl DockController {
             }
         };
 
-        let target = match target {
-            DropTarget::GroupTabs { group, .. } => {
-                let Some(Node::Tabs(tabs)) = self.layout.node(group) else {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "a GroupTabs drop target must reference a Tabs node",
-                    });
-                };
-                DropTarget::GroupTabs {
-                    group,
-                    index: tabs.children.len(),
-                }
-            }
-            target => target,
-        };
+        let target = self.group_grip_drop_target(target);
         let request = DragDropRequest {
             payload: dock_core::DragPayload::Group { group: source_group },
             handle: DragHandle::GroupGrip,
