@@ -741,14 +741,42 @@ impl FloatingZoneContext<'_> {
         {
             return Ok(());
         }
-        // FloatingTop/FloatingBottom describe the visual affordance only.
-        // Core docking commands consume the corresponding cardinal edge, so
-        // keep the target semantic independent from the rendered zone kind.
+        // A PanelTab/GroupGrip dropped on an outer edge of a multi-window
+        // Floating composition must be routed to WindowGrid by GPUI. A simple
+        // one-Group window, and a whole Composition drop, use Core's cardinal
+        // edge operation instead. Horizontal Floating compositions also keep
+        // branch-specific outer edges as WindowGrid targets.
+        let target_is_horizontal_composition = self.layout.floating_groups().any(|(_, floating)| {
+            self.layout
+                .dock_area(floating.area)
+                .is_some_and(|area| {
+                    matches!(
+                        self.layout.node(area.root),
+                        Some(Node::Split(split)) if split.axis == crate::Axis::X
+                    ) && contains_node(self.tree_index, area.root, target_group)
+                })
+        });
+        let target_column_has_multiple_groups = owner_column(
+            self.layout,
+            self.tree_index,
+            target_group,
+        )
+        .and_then(|column| self.layout.node(column))
+        .is_some_and(|node| {
+            matches!(node, Node::Column(column) if column.groups.len() > 1)
+        });
+        let use_window_grid_edge = matches!(
+            self.source,
+            DropSource::Panel { .. } | DropSource::Group { .. }
+        ) && (target_is_horizontal_composition
+            || (self.layout.profile() == Profile::Photoshop
+                && target_column_has_multiple_groups));
+        let target_edge = if use_window_grid_edge { kind } else { edge };
         push_zone(
             self.zones,
             DropTarget::GroupEdge {
                 group: target_group,
-                zone: edge,
+                zone: target_edge,
             },
             kind,
             rect,
