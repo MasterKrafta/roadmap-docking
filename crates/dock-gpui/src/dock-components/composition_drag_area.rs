@@ -2,9 +2,10 @@ use dock_core::{Axis, Point, Rect, SplitterRect};
 use gpui::{IntoElement, InteractiveElement, Styled, div, rgb};
 use ui::Theme;
 
-/// Flexible drag surface for one complete composition.
+/// Flexible drag surface for a Column header or a complete legacy composition header.
 ///
-/// Its hit region spans the shared header and excludes only composition controls.
+/// The hit region includes only actual Column header rectangles and excludes
+/// the controls and horizontal splitters supplied by the host.
 pub struct CompositionDragArea;
 
 impl CompositionDragArea {
@@ -15,6 +16,7 @@ impl CompositionDragArea {
         point: Point,
         header_height: f32,
         button_width: f32,
+        show_close_button: bool,
     ) -> bool {
         let header_height = header_height.min(area_rect.size.height);
         let area_right = area_rect.origin.x + area_rect.size.width;
@@ -26,13 +28,22 @@ impl CompositionDragArea {
             return false;
         }
 
-        let close_left = area_right - button_width;
-        if point.x >= close_left {
+        let inside_column_header = columns.iter().any(|column| {
+            let column_header_height = header_height.min(column.rect.size.height);
+            point.x >= column.rect.origin.x
+                && point.x < column.rect.origin.x + column.rect.size.width
+                && point.y >= column.rect.origin.y
+                && point.y < column.rect.origin.y + column_header_height
+        });
+        if !inside_column_header {
             return false;
         }
 
-        // The shared CompositionHeader spans every Column, but an X splitter
-        // remains an independent resize handle even where it crosses the header.
+        if show_close_button && point.x >= area_right - button_width {
+            return false;
+        }
+
+        // X splitters remain independent resize handles where they cross a header.
         if splitters.iter().any(|splitter| {
             splitter.axis == Axis::X && matches!(splitter.rect.contains(point), Ok(true))
         }) {
@@ -40,7 +51,8 @@ impl CompositionDragArea {
         }
 
         columns.iter().all(|column| {
-            let collapse_left = Self::collapse_button_left(area_rect, *column, button_width);
+            let collapse_left =
+                Self::collapse_button_left(area_rect, *column, button_width, show_close_button);
             point.x < collapse_left || point.x >= collapse_left + button_width
         })
     }
@@ -49,16 +61,17 @@ impl CompositionDragArea {
         area_rect: Rect,
         column: dock_core::ColumnRect,
         button_width: f32,
+        show_close_button: bool,
     ) -> f32 {
         let column_right = column.rect.origin.x + column.rect.size.width;
         let area_right = area_rect.origin.x + area_rect.size.width;
         let is_area_right_edge = (column_right - area_right).abs() < 0.5;
-        column_right - area_rect.origin.x
-            - if is_area_right_edge {
-                2.0 * button_width
-            } else {
-                button_width
-            }
+        let reserved_width = if show_close_button && is_area_right_edge {
+            2.0 * button_width
+        } else {
+            button_width
+        };
+        column_right - area_rect.origin.x - reserved_width
     }
 
     pub fn render(id: String, theme: Theme) -> impl IntoElement {
