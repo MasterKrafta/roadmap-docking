@@ -659,6 +659,22 @@ pub(crate) fn floating_window_chain_direction(
     }
 }
 
+fn append_group_grip_tabs_target(
+    layout: &dock_core::Layout,
+    target: DropTarget,
+) -> DropTarget {
+    let DropTarget::GroupTabs { group, .. } = target else {
+        return target;
+    };
+    let Some(Node::Tabs(tabs)) = layout.node(group) else {
+        return target;
+    };
+    DropTarget::GroupTabs {
+        group,
+        index: tabs.children.len(),
+    }
+}
+
 fn floating_window_drop_destination(
     anchor: FloatingGroupId,
     target: DropTarget,
@@ -2424,6 +2440,9 @@ impl FloatingWindowManager {
                 _ => return None,
             };
             match payload {
+                DragPayload::Group { group } if state.source_group == Some(group) => {
+                    Some(DropSource::Group { group })
+                }
                 DragPayload::FloatingGroup { group } if group == state.group => controller
                     .layout()
                     .floating_group(group)
@@ -2439,7 +2458,9 @@ impl FloatingWindowManager {
         };
 
         let moving_groups = floating_groups_in_move_order(&self.native_move_windows);
-        let moving_chain = moving_groups.len() > 1;
+        // A GroupGrip move is a Core node drag even when its Column has a Header
+        // HWND alongside it; it must never be converted into a physical WindowGrid join.
+        let moving_chain = state.source_group.is_none() && moving_groups.len() > 1;
         let mut known = Vec::new();
         if let Some(main) = self.main_native_window {
             known.push(main);
@@ -2501,6 +2522,13 @@ impl FloatingWindowManager {
                     !moving_chain
                         || (moving_chain_can_dock_to_main
                             && floating_chain_drop_target_is_supported(*target, true))
+                });
+                let target = target.map(|target| {
+                    if state.source_group.is_some() {
+                        append_group_grip_tabs_target(controller.layout(), target)
+                    } else {
+                        target
+                    }
                 });
                 controller.drag_mut().session_mut().pointer_move(point).ok()?;
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
@@ -2568,6 +2596,12 @@ impl FloatingWindowManager {
                 let target = match resolved {
                     Ok(target) => target.filter(|target| {
                         !moving_chain || floating_chain_drop_target_is_supported(*target, false)
+                    }).map(|target| {
+                        if state.source_group.is_some() {
+                            append_group_grip_tabs_target(controller.layout(), target)
+                        } else {
+                            target
+                        }
                     }),
                     Err(error) => {
                         tracing::debug!(
