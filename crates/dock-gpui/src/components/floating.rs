@@ -7,12 +7,12 @@ use std::{
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, ComputeRectsError, DockCommand, DockMetrics,
     DragPreview, DropZoneRect, FloatingGroupId, FloatingGroupRect, FlyoutState,
-    GroupRect, LayoutRects, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect,
+    GroupRect, Node, NodeId, PanelId, PanelRect, Point, Rect, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
     AnyView, App, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
     ScrollHandle, Styled, WeakEntity, Window, WindowId, canvas, div,
     prelude::InteractiveElement as _, rgb,
 };
@@ -22,12 +22,8 @@ use crate::{
     dock_components::{
         active_panels_for_groups, collect_group_presentations, CompositionDragArea,
         DockCompositionView, DockGroupView, DockTab, GroupDragArea, GroupPresentation,
-        PanelTransferPresentation,
     },
-    dock_host::{
-        build_context_menu_entries, collect_subtree_nodes, context_menu_target_exists,
-        render_resize_preview,
-    },
+    dock_host::collect_subtree_nodes,
     input::{
         drag::{
             begin_drag_at, begin_group_drag_host, begin_panel_drag_host,
@@ -38,17 +34,14 @@ use crate::{
         resize::{
             begin_resize_hit_with_rects, finish_resize_with_rects, update_resize,
         },
-        resize_preview_for_interaction, ResizePreview,
+        resize_preview_for_interaction,
     },
     DockController, DockWindowPart, DragSourceHost, FloatingWindowManager,
 };
 
 use super::{
     drop_overlay::DropOverlay,
-    context_menu::{
-        ContextMenu, ContextMenuCallbacks, ContextMenuDismiss, ContextMenuSubmenuToggle,
-        ContextMenuTarget, GroupMenuToggle,
-    },
+    context_menu::GroupMenuToggle,
     panel_host::PanelHost,
     splitter::SplitterView,
 };
