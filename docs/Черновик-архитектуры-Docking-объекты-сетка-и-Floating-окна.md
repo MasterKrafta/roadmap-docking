@@ -681,15 +681,15 @@ Core уже содержит необходимые операции, поэто
 
 **Готово, когда:** перенос GroupGrip из многогрупповой и одногрупповой Floating Column корректно показывает цели Main/Floating; TabStrip выполняет Merge, края — Core Split/стыковку; отпускание на рабочем столе отделяет Group; Esc и чужое/неподдерживаемое окно возвращают исходный HWND в исходную позицию без сдвига соседей и изменения Core Layout.
 
-### Этап 9. Main PanelTab → Floating с сохранением HWND
+### Этап 9. PanelTab → Floating с сохранением HWND
 
 **Основные файлы:** `crates/dock-gpui/src/input_drag.rs`, `crates/dock-gpui/src/drag_host_manager.rs`, `crates/dock-gpui/src/components/floating.rs`, `crates/dock-gpui/src/floating_manager.rs`.
 
-**Что сделать:** после успешного отделения Main-origin PanelTab определить созданную Core Group по перенесённому PanelId и использовать уже существующий DragHost HWND как её постоянное окно. Переиспользовать тот же механизм регистрации Group в WindowGrid и тот же `FloatingPartHost`, что и для GroupGrip. Если вкладка сливается с уже существующей Group, не захватывать её HWND: оставить двухфазную передачу PanelView в окно получателя.
+**Что сделать:** после успешного отделения PanelTab из Main или Floating определить созданную Core Group по перенесённому PanelId и использовать уже существующий DragHost HWND как её постоянное окно. Переиспользовать тот же механизм регистрации Group в WindowGrid и тот же `FloatingPartHost`, что и для GroupGrip. Если вкладка сливается с уже существующей Group, не захватывать её HWND: оставить двухфазную передачу PanelView в окно получателя.
 
-**Состояние реализации (17.11.2026):** добавлен общий путь Main-origin promotion для GroupGrip и PanelTab. Новый resolver находит FloatingGroup, Column и Group, содержащую перенесённый PanelId; регистрация отклоняет уже занятую запись Group, поэтому при Merge автоматически сохраняется безопасный handoff в HWND получателя. DragHost не создаёт второе дерево Layout и продолжает использовать исходный кэш PanelView. Локальная проверка не запускалась.
+**Состояние реализации (17.11.2026):** добавлен общий путь promotion для PanelTab из Main и Floating. Новый resolver находит FloatingGroup, Column и Group, содержащую перенесённый PanelId; регистрация отклоняет уже занятую запись Group, поэтому при Merge автоматически сохраняется безопасный handoff в HWND получателя. Для Floating-origin PanelTab включено отложенное обновление Layout, чтобы временный DragHost успел стать постоянным Group host до передачи PanelView. DragHost не создаёт второе дерево Layout и продолжает использовать исходный кэш PanelView. Локальная проверка не запускалась.
 
-**Готово, когда:** отдельный Main PanelTab можно вынести на рабочий стол или в поддерживаемую зону Floating без создания второго HWND, вкладка отображается общим Group-компонентом без CompositionHeader; при Merge в TabStrip сохраняются окно получателя и порядок вкладок.
+**Готово, когда:** отдельный PanelTab из Main или Floating можно вынести на рабочий стол либо в поддерживаемую зону Floating без создания второго HWND; вкладка отображается общим Group-компонентом без CompositionHeader; при Merge в TabStrip сохраняются окно получателя и порядок вкладок.
 
 ### Что намеренно отложено
 
