@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    DockMetrics, NodeId, PanelId, PanelRect, Point, Size, TabHeaderRect, TabOverflowRect,
+    DockMetrics, NodeId, PanelId, PanelRect, Point, Rect, Size, TabHeaderRect, TabOverflowRect,
     TabStripRect,
 };
 
