@@ -1,5 +1,3 @@
-use dock_core::{NodeId, PanelId};
-
 use super::pointer_press_target::PointerPressTarget;
 
 /// A click candidate derived from one Core hit-test result and retained until
