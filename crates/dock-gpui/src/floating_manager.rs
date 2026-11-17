@@ -2366,7 +2366,12 @@ impl FloatingWindowManager {
         true
     }
 
-    fn update_native_drop_target(&self, state: &mut NativeMoveSession, cursor: PhysicalPoint, cx: &mut Context<Self>) {
+    fn update_native_drop_target(
+        &self,
+        state: &mut NativeMoveSession,
+        cursor: PhysicalPoint,
+        cx: &mut Context<Self>,
+    ) {
         let source = self.controller.update(cx, |controller, _| {
             let payload = match controller.drag().session().state() {
                 DragState::Dragging { payload, .. } => payload,
@@ -2386,8 +2391,13 @@ impl FloatingWindowManager {
             self.clear_native_drag_target(cx);
             return;
         };
+
+        let moving_groups = floating_groups_in_move_order(&self.native_move_windows);
+        let moving_chain = moving_groups.len() > 1;
         let mut known = Vec::new();
-        if let Some(main) = self.main_native_window { known.push(main); }
+        if let Some(main) = self.main_native_window {
+            known.push(main);
+        }
         known.extend(self.all_native_window_entries().filter_map(|entry| {
             let native_window = entry.native_window?;
             let is_moving_member = self
@@ -2408,19 +2418,20 @@ impl FloatingWindowManager {
                 return;
             }
         };
-        let moving_chain = self.native_move_windows.len() > 1;
+
         let moving_chain_can_dock_to_main = moving_chain
             && self.controller.update(cx, |controller, _| {
-                self.native_move_windows.iter().all(|moving| {
+                moving_groups.iter().all(|moving_group| {
                     controller
                         .layout()
-                        .floating_group(moving.group)
+                        .floating_group(*moving_group)
                         .and_then(|floating| controller.layout().dock_area(floating.area))
                         .is_some_and(|area| {
                             matches!(controller.layout().node(area.root), Some(Node::Column(_)))
                         })
                 })
             });
+
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
                 state.drop_target = None;
@@ -2428,7 +2439,8 @@ impl FloatingWindowManager {
                 return;
             };
             self.controller.update(cx, |controller, controller_cx| {
-                let target = match controller.prepare_drop_resolver(source)
+                let target = match controller
+                    .prepare_drop_resolver(source)
                     .and_then(|resolver| resolver.resolve(point))
                 {
                     Ok(target) => target,
@@ -2450,33 +2462,64 @@ impl FloatingWindowManager {
                 target.map(|target| NativeMoveTarget::MainDock { target, point })
             })
         } else {
-            let Some((target_group, target_window_id)) = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
+            // Permanent Floating Header/Group hosts are keyed by Core member,
+            // not by the legacy PanelId composition registry.
+            let typed_target = self.registry.members.iter().find_map(|(member, entry)| {
+                (entry.native_window == Some(target_window)
+                    && entry.visibility == PanelWindowVisibility::Visible)
+                    .then_some((*member, entry.host_group?, entry.window_id))
+            });
+            let legacy_target = self.host_registry.floating_groups.iter().find_map(|(group, panel)| {
                 let entry = self.registry.windows.get(panel)?;
-                (entry.native_window == Some(target_window) && *group != state.group)
+                (entry.native_window == Some(target_window)
+                    && entry.visibility == PanelWindowVisibility::Visible)
                     .then_some((*group, entry.window_id))
-            }) else {
-                state.drop_target = None;
-                self.clear_native_drag_target(cx);
-                return;
+            });
+
+            let (target_group, target_window_id, target_member) =
+                if let Some((member, group, window_id)) = typed_target {
+                    (group, window_id, member)
+                } else if let Some((group, window_id)) = legacy_target {
+                    (group, window_id, window_grid_member(group))
+                } else {
+                    state.drop_target = None;
+                    self.clear_native_drag_target(cx);
+                    return;
+                };
+
+            let point = match target_member {
+                WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
+                    .registry
+                    .members
+                    .get(&target_member)
+                    .and_then(|entry| {
+                        self.core_point_for_floating_member(
+                            target_member,
+                            target_group,
+                            target_window_id,
+                            target_window,
+                            cursor,
+                            cx,
+                        )
+                    }),
+                WindowGridMember::FloatingComposition(_) => {
+                    self.core_point_for_floating(target_window, cursor)
+                }
             };
-            let Some(point) = self.core_point_for_floating(target_window, cursor) else {
+            let Some(point) = point else {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
                 return;
             };
 
-            // Resolve the target Floating's own edge zones so the destination
-            // window paints the same affordance used to choose the WindowGrid side.
-            // The Core composition is not docked into the target; only HWND bounds
-            // and WindowGrid membership are changed after release.
+            // Resolve the target Floating's own edge zones. For a multi-composition
+            // WindowGrid, cardinal GroupEdge zones extend the physical grid; for one
+            // Core composition, the existing Core resolver owns the docking action.
             let resolved_target = self.controller.update(cx, |controller, controller_cx| {
                 let resolved = controller
                     .prepare_floating_window_drop_resolver(target_window_id, target_group, source)
                     .and_then(|resolver| resolver.resolve(point));
                 let target = match resolved {
-                    // Keep every legal target from the Floating resolver. The four
-                    // cardinal GroupEdge zones are interpreted as native WindowGrid
-                    // insertion on release; other zones retain Core docking semantics.
                     Ok(target) => target.filter(|target| {
                         !moving_chain || floating_chain_drop_target_is_supported(*target, false)
                     }),
@@ -2503,12 +2546,11 @@ impl FloatingWindowManager {
             });
 
             resolved_target.map(|target| {
-                floating_window_drop_destination(target_group, target, point)
+                floating_window_drop_destination(target_group, target, point, moving_chain)
             })
         };
         state.drop_target = resolved;
     }
-
 
     fn clear_native_drag_target(&self, cx: &mut Context<Self>) {
         self.controller.update(cx, |controller, controller_cx| {
