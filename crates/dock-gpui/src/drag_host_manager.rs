@@ -1240,7 +1240,7 @@ impl DragHostManager {
                         }
                         _ => None,
                     }
-                }).ok().flatten();
+                });
                 if let Some((owner, column, group)) = destination
                     && owner == target_group
                     && self.promote_drag_host_content_to_floating(
@@ -1398,18 +1398,16 @@ impl DragHostManager {
             return false;
         }
 
-        let adopted = manager
-            .update(cx, |manager, manager_cx| {
-                manager.adopt_drag_host_group_window(
-                    group,
-                    floating_group,
-                    window,
-                    window_id,
-                    native_window,
-                    manager_cx,
-                )
-            })
-            .unwrap_or(false);
+        let adopted = manager.update(cx, |manager, manager_cx| {
+            manager.adopt_drag_host_group_window(
+                group,
+                floating_group,
+                window,
+                window_id,
+                native_window,
+                manager_cx,
+            )
+        });
         if !adopted {
             let _ = window.update(cx, |surface, _, host_cx| {
                 surface.promoted_part = None;
@@ -2103,7 +2101,7 @@ fn translate_rect(rect: Rect, origin: Point) -> Rect {
 }
 
 impl Render for DragHostSurface {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.controller_observed {
             let controller = self.controller.clone();
             cx.observe(&controller, |_, _, host_cx| host_cx.notify())
