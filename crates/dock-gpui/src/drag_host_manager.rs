@@ -267,7 +267,7 @@ impl DragHostManager {
         )
     }
 
-    /// Opens DragHost for a Main-host tab tear-off that can be promoted to Floating
+    /// Opens DragHost for a PanelTab tear-off that can be promoted to Floating
     /// after release without replacing its native window.
     pub fn open_panel_tab_at_cursor(
         &mut self,
