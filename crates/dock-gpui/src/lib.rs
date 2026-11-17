@@ -29,25 +29,14 @@ pub mod theme;
 pub use dock_core;
 
 #[cfg(windows)]
-use gpui::{AppContext, Context, Window, div, prelude::*};
+use gpui::AppContext;
 
-/// Options for starting the built-in dock demo.
-#[derive(Default)]
-pub struct RunOptions {}
-
-/// Small content view used by the built-in launcher. Applications that need
-/// their own panels can construct DockController and DockHost directly.
-#[cfg(windows)]
-struct StarterPanel {
-    title: &'static str,
-}
+mod run_options;
+pub use run_options::RunOptions;
 
 #[cfg(windows)]
-impl Render for StarterPanel {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().p_4().child(self.title)
-    }
-}
+#[path = "lib/starter_panel.rs"]
+mod starter_panel;
 
 #[cfg(windows)]
 fn starter_panel_registry() -> PanelRegistry {
@@ -65,7 +54,7 @@ fn starter_panel_registry() -> PanelRegistry {
                 title,
                 IconSource::None,
                 constraints,
-                move |_window, app| app.new(|_| StarterPanel { title }).into(),
+                move |_window, app| app.new(|_| starter_panel::StarterPanel { title }).into(),
             ))
             .expect("built-in panel descriptors must be valid");
     }
