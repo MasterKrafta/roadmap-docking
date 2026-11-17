@@ -1,4 +1,4 @@
-use gpui::{Context, IntoElement, Render, Window, div};
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div};
 
 /// Small content view used by the built-in launcher. Applications that need
 /// their own panels can construct DockController and DockHost directly.
