@@ -746,15 +746,17 @@ impl FloatingZoneContext<'_> {
         // one-Group window, and a whole Composition drop, use Core's cardinal
         // edge operation instead. Horizontal Floating compositions also keep
         // branch-specific outer edges as WindowGrid targets.
-        let target_is_horizontal_composition = self.layout.floating_groups().any(|(_, floating)| {
-            self.layout
-                .dock_area(floating.area)
-                .is_some_and(|area| {
-                    matches!(
-                        self.layout.node(area.root),
-                        Some(Node::Split(split)) if split.axis == crate::Axis::X
-                    ) && contains_node(self.tree_index, area.root, target_group)
-                })
+        let target_floating_root = self.layout.floating_groups().find_map(|(_, floating)| {
+            let root = self.layout.dock_area(floating.area)?.root;
+            contains_node(self.tree_index, root, target_group).then_some(root)
+        });
+        let source_is_inside_target = target_floating_root
+            .is_some_and(|root| contains_node(self.tree_index, root, self.source_root));
+        let target_is_horizontal_composition = target_floating_root.is_some_and(|root| {
+            matches!(
+                self.layout.node(root),
+                Some(Node::Split(split)) if split.axis == crate::Axis::X
+            )
         });
         let target_column_has_multiple_groups = owner_column(
             self.layout,
@@ -768,9 +770,10 @@ impl FloatingZoneContext<'_> {
         let use_window_grid_edge = matches!(
             self.source,
             DropSource::Panel { .. } | DropSource::Group { .. }
-        ) && (target_is_horizontal_composition
-            || (self.layout.profile() == Profile::Photoshop
-                && target_column_has_multiple_groups));
+        ) && !source_is_inside_target
+            && (target_is_horizontal_composition
+                || (self.layout.profile() == Profile::Photoshop
+                    && target_column_has_multiple_groups));
         let target_edge = if use_window_grid_edge { kind } else { edge };
         push_zone(
             self.zones,
