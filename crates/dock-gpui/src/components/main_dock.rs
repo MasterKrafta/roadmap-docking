@@ -122,31 +122,24 @@ impl MainDockView {
             ));
         }
 
-        // Each Core DockArea (Left and Right) owns one shared header.
-        // Column group geometry already starts below this reserved header band.
+        // Each Main Column owns its own visual Header. The drag hit-test still
+        // resolves every free Header region to the complete Main DockArea.
         if render_area_headers {
-            for side in [DockSide::Left, DockSide::Right] {
+            for column in columns {
+                let Some(side) = main_column_sides.get(&column.column).copied() else {
+                    continue;
+                };
                 if dragged_dock_area == Some(side) {
                     continue;
                 }
-                let area_columns = columns
-                    .iter()
-                    .filter(|column| main_column_sides.get(&column.column) == Some(&side))
-                    .copied()
-                    .collect::<Vec<_>>();
-                if let Some(area_rect) = dock_area_bounds(&area_columns) {
-                    let side_name = match side {
-                        DockSide::Left => "left",
-                        DockSide::Right => "right",
-                    };
-                    layer = layer.child(DockCompositionView::render_header(
-                        format!("main-dock-area-{side_name}"),
-                        area_rect,
-                        &area_columns,
-                        metrics,
-                        theme,
-                    ));
-                }
+                layer = layer.child(DockCompositionView::render_header(
+                    format!("main-column-header-{:?}", column.column),
+                    column.rect,
+                    std::slice::from_ref(column),
+                    metrics,
+                    theme,
+                    false,
+                ));
             }
         }
 
