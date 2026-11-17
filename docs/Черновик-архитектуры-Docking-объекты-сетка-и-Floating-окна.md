@@ -580,6 +580,8 @@ flowchart TD
 
 ### Этап 1. Общая шапка для каждой Column
 
+**Статус:** кодовая часть внесена в `main`; этап ожидает локальной проверки. Сборка и тесты не запускались.
+
 **Основные файлы:**
 - `crates/dock-gpui/src/dock-components/composition_header.rs`
 - `crates/dock-gpui/src/dock-components/composition_drag_area.rs`
