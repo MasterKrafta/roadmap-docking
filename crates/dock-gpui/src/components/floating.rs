@@ -549,17 +549,25 @@ fn render_floating_pointer_input(
                                 Some(DockWindowPart::Group { group: source_group })
                                     if source_group == dock_group
                             );
-                            if is_source_group_window
-                                && let Some(manager) = manager_for_down.upgrade()
-                                && manager.update(app, |manager, manager_cx| {
-                                    manager.begin_existing_floating_group_move(
-                                        group,
-                                        dock_group,
-                                        point,
-                                        manager_cx,
-                                    )
-                                })
-                            {
+                            if is_source_group_window {
+                                let started = manager_for_down.upgrade().is_some_and(|manager| {
+                                    manager.update(app, |manager, manager_cx| {
+                                        manager.begin_existing_floating_group_move(
+                                            group,
+                                            dock_group,
+                                            point,
+                                            manager_cx,
+                                        )
+                                    })
+                                });
+                                if !started {
+                                    tracing::debug!(
+                                        ?dock_group,
+                                        "could not start direct native move for Floating GroupGrip"
+                                    );
+                                }
+                                // A typed Group HWND must never fall back to DragHost:
+                                // doing so would transfer the cached PanelViews.
                                 app.stop_propagation();
                                 return;
                             }
