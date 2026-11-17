@@ -8,7 +8,6 @@ use dock_core::{
     Rect, ValidationError, create_initial_layout,
 };
 use gpui::{AnyView, EventEmitter, WindowId};
-use thiserror::Error;
 
 use crate::{
     drag_host::{DragHostSession, DragSourceHost},
@@ -20,327 +19,43 @@ mod commands;
 #[path = "controller_layout_cache.rs"]
 mod layout_cache;
 
-/// Events emitted by the controller entity after successful model operations.
-#[derive(Clone, Debug)]
-pub enum DockEvent {
-    LayoutChanged {
-        version: u64,
-    },
-    /// Core geometry and cached hit-test snapshots use a new DockMetrics revision.
-    MetricsChanged {
-        revision: u64,
-    },
-    PanelOpened {
-        panel: PanelId,
-        key: PanelKey,
-    },
-    PanelClosed {
-        panel: PanelId,
-        key: PanelKey,
-    },
-    PanelActivated {
-        group: dock_core::NodeId,
-        panel: PanelId,
-    },
-    /// Effective values returned by Core after one resize operation.
-    ResizeApplied {
-        hit: Option<HitResult>,
-        actual_values: Vec<CommandValue>,
-        version: u64,
-    },
-    CommandFailed(CommandError),
-}
+
+#[path = "controller/dock_event.rs"]
+mod dock_event;
+#[path = "controller/rect_cache_key.rs"]
+mod rect_cache_key;
+#[path = "controller/floating_rect_cache_key.rs"]
+mod floating_rect_cache_key;
+#[path = "controller/resolver_cache_key.rs"]
+mod resolver_cache_key;
+#[path = "controller/floating_geometry_cache.rs"]
+mod floating_geometry_cache;
+#[path = "controller/dock_controller_config_error.rs"]
+mod dock_controller_config_error;
+#[path = "controller/panel_command_error.rs"]
+mod panel_command_error;
+#[path = "controller/drag_controller.rs"]
+mod drag_controller;
+#[path = "controller/resize_interaction.rs"]
+mod resize_interaction;
+#[path = "controller/resize_interaction_error.rs"]
+mod resize_interaction_error;
+#[path = "controller/resize_frame_throttle.rs"]
+mod resize_frame_throttle;
+
+pub use dock_event::DockEvent;
+pub use dock_controller_config_error::DockControllerConfigError;
+pub use drag_controller::DragController;
+pub use panel_command_error::PanelCommandError;
+pub use resize_interaction::ResizeInteraction;
+pub use resize_interaction_error::ResizeInteractionError;
+use floating_geometry_cache::FloatingGeometryCache;
+use floating_rect_cache_key::FloatingRectCacheKey;
+use rect_cache_key::RectCacheKey;
+use resolver_cache_key::ResolverCacheKey;
+use resize_frame_throttle::ResizeFrameThrottle;
 
 impl EventEmitter<DockEvent> for DockController {}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct RectCacheKey {
-    window_id: Option<WindowId>,
-    layout_version: u64,
-    viewport: Rect,
-    metrics_revision: u64,
-    chrome: dock_core::ChromeMode,
-    flyout: Option<FlyoutState>,
-    /// ResizeFlyout is transient and does not advance Layout::version().
-    /// Its remembered width therefore participates in the geometry cache key.
-    flyout_width: Option<f32>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct FloatingRectCacheKey {
-    window_id: WindowId,
-    group: FloatingGroupId,
-    layout_version: u64,
-    metrics_revision: u64,
-    chrome: dock_core::ChromeMode,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum ResolverCacheKey {
-    Main(RectCacheKey),
-    Floating(FloatingRectCacheKey),
-}
-
-struct FloatingGeometryCache {
-    key: FloatingRectCacheKey,
-    rects: LayoutRects,
-}
-
-/// Controller construction and configuration errors.
-#[derive(Debug, Error)]
-pub enum DockControllerConfigError {
-    #[error("invalid dock metrics: {0}")]
-    InvalidMetrics(&'static str),
-
-    #[error("initial layout is invalid for the supplied metrics: {0:?}")]
-    InvalidLayout(Vec<ValidationError>),
-
-    #[error(transparent)]
-    InvalidGeometry(#[from] GeometryError),
-
-    #[error(transparent)]
-    InvalidDragSession(#[from] DragSessionError),
-
-    #[error("dock metrics cannot change during an active pointer, native move, or DragHost transfer")]
-    ActiveInteraction,
-
-    #[error("dock metrics revision overflow")]
-    MetricsRevisionOverflow,
-}
-
-/// Errors returned by panel-oriented controller helpers.
-#[derive(Debug, Error)]
-pub enum PanelCommandError {
-    #[error("panel '{0}' is not registered")]
-    UnknownPanel(PanelKey),
-
-    #[error(transparent)]
-    Command(#[from] CommandError),
-
-    #[error("the main window bounds are not available for positioning a floating panel")]
-    MainWindowBoundsUnavailable,
-}
-
-/// State for an active drag gesture.
-///
-/// DragSession and the optional resolver are transient interaction data only;
-/// the layout tree remains exclusively owned by dock_core::Layout.
-pub struct DragController {
-    session: DragSession,
-    main_resolver: Option<(RectCacheKey, DropSource, DropZoneResolver)>,
-    floating_resolver: Option<(FloatingRectCacheKey, DropSource, DropZoneResolver)>,
-    /// Identifies which host-local resolver is currently active for preview/rendering.
-    resolver_key: Option<ResolverCacheKey>,
-    /// Layout revision captured when the current drag press began.
-    layout_version: Option<u64>,
-    /// Adapter context keeps the original source host separate from its transport host.
-    host_session: Option<DragHostSession>,
-}
-
-impl DragController {
-    fn new(metrics: &DockMetrics) -> Result<Self, DragSessionError> {
-        Ok(Self {
-            session: DragSession::new(metrics)?,
-            main_resolver: None,
-            floating_resolver: None,
-            resolver_key: None,
-            layout_version: None,
-            host_session: None,
-        })
-    }
-
-    pub fn session(&self) -> &DragSession {
-        &self.session
-    }
-
-    pub fn session_mut(&mut self) -> &mut DragSession {
-        &mut self.session
-    }
-
-    pub fn resolver(&self) -> Option<&DropZoneResolver> {
-        match self.resolver_key? {
-            ResolverCacheKey::Main(key) => self
-                .main_resolver
-                .as_ref()
-                .filter(|(cached_key, _, _)| *cached_key == key)
-                .map(|(_, _, resolver)| resolver),
-            ResolverCacheKey::Floating(key) => self
-                .floating_resolver
-                .as_ref()
-                .filter(|(cached_key, _, _)| *cached_key == key)
-                .map(|(_, _, resolver)| resolver),
-        }
-    }
-
-    /// Returns the adapter's source/transport context for the active content drag.
-    pub fn host_session(&self) -> Option<&DragHostSession> {
-        self.host_session.as_ref()
-    }
-
-    pub(crate) fn begin_host_session(&mut self, session: DragHostSession) {
-        self.host_session = Some(session);
-    }
-
-    pub(crate) fn attach_transport_host(&mut self, id: crate::DragHostId) -> bool {
-        self.host_session
-            .as_mut()
-            .is_some_and(|session| session.attach_transport_host(id))
-    }
-
-    pub(crate) fn clear_transport_host(&mut self, id: crate::DragHostId) -> bool {
-        self.host_session
-            .as_mut()
-            .is_some_and(|session| session.clear_transport_host(id))
-    }
-
-    pub(crate) fn can_begin_panel_view_transfer(&self, panel: PanelId) -> bool {
-        self.host_session
-            .as_ref()
-            .is_some_and(|session| session.can_begin_panel_view_transfer(panel))
-    }
-
-    pub(crate) fn begin_panel_view_transfer(&mut self, panel: PanelId) -> bool {
-        self.host_session
-            .as_mut()
-            .is_some_and(|session| session.begin_panel_view_transfer(panel))
-    }
-
-    pub(crate) fn finish_panel_view_transfer(&mut self, panel: PanelId) -> bool {
-        self.host_session
-            .as_mut()
-            .is_some_and(|session| session.finish_panel_view_transfer(panel))
-    }
-
-    pub(crate) fn panel_view_is_transferred(&self, panel: PanelId) -> bool {
-        self.host_session
-            .as_ref()
-            .is_some_and(|session| session.transferred_panels().contains(&panel))
-    }
-
-    pub(crate) fn panel_view_source_detached(&self, panel: PanelId) -> bool {
-        self.host_session
-            .as_ref()
-            .is_some_and(|session| session.panel_view_source_detached(panel))
-    }
-
-    pub(crate) fn confirm_panel_view_source_detached(
-        &mut self,
-        panel: PanelId,
-        source_window_id: WindowId,
-    ) -> bool {
-        self.host_session
-            .as_mut()
-            .is_some_and(|session| {
-                session.confirm_panel_view_source_detached(panel, source_window_id)
-            })
-    }
-
-    /// Finishes a successfully released content drag and discards its adapter context.
-    pub(crate) fn finish_host_session(&mut self) {
-        self.host_session = None;
-    }
-
-    /// Cancels a content drag and discards its adapter context.
-    pub(crate) fn cancel_host_session(&mut self) {
-        self.host_session = None;
-    }
-
-    fn set_main_resolver(
-        &mut self,
-        resolver: DropZoneResolver,
-        key: RectCacheKey,
-        source: DropSource,
-    ) {
-        self.main_resolver = Some((key, source, resolver));
-        self.resolver_key = Some(ResolverCacheKey::Main(key));
-    }
-
-    fn set_floating_resolver(
-        &mut self,
-        resolver: DropZoneResolver,
-        key: FloatingRectCacheKey,
-        source: DropSource,
-    ) {
-        self.floating_resolver = Some((key, source, resolver));
-        self.resolver_key = Some(ResolverCacheKey::Floating(key));
-    }
-
-    pub fn clear_resolver(&mut self) {
-        self.main_resolver = None;
-        self.floating_resolver = None;
-        self.resolver_key = None;
-    }
-
-    pub(crate) fn clear_layout_version(&mut self) {
-        self.layout_version = None;
-    }
-
-    /// Cancels any active gesture and clears its resolver snapshot.
-    ///
-    /// The adapter selects the reason so Escape, focus loss, and model/viewport
-    /// invalidation remain distinguishable in Core's terminal state.
-    pub fn cancel_gesture(&mut self) {
-        self.cancel_gesture_with_reason(DragCancelReason::Explicit);
-    }
-
-    fn cancel_gesture_with_reason(&mut self, reason: DragCancelReason) {
-        match reason {
-            DragCancelReason::Escape => {
-                let _ = self.session.escape();
-            }
-            DragCancelReason::FocusLost => {
-                let _ = self.session.focus_lost();
-            }
-            _ => {
-                let _ = self.session.cancel();
-            }
-        }
-        let _ = self.session.reset();
-        self.clear_resolver();
-        self.clear_layout_version();
-    }
-}
-
-/// The target, pointer origin, and source geometry captured at pointer-down.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ResizeInteraction {
-    /// The native GPUI window that owns this pointer gesture.
-    pub window_id: WindowId,
-    pub hit: HitResult,
-    pub origin: Point,
-    /// Latest pointer position used only to render a visual preview.
-    pub preview_point: Option<Point>,
-    pub layout_version: u64,
-    pub metrics_revision: u64,
-    /// Requested width captured at pointer-down for column/flyout resizing.
-    pub start_width: Option<f32>,
-    /// Original splitter rectangle, captured before the gesture moves it.
-    pub start_splitter_rect: Option<Rect>,
-    /// Original flyout rectangle, captured before the gesture moves it.
-    pub start_flyout_rect: Option<Rect>,
-}
-
-/// Invalid attempts to begin a resize interaction.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
-pub enum ResizeInteractionError {
-    #[error("the resize gesture has no owning window")]
-    WindowUnavailable,
-
-    #[error("a resize interaction is already active")]
-    AlreadyActive,
-
-    #[error("the hit result does not identify a resize handle")]
-    NotResizeHandle,
-
-    #[error(transparent)]
-    InvalidPointer(#[from] GeometryError),
-}
-
-#[derive(Default)]
-struct ResizeFrameThrottle {
-    latest: Option<Point>,
-    scheduled: bool,
-}
 
 /// Owns the sole dock-core layout and the adapter state needed to operate it.
 ///
