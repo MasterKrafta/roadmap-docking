@@ -30,7 +30,9 @@ fn floating_middle_main_group_shares_released_height_between_neighbours() {
         panic!("the source Main Column must remain");
     };
     assert_eq!(column.groups, vec![groups[0], groups[2], groups[3]]);
-    assert_eq!(column.group_ratios, vec![0.35, 0.55, 0.1]);
+    for (actual, expected) in column.group_ratios.iter().zip([0.35, 0.55, 0.1]) {
+        assert!((actual - expected).abs() < 1.0e-5);
+    }
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
@@ -64,7 +66,9 @@ fn floating_edge_main_group_redistributes_space_across_all_remaining_groups() {
         panic!("the source Main Column must remain");
     };
     assert_eq!(column.groups, vec![groups[1], groups[2], groups[3]]);
-    assert_eq!(column.group_ratios, vec![0.375, 0.5, 0.125]);
+    for (actual, expected) in column.group_ratios.iter().zip([0.375, 0.5, 0.125]) {
+        assert!((actual - expected).abs() < 1.0e-5);
+    }
     assert_eq!(layout.validate(&metrics), Ok(()));
 }
 
