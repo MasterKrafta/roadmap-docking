@@ -2039,8 +2039,8 @@ pub(crate) struct DragHostSurface {
     render_detached_tab: bool,
     drag_content_size: Size,
     handoff_placeholder: bool,
-    /// When Main-origin GroupGrip succeeds, this same HWND becomes the permanent
-    /// Floating Group host instead of being replaced by a second native window.
+    /// When a Main-origin GroupGrip or detached PanelTab succeeds, this same
+    /// HWND becomes the permanent Floating Group host instead of being replaced.
     promoted_part: Option<Entity<FloatingPartHost>>,
 }
 
