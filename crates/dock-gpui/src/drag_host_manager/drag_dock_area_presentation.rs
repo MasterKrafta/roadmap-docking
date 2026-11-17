@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, rc::Rc};
+
+use gpui::AnyView;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, DockSide, GroupRect, NodeId, PanelRect,

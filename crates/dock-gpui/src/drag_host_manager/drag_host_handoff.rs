@@ -4,7 +4,7 @@ use dock_core::{FloatingGroupId, PanelId};
 use platform::NativeWindowId;
 
 #[derive(Clone)]
-struct DragHostHandoff {
+pub(super) struct DragHostHandoff {
     pub(super) primary_target_group: FloatingGroupId,
     pub(super) required_panels_by_group: HashMap<FloatingGroupId, Vec<PanelId>>,
     pub(super) rendered_panels: HashSet<PanelId>,

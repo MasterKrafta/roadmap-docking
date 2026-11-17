@@ -8,7 +8,7 @@ use crate::{DockWindowRole, DragHostId};
 
 use super::{DragHostHandoff, DragHostSurface};
 
-struct ActiveDragHost {
+pub(super) struct ActiveDragHost {
     pub(super) id: DragHostId,
     pub(super) window: WindowHandle<DragHostSurface>,
     pub(super) window_id: WindowId,

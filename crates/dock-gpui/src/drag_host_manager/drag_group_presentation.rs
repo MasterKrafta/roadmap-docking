@@ -4,7 +4,7 @@ use dock_core::{DockMetrics, GroupRect, NodeId, PanelRect, TabHeaderRect, TabOve
 
 use crate::dock_components::GroupPresentation;
 
-struct DragGroupPresentation {
+pub(super) struct DragGroupPresentation {
     pub(super) group: GroupRect,
     pub(super) strip: TabStripRect,
     pub(super) headers: Vec<TabHeaderRect>,

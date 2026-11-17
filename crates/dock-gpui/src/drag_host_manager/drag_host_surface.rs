@@ -1,7 +1,8 @@
 use std::{collections::{HashMap, HashSet}, rc::Rc};
 
 use dock_core::{
-    ColumnRect, DragPayload, GroupRect, Node, NodeId, PanelRect, Point, Rect, SplitterRect,
+    ColumnRect, DockSide, DragPayload, GroupRect, Node, NodeId, PanelId, PanelRect, Point, Rect,
+    Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, rgb};
