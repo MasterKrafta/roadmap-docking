@@ -273,6 +273,7 @@ enum NativeMoveTarget {
     },
     FloatingChain {
         anchor: FloatingGroupId,
+        anchor_member: WindowGridMember,
         direction: WindowGridDirection,
     },
 }
@@ -280,6 +281,7 @@ enum NativeMoveTarget {
 #[derive(Clone, Copy)]
 struct NativeMoveWindow {
     group: FloatingGroupId,
+    member: WindowGridMember,
     native_window: NativeWindowId,
     /// Actual outer-window origin used as the drag baseline.
     drag_origin: PhysicalPoint,
@@ -299,6 +301,9 @@ struct NativeMoveSession {
     threshold_crossed: bool,
     high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
+    /// Header HWND that initiated this gesture, independent of move scope.
+    source_header: Option<NodeId>,
+    /// Set only when the gesture intentionally extracts one Core Column.
     moving_column: Option<NodeId>,
 }
 
@@ -663,14 +668,32 @@ fn floating_window_drop_destination(
     anchor: FloatingGroupId,
     target: DropTarget,
     point: Point,
+    moving_chain: bool,
 ) -> NativeMoveTarget {
-    match floating_window_chain_direction(target) {
-        Some(direction) => NativeMoveTarget::FloatingChain {
+    match (moving_chain, floating_window_chain_direction(target), target) {
+        (
+            true,
+            Some(direction),
+            DropTarget::GroupEdge { group, .. },
+        ) => NativeMoveTarget::FloatingChain {
             anchor,
+            anchor_member: WindowGridMember::Group(group),
             direction,
         },
-        None => NativeMoveTarget::FloatingDock { target, point },
+        _ => NativeMoveTarget::FloatingDock { target, point },
     }
+}
+
+fn floating_groups_in_move_order(
+    moving_windows: &[NativeMoveWindow],
+) -> Vec<FloatingGroupId> {
+    let mut groups = Vec::new();
+    for moving in moving_windows {
+        if !groups.contains(&moving.group) {
+            groups.push(moving.group);
+        }
+    }
+    groups
 }
 
 /// Reconciles the native-window registry with the current Core Layout.
@@ -1876,6 +1899,122 @@ impl FloatingWindowManager {
         self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
+    /// Starts a native move for every Header/Group HWND in the connected WindowGrid.
+    ///
+    /// The grabbed Header identifies the source host, but the move set comes from
+    /// WindowGridRegistry so all connected native windows share one pointer delta.
+    pub(crate) fn begin_existing_window_grid_move(
+        &mut self,
+        group: FloatingGroupId,
+        column: NodeId,
+        pointer: Point,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() || self.native_resize.is_some() {
+            return false;
+        }
+
+        let source_member = WindowGridMember::Header(column);
+        let Some(source_entry) = self.registry.members.get(&source_member) else {
+            return false;
+        };
+        if source_entry.host_group != Some(group)
+            || source_entry.visibility != PanelWindowVisibility::Visible
+        {
+            return false;
+        }
+        let Some(source_window) = source_entry.native_window else {
+            return false;
+        };
+        let source_window_id = source_entry.window_id;
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let Ok(source_rect) = self.native_ops.window_rect(source_window) else {
+            return false;
+        };
+        let scale = self
+            .native_ops
+            .scale_factor(source_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let floating = controller.layout().floating_group(group)?;
+            Some((floating.bounds, controller.metrics()))
+        });
+        let Some((start_bounds, metrics)) = snapshot else {
+            return false;
+        };
+
+        let members = self.window_grid_members_in_native_order(group);
+        if !members.contains(&source_member) || members.is_empty() {
+            return false;
+        }
+
+        let mut move_windows = Vec::with_capacity(members.len());
+        for member in members {
+            let Some(member_group) = self.floating_group_for_member(member) else {
+                return false;
+            };
+            let Some(entry) = self.panel_window_for_grid_member(member) else {
+                return false;
+            };
+            if entry.host_group != Some(member_group)
+                || entry.visibility != PanelWindowVisibility::Visible
+            {
+                return false;
+            }
+            let Some(native_window) = entry.native_window else {
+                return false;
+            };
+            let rect = if native_window == source_window {
+                source_rect
+            } else {
+                match self.native_ops.window_rect(native_window) {
+                    Ok(rect) => rect,
+                    Err(_) => return false,
+                }
+            };
+            let origin = PhysicalPoint {
+                x: rect.left,
+                y: rect.top,
+            };
+            move_windows.push(NativeMoveWindow {
+                group: member_group,
+                member,
+                native_window,
+                drag_origin: origin,
+                cancel_origin: origin,
+            });
+        }
+
+        if !self.controller.update(cx, |controller, _| {
+            controller.begin_floating_window_move(group, pointer)
+        }) {
+            return false;
+        }
+
+        self.native_move_windows = move_windows;
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.native_move = Some(NativeMoveSession {
+            group,
+            native_window: source_window,
+            hide_header: false,
+            initial_cursor: cursor,
+            start_bounds,
+            start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale,
+            threshold_crossed: false,
+            high_resolution_timer,
+            drop_target: None,
+            source_header: Some(column),
+            moving_column: None,
+        });
+        self.schedule_native_move(cx, group, source_window_id);
+        true
+    }
+
     /// Starts a native move for one Header and only the Groups belonging to its Column.
     pub(crate) fn begin_existing_column_move(
         &mut self,
@@ -1962,6 +2101,7 @@ impl FloatingWindowManager {
             let origin = PhysicalPoint { x: rect.left, y: rect.top };
             move_windows.push(NativeMoveWindow {
                 group,
+                member,
                 native_window: member_window,
                 drag_origin: origin,
                 cancel_origin: origin,
@@ -1989,6 +2129,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
+            source_header: Some(column),
             moving_column: Some(column),
         });
         self.schedule_native_move(cx, group, window_id);
@@ -2029,7 +2170,7 @@ impl FloatingWindowManager {
             .unwrap_or(1.0);
         let mut move_windows = Vec::new();
         for member in self.window_grid_members_in_native_order(group) {
-            let Some(member_group) = member.floating_group() else { return false; };
+            let Some(member_group) = self.floating_group_for_member(member) else { return false; };
             let Some(member_entry) = self.panel_window_for_grid_member(member) else {
                 return false;
             };
@@ -2050,6 +2191,7 @@ impl FloatingWindowManager {
             };
             move_windows.push(NativeMoveWindow {
                 group: member_group,
+                member,
                 native_window: member_window,
                 drag_origin: origin,
                 cancel_origin: origin,
@@ -2107,6 +2249,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
+            source_header: None,
             moving_column: None,
         });
         self.schedule_native_move(cx, group, window_id);
