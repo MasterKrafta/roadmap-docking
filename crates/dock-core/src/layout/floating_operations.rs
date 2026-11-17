@@ -194,7 +194,8 @@ impl Layout {
         &self,
         group: NodeId,
     ) -> Option<(NodeId, Vec<f32>)> {
-        if !matches!(self.nodes.get(group), Some(Node::Tabs(_)))
+        if self.profile != Profile::Photoshop
+            || !matches!(self.nodes.get(group), Some(Node::Tabs(_)))
             || self.group_is_collapsed(group)
         {
             return None;
