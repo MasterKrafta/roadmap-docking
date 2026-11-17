@@ -73,6 +73,48 @@ fn floating_edge_main_group_redistributes_space_across_all_remaining_groups() {
 }
 
 #[test]
+fn floating_middle_main_group_gives_released_height_to_expanded_neighbour() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let mut groups = Vec::new();
+    for (key, collapsed) in [
+        ("main-reflow-collapsed", true),
+        ("main-reflow-moving", false),
+        ("main-reflow-expanded", false),
+        ("main-reflow-last", false),
+    ] {
+        let (_, panel) = builder.panel(PanelKey::new(key).unwrap(), descriptors()[0].1);
+        groups.push(builder.tabs(vec![panel], 0, collapsed));
+    }
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        groups.clone(),
+        vec![0.2, 0.3, 0.4, 0.1],
+    );
+    builder.main_area(DockSide::Right, column);
+    let mut layout = builder.build();
+
+    layout.apply(
+        DockCommand::Float {
+            node: groups[1],
+            bounds: Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 220.0)),
+        },
+        &metrics,
+    ).unwrap();
+
+    let Node::Column(column) = layout.node(column).unwrap() else {
+        panic!("the source Main Column must remain");
+    };
+    assert_eq!(column.groups, vec![groups[0], groups[2], groups[3]]);
+    for (actual, expected) in column.group_ratios.iter().zip([0.2, 0.7, 0.1]) {
+        assert!((*actual - expected).abs() < 1.0e-5);
+    }
+    assert!(matches!(layout.node(groups[0]), Some(Node::Tabs(tabs)) if tabs.collapsed));
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c46_float_panel_keeps_panel_instance_and_id() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
