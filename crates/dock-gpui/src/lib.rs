@@ -31,6 +31,7 @@ pub use dock_core;
 #[cfg(windows)]
 use gpui::AppContext;
 
+#[path = "lib/run_options.rs"]
 mod run_options;
 pub use run_options::RunOptions;
 
