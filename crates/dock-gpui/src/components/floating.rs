@@ -1834,6 +1834,34 @@ impl FloatingPartHost {
     }
 }
 
+pub(crate) fn floating_group_column_for_panel(
+    layout: &dock_core::Layout,
+    panel: PanelId,
+) -> Option<(FloatingGroupId, NodeId, NodeId)> {
+    let group = layout.nodes().find_map(|(group, node)| {
+        let Node::Tabs(tabs) = node else {
+            return None;
+        };
+        tabs.children
+            .iter()
+            .any(|child| {
+                matches!(
+                    layout.node(*child),
+                    Some(Node::Panel(value)) if value.panel_id == panel
+                )
+            })
+            .then_some(group)
+    })?;
+    let (floating_group, column) = floating_part_owner_and_column(
+        layout,
+        FloatingPartKind::Group {
+            column: group,
+            group,
+        },
+    )?;
+    Some((floating_group, column, group))
+}
+
 pub(crate) fn floating_group_and_column_for_group(
     layout: &dock_core::Layout,
     group: NodeId,
