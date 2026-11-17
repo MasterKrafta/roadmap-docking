@@ -273,6 +273,9 @@ impl DockingWindowAtPoint {
 
 #[derive(Clone, Copy)]
 enum NativeMoveTarget {
+    /// The pointer was released over an unsupported/foreign managed surface.
+    /// A Group HWND drag must return to its original slot instead of tearing off.
+    RejectedGroupDrop,
     MainDock {
         target: DropTarget,
         point: Point,
@@ -2497,9 +2500,10 @@ impl FloatingWindowManager {
             }
         }
 
-        if state.source_group.is_none() {
-            self.update_native_drop_target(&mut state, cursor, cx);
-        }
+        // Both whole-WindowGrid moves and direct Group HWND moves resolve the
+        // Core drop target while the pointer is moving. Group moves must not
+        // bypass Dock Zones merely because they reuse a permanent native window.
+        self.update_native_drop_target(&mut state, cursor, cx);
         self.native_move = Some(state);
         if !self.native_ops.left_button_down().unwrap_or(false) {
             self.finish_native_move(state, cx);
@@ -2532,8 +2536,7 @@ impl FloatingWindowManager {
             }
         });
         let Some(source) = source else {
-            state.drop_target = None;
-            self.clear_native_drag_target(cx);
+            self.reject_native_drop_target(state, cx);
             return;
         };
 
@@ -2559,9 +2562,15 @@ impl FloatingWindowManager {
             Some(state.native_window),
         ) {
             Ok(NativeWindowAtPoint::Known(window)) => window,
-            Ok(NativeWindowAtPoint::Foreign | NativeWindowAtPoint::Empty) | Err(_) => {
+            // Desktop is a valid tear-off destination for a Group. A foreign
+            // application window is not: keep the original Group and HWND.
+            Ok(NativeWindowAtPoint::Empty) => {
                 state.drop_target = None;
                 self.clear_native_drag_target(cx);
+                return;
+            }
+            Ok(NativeWindowAtPoint::Foreign) | Err(_) => {
+                self.reject_native_drop_target(state, cx);
                 return;
             }
         };
@@ -2581,8 +2590,7 @@ impl FloatingWindowManager {
 
         let resolved = if Some(target_window) == self.main_native_window {
             let Some(point) = self.core_point_for_main(cursor) else {
-                state.drop_target = None;
-                self.clear_native_drag_target(cx);
+                self.reject_native_drop_target(state, cx);
                 return;
             };
             self.controller.update(cx, |controller, controller_cx| {
@@ -2610,6 +2618,7 @@ impl FloatingWindowManager {
                 controller.drag_mut().session_mut().set_drop_target(target).ok()?;
                 controller_cx.notify();
                 target.map(|target| NativeMoveTarget::MainDock { target, point })
+                    .or_else(|| state.source_group.map(|_| NativeMoveTarget::RejectedGroupDrop))
             })
         } else {
             // Permanent Floating Header/Group hosts are keyed by Core member,
@@ -2636,8 +2645,7 @@ impl FloatingWindowManager {
                 } else if let Some((group, window_id)) = legacy_target {
                     (group, window_id, window_grid_member(group))
                 } else {
-                    state.drop_target = None;
-                    self.clear_native_drag_target(cx);
+                    self.reject_native_drop_target(state, cx);
                     return;
                 };
 
@@ -2657,8 +2665,7 @@ impl FloatingWindowManager {
                 }
             };
             let Some(point) = point else {
-                state.drop_target = None;
-                self.clear_native_drag_target(cx);
+                self.reject_native_drop_target(state, cx);
                 return;
             };
 
@@ -2697,11 +2704,24 @@ impl FloatingWindowManager {
                 target
             });
 
-            resolved_target.map(|target| {
-                floating_window_drop_destination(target_group, target, point, moving_chain)
-            })
+            resolved_target
+                .map(|target| {
+                    floating_window_drop_destination(target_group, target, point, moving_chain)
+                })
+                .or_else(|| state.source_group.map(|_| NativeMoveTarget::RejectedGroupDrop))
         };
         state.drop_target = resolved;
+    }
+
+    fn reject_native_drop_target(
+        &self,
+        state: &mut NativeMoveSession,
+        cx: &mut Context<Self>,
+    ) {
+        state.drop_target = state
+            .source_group
+            .map(|_| NativeMoveTarget::RejectedGroupDrop);
+        self.clear_native_drag_target(cx);
     }
 
     fn clear_native_drag_target(&self, cx: &mut Context<Self>) {
@@ -3193,6 +3213,11 @@ impl FloatingWindowManager {
             Some(NativeMoveTarget::FloatingChain { .. }) => {
                 return Err(dock_core::CommandError::InvalidTarget {
                     reason: "a GroupGrip move must use a logical Core drop target, not a physical WindowGrid join",
+                });
+            }
+            Some(NativeMoveTarget::RejectedGroupDrop) => {
+                return Err(dock_core::CommandError::InvalidTarget {
+                    reason: "a Floating Group cannot be dropped on a foreign or unsupported window",
                 });
             }
             Some(NativeMoveTarget::MainDock {
