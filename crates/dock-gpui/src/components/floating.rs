@@ -69,6 +69,10 @@ use floating_group_press::FloatingGroupPress;
 mod floating_host_snapshot;
 use floating_host_snapshot::FloatingHostSnapshot;
 
+#[path = "floating/floating_part_kind.rs"]
+mod floating_part_kind;
+pub(crate) use floating_part_kind::FloatingPartKind;
+
 /// Content view for one native floating window.
 ///
 /// The root already owns the native window bounds and local coordinate origin.
@@ -1771,13 +1775,6 @@ fn floating_host_snapshot(
     }))
 }
 
-
-/// Identity of a permanent Floating window that renders exactly one Core member.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum FloatingPartKind {
-    Header { column: NodeId },
-    Group { column: NodeId, group: NodeId },
-}
 
 /// Root view for one detached Header or Group window.
 ///
