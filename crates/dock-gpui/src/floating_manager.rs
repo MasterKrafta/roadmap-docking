@@ -630,11 +630,6 @@ fn dock_window_part_for_member(member: WindowGridMember) -> Option<DockWindowPar
         WindowGridMember::FloatingComposition(_) => None,
     }
 }
-fn core_floating_bounds_from_grid_members(
-    bounds: &[(WindowGridMember, Rect)],
-) -> Option<Vec<(FloatingGroupId, Rect)>> {
-    bounds.iter().map(|(member, bounds)| member.floating_group().map(|group| (group, *bounds))).collect()
-}
 fn floating_groups_in_native_z_order(
     groups: &[FloatingGroupSnapshot],
     grids: &WindowGridRegistry,
