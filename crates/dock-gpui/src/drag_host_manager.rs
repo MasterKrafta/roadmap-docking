@@ -24,7 +24,9 @@ use dock_core::{
 use crate::{
     components::{
         context_menu::GroupMenuToggle,
-        floating::{floating_group_and_column_for_group, FloatingPartHost},
+        floating::{
+            floating_group_and_column_for_group, floating_group_column_for_panel, FloatingPartHost,
+        },
         MainDockView,
         PanelHost,
     },
@@ -1209,30 +1211,38 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            // Main-origin GroupGrip keeps its Core Group node when it is floated or
-            // split into another Floating composition. In that case the DragHost HWND
-            // can become that exact Group's permanent host; merges are excluded because
-            // Core removes the source Group node and the target HWND must remain.
+            // A Main-origin GroupGrip or PanelTab tear-off can reuse its DragHost
+            // HWND as the new permanent Group host. Resolve the resulting Group by
+            // its preserved NodeId (GroupGrip) or the transferred PanelId (PanelTab).
+            // When a PanelTab is merged into an existing Group, adoption is rejected
+            // because that Group already has its own HWND; the safe two-phase handoff
+            // below then gives the PanelView to the existing target window.
             if defer_layout_events_until_parts_ready
                 && source_host == Some(DragSourceHost::Main)
-                && drag_handle == Some(DragHandle::GroupGrip)
+                && matches!(
+                    drag_handle,
+                    Some(DragHandle::GroupGrip | DragHandle::PanelTab)
+                )
             {
-                let source_group = self.controller.update(cx, |controller, _| {
+                let destination = self.controller.update(cx, |controller, _| {
                     let session = controller.drag().host_session()?;
                     match session.payload() {
-                        DragPayload::Group { group } => Some(group),
+                        DragPayload::Group { group } => {
+                            let (owner, column) = floating_group_and_column_for_group(
+                                controller.layout(),
+                                group,
+                            )?;
+                            Some((owner, column, group))
+                        }
+                        DragPayload::Panel { panel } => {
+                            floating_group_column_for_panel(controller.layout(), panel)
+                        }
                         _ => None,
                     }
                 }).ok().flatten();
-                let destination = source_group.and_then(|group| {
-                    self.controller.update(cx, |controller, _| {
-                        floating_group_and_column_for_group(controller.layout(), group)
-                            .map(|(owner, column)| (group, owner, column))
-                    }).ok().flatten()
-                });
-                if let Some((group, owner, column)) = destination
+                if let Some((owner, column, group)) = destination
                     && owner == target_group
-                    && self.promote_main_group_to_floating(
+                    && self.promote_main_content_to_floating(
                         id,
                         target_group,
                         column,
@@ -1308,7 +1318,7 @@ impl DragHostManager {
         }
     }
 
-    fn promote_main_group_to_floating(
+    fn promote_main_content_to_floating(
         &mut self,
         id: DragHostId,
         floating_group: FloatingGroupId,
