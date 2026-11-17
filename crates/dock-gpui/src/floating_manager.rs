@@ -1936,7 +1936,11 @@ impl FloatingWindowManager {
             return false;
         };
 
-        let members = self.window_grid_members_in_native_order(group);
+        // Keep WindowGrid's stable component order here. Native front-to-back
+        // ordering is for Z-order, while this order also preserves group order
+        // when the complete chain is committed back into Main.
+        let anchor = self.grid_anchor_member_for_group(group);
+        let members = self.window_chains.members_for(anchor);
         if !members.contains(&source_member) || members.is_empty() {
             return false;
         }
