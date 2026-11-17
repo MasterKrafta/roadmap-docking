@@ -1528,17 +1528,39 @@ impl FloatingWindowManager {
             .native_ops
             .scale_factor(native_window)
             .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0);
-        let Some(bounds) = self.native_ops.window_rect(native_window).ok().and_then(|outer| {
-            let client = self.native_ops.client_size(native_window).ok()?;
-            let scale = scale?;
-            DockGeometry::core_bounds_from_native(outer, client, scale)
-        }) else {
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let spec = self.controller.update(cx, |controller, _| {
+            let transferred = HashSet::new();
+            collect_floating_part_windows(
+                controller.layout(),
+                &controller.metrics(),
+                scale,
+                &transferred,
+            )
+            .into_iter()
+            .find(|spec| {
+                spec.member == member && spec.floating_group == floating_group
+            })
+        });
+        let bounds = spec
+            .and_then(|spec| {
+                self.part_outer_bounds_for_target(spec, native_window, Some(scale))
+                    .or(Some(spec.bounds))
+            })
+            .or_else(|| {
+                self.native_ops.window_rect(native_window).ok().and_then(|outer| {
+                    let client = self.native_ops.client_size(native_window).ok()?;
+                    DockGeometry::core_bounds_from_native(outer, client, scale)
+                })
+            });
+        let Some(bounds) = bounds else {
             return false;
         };
-        let Some(scale) = scale else {
-            return false;
-        };
+        // Match the current Core Group rectangle before adopting the HWND. The
+        // DragHost's original size can differ after the new Header row or an
+        // insertion into an existing Floating composition changes the layout.
+        self.sync_part_window_bounds(native_window, bounds);
 
         self.registry.members.insert(
             member,
