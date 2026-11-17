@@ -3,7 +3,7 @@ use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div};
 /// Small content view used by the built-in launcher. Applications that need
 /// their own panels can construct DockController and DockHost directly.
 pub(super) struct StarterPanel {
-    title: &'static str,
+    pub(super) title: &'static str,
 }
 
 impl Render for StarterPanel {
