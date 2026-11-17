@@ -1316,12 +1316,44 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
-    /// Only the rightmost Header in a connected WindowGrid owns the close control.
+    /// Only one Header in a connected WindowGrid owns the close control.
+    ///
+    /// Select by actual native right edge so a multi-row WindowGrid still receives
+    /// exactly one X. If several Headers share that edge, prefer the uppermost one.
     pub(crate) fn is_rightmost_header(&self, column: NodeId) -> bool {
-        !self.window_chains.has_neighbor_on_side(
-            WindowGridMember::Header(column),
-            WindowGridDirection::Right,
-        )
+        let current = WindowGridMember::Header(column);
+        let members = self.window_chains.members_for(current);
+        let mut rightmost: Option<(WindowGridMember, i32, i32)> = None;
+
+        for member in members {
+            if !matches!(member, WindowGridMember::Header(_)) {
+                continue;
+            }
+            let Some(native_window) = self
+                .registry
+                .members
+                .get(&member)
+                .and_then(|entry| entry.native_window)
+            else {
+                continue;
+            };
+            let Ok(bounds) = self.native_ops.window_rect(native_window) else {
+                continue;
+            };
+
+            let candidate = (member, bounds.right, bounds.top);
+            let should_replace = rightmost.is_none_or(|current| {
+                candidate.1 > current.1
+                    || (candidate.1 == current.1 && candidate.2 < current.2)
+            });
+            if should_replace {
+                rightmost = Some(candidate);
+            }
+        }
+
+        rightmost
+            .map(|(member, _, _)| member == current)
+            .unwrap_or(true)
     }
 
     pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
