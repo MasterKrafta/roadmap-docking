@@ -14,10 +14,9 @@ pub use collapse_column_button::CollapseColumnButton;
 pub use close_composition_button::CloseCompositionButton;
 pub use drag_area::CompositionDragArea;
 
-/// Shared header for one complete composition.
+/// Shared renderer for a Column header or a complete legacy composition header.
 ///
-/// Each Column has one collapse control aligned to its right edge, while the
-/// whole composition has a single close control at the far right.
+/// The host decides whether this header owns the composition's close control.
 pub struct CompositionHeader;
 
 impl CompositionHeader {
@@ -27,6 +26,7 @@ impl CompositionHeader {
         columns: &[ColumnRect],
         metrics: DockMetrics,
         theme: Theme,
+        show_close_button: bool,
     ) -> impl IntoElement {
         let button_width = metrics.column_control_button_width;
         let mut header = div()
@@ -46,8 +46,12 @@ impl CompositionHeader {
             ));
 
         for (index, column) in columns.iter().enumerate() {
-            let button_x =
-                CompositionDragArea::collapse_button_left(area_rect, *column, button_width);
+            let button_x = CompositionDragArea::collapse_button_left(
+                area_rect,
+                *column,
+                button_width,
+                show_close_button,
+            );
 
             header = header.child(
                 div()
@@ -65,19 +69,23 @@ impl CompositionHeader {
             );
         }
 
-        header.child(
-            div()
-                .absolute()
-                .left(px((area_rect.size.width - button_width).max(0.0)))
-                .top_0()
-                .w(px(button_width))
-                .h_full()
-                .child(CloseCompositionButton::render_with_metrics(
-                    format!("{id}-close"),
-                    theme,
-                    button_width,
-                    metrics.control_icon_size,
-                )),
-        )
+        if show_close_button {
+            header = header.child(
+                div()
+                    .absolute()
+                    .left(px((area_rect.size.width - button_width).max(0.0)))
+                    .top_0()
+                    .w(px(button_width))
+                    .h_full()
+                    .child(CloseCompositionButton::render_with_metrics(
+                        format!("{id}-close"),
+                        theme,
+                        button_width,
+                        metrics.control_icon_size,
+                    )),
+            );
+        }
+
+        header
     }
 }
