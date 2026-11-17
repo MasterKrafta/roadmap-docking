@@ -1178,12 +1178,12 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingTop
             && zone.target
-                == DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingTop }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Top }
     }));
     assert!(zones.iter().any(|zone| {
         zone.zone == DropZone::FloatingBottom
             && zone.target
-                == DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingBottom }
+                == DropTarget::GroupEdge { group: float_group, zone: DropZone::Bottom }
     }));
 
     let center = zones.iter().find(|zone| zone.zone == DropZone::FloatingCenter).unwrap();
@@ -1217,7 +1217,7 @@ fn floating_center_and_edges_resolve_to_tab_or_stack_targets() {
                 &metrics,
             )
             .unwrap(),
-        Some(DropTarget::GroupEdge { group: float_group, zone: DropZone::FloatingTop })
+        Some(DropTarget::GroupEdge { group: float_group, zone: DropZone::Top })
     );
 }
 
@@ -1291,7 +1291,7 @@ fn floating_top_zone_tracks_the_actual_header_for_column_and_tabs_roots() {
                     && zone.target
                         == DropTarget::GroupEdge {
                             group: first_group.group,
-                            zone: DropZone::FloatingTop,
+                            zone: DropZone::Top,
                         }
             })
             .expect("the Floating header should expose its lower top-drop band");
@@ -2698,7 +2698,7 @@ fn floating_stack_exposes_outer_edges_for_another_floating_windowgrid() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: target_first_group,
-                        zone: DropZone::FloatingTop,
+                        zone: DropZone::Top,
                     }
         })
         .expect("a whole Floating stack must expose the target window's outer top edge");
@@ -2709,7 +2709,7 @@ fn floating_stack_exposes_outer_edges_for_another_floating_windowgrid() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: target_second_group,
-                        zone: DropZone::FloatingBottom,
+                        zone: DropZone::Bottom,
                     }
         })
         .expect("a whole Floating stack must expose the target window's outer bottom edge");
@@ -3575,7 +3575,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::FloatingTop,
+                        zone: DropZone::Top,
                     }
         })
         .expect("a Floating composition must expose the top edge of another Floating window");
@@ -3622,7 +3622,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: third_group,
-                        zone: DropZone::FloatingBottom,
+                        zone: DropZone::Bottom,
                     }
         })
         .expect("a whole Floating composition must expose its outer bottom edge for WindowGrid");
@@ -3658,7 +3658,7 @@ fn floating_column_composition_exposes_vertical_zones_in_another_floating_window
             .unwrap(),
         Some(DropTarget::GroupEdge {
             group: third_group,
-            zone: DropZone::FloatingBottom,
+            zone: DropZone::Bottom,
         })
     );
 
@@ -4271,7 +4271,7 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: first_group,
-                        zone: DropZone::FloatingTop,
+                        zone: DropZone::Top,
                     }
         })
         .expect("a single-group Main composition must expose the Floating top edge");
@@ -4320,7 +4320,7 @@ fn simple_composition_sources_share_identical_drop_zones_in_floating() {
                 && zone.target
                     == DropTarget::GroupEdge {
                         group: third_group,
-                        zone: DropZone::FloatingBottom,
+                        zone: DropZone::Bottom,
                     }
         })
         .expect("a Main composition must expose the target Floating window's outer bottom edge");
@@ -4897,7 +4897,7 @@ fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
         zone.target
             == DropTarget::GroupEdge {
                 group: target_top,
-                zone: DropZone::FloatingTop,
+                zone: DropZone::Top,
             }
             && zone.zone == DropZone::FloatingTop
     }));
@@ -4913,7 +4913,7 @@ fn main_multi_group_composition_exposes_floating_stack_drop_zones() {
         zone.target
             == DropTarget::GroupEdge {
                 group: target_bottom,
-                zone: DropZone::FloatingBottom,
+                zone: DropZone::Bottom,
             }
             && zone.zone == DropZone::FloatingBottom
     }));
