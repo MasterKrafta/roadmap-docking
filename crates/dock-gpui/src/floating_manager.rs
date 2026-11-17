@@ -659,22 +659,6 @@ pub(crate) fn floating_window_chain_direction(
     }
 }
 
-fn append_group_grip_tabs_target(
-    layout: &dock_core::Layout,
-    target: DropTarget,
-) -> DropTarget {
-    let DropTarget::GroupTabs { group, .. } = target else {
-        return target;
-    };
-    let Some(Node::Tabs(tabs)) = layout.node(group) else {
-        return target;
-    };
-    DropTarget::GroupTabs {
-        group,
-        index: tabs.children.len(),
-    }
-}
-
 fn floating_window_drop_destination(
     anchor: FloatingGroupId,
     target: DropTarget,
@@ -2525,7 +2509,7 @@ impl FloatingWindowManager {
                 });
                 let target = target.map(|target| {
                     if state.source_group.is_some() {
-                        append_group_grip_tabs_target(controller.layout(), target)
+                        controller.group_grip_drop_target(target)
                     } else {
                         target
                     }
@@ -2598,7 +2582,7 @@ impl FloatingWindowManager {
                         !moving_chain || floating_chain_drop_target_is_supported(*target, false)
                     }).map(|target| {
                         if state.source_group.is_some() {
-                            append_group_grip_tabs_target(controller.layout(), target)
+                            controller.group_grip_drop_target(target)
                         } else {
                             target
                         }
