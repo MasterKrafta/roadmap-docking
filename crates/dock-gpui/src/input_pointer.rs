@@ -1126,6 +1126,7 @@ fn dock_area_drag_handle_side(
                 point,
                 metrics.column_header_height,
                 metrics.column_control_button_width,
+                false,
             ) {
                 return Some(side);
             }
@@ -1350,7 +1351,7 @@ mod hit_dispatch_tests {
     }
 
     #[test]
-    fn dock_area_header_drag_zone_excludes_collapse_and_close_controls() {
+    fn main_header_drag_zone_excludes_column_controls_and_splitters() {
         let rect = Rect::new(
             Point::new(10.0, 20.0),
             dock_core::Size::new(240.0, 500.0),
@@ -1365,15 +1366,19 @@ mod hit_dispatch_tests {
             Point::new(100.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
-        assert!(!crate::dock_components::CompositionDragArea::contains(
+        // Main has no X, so this part of the Header remains a drag surface.
+        assert!(crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
             &[],
             Point::new(200.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
+        // The per-Column collapse control is not part of the drag surface.
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
             &columns,
@@ -1381,6 +1386,7 @@ mod hit_dispatch_tests {
             Point::new(240.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
         assert!(!crate::dock_components::CompositionDragArea::contains(
             rect,
@@ -1389,6 +1395,7 @@ mod hit_dispatch_tests {
             Point::new(100.0, 52.0),
             32.0,
             28.0,
+            false,
         ));
 
         let left = Rect::new(Point::new(10.0, 20.0), dock_core::Size::new(240.0, 500.0));
@@ -1406,6 +1413,7 @@ mod hit_dispatch_tests {
             Point::new(350.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
         assert!(!crate::dock_components::CompositionDragArea::contains(
             composition,
@@ -1414,6 +1422,7 @@ mod hit_dispatch_tests {
             Point::new(490.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
 
         let splitters = [SplitterRect::new(
@@ -1429,9 +1438,9 @@ mod hit_dispatch_tests {
             Point::new(250.0, 30.0),
             32.0,
             28.0,
+            false,
         ));
     }
-
     #[test]
     fn click_and_double_click_intents_follow_the_hitresult_table() {
         let group = NodeId::null();
