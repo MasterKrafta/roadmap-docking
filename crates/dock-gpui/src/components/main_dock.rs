@@ -139,6 +139,7 @@ impl MainDockView {
                     metrics,
                     theme,
                     false,
+                    None,
                 ));
             }
         }
