@@ -1012,6 +1012,30 @@ impl DockController {
         true
     }
 
+    /// Starts a native GroupGrip move without creating a DragHost or transferring PanelViews.
+    ///
+    /// The persistent Group HWND remains the presentation host for the entire gesture.
+    pub(crate) fn begin_floating_group_move(
+        &mut self,
+        group: NodeId,
+        point: Point,
+    ) -> bool {
+        if self.has_active_pointer_interaction() || !self.begin_native_window_move_transaction() {
+            return false;
+        }
+        if let Err(error) = self.begin_drag_interaction(
+            DragPayload::Group { group },
+            DragHandle::GroupGrip,
+            point,
+        ) {
+            tracing::debug!(%error, ?group, "could not begin native Floating Group move");
+            let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+            self.native_window_move_transaction_active = false;
+            return false;
+        }
+        true
+    }
+
     /// Called only after a resize command owned by the active interaction succeeds.
     pub(crate) fn record_resize_layout_version(&mut self) {
         if let Some(interaction) = self.interaction.as_mut() {
