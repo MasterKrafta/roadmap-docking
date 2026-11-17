@@ -388,15 +388,16 @@ impl DockCompositionView {
             .border_color(rgb(theme.colors.group_frame_border))
     }
 
-    /// Renders the one shared header above all Columns in this composition.
+    /// Renders shared header chrome for the supplied Column(s).
     pub(crate) fn render_header(
         id: String,
         area_rect: Rect,
         columns: &[ColumnRect],
         metrics: DockMetrics,
         theme: Theme,
+        show_close_button: bool,
     ) -> impl IntoElement {
-        CompositionHeader::render(id, area_rect, columns, metrics, theme)
+        CompositionHeader::render(id, area_rect, columns, metrics, theme, show_close_button)
     }
 
     #[allow(clippy::too_many_arguments)]
