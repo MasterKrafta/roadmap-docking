@@ -1561,6 +1561,14 @@ impl FloatingWindowManager {
         // DragHost's original size can differ after the new Header row or an
         // insertion into an existing Floating composition changes the layout.
         self.sync_part_window_bounds(native_window, bounds);
+        if let Err(error) = window.update(cx, |_, window, app| window.bounds_changed(app)) {
+            tracing::warn!(
+                ?member,
+                %error,
+                "could not refresh the adopted DragHost GPUI bounds"
+            );
+            return false;
+        }
 
         self.registry.members.insert(
             member,
