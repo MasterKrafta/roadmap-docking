@@ -255,6 +255,7 @@ impl FloatingWindowContent {
                 columns,
                 metrics,
                 theme,
+                true,
             ));
         }
 
@@ -344,7 +345,7 @@ fn render_floating_pointer_input(
     input_window_id: WindowId,
     floating_rect: Option<Rect>,
     dock_component_tab_zones: HashMap<PanelId, Rect>,
-    dock_area_drag_area: Option<(Rect, Vec<ColumnRect>, Vec<SplitterRect>, DockMetrics)>,
+    dock_area_drag_area: Option<(Rect, Vec<ColumnRect>, Vec<SplitterRect>, DockMetrics, bool)>,
     hide_header: bool,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
@@ -469,13 +470,14 @@ fn render_floating_pointer_input(
                         // The remaining CompositionHeader region controls moving the whole Floating.
                         let floating_title_region = if !hide_header {
                             dock_area_drag_area.as_ref().and_then(
-                                |(area_rect, columns, splitters, metrics)| {
+                                |(area_rect, columns, splitters, metrics, show_close_button)| {
                                     floating_dock_area_title_pointer_region(
                                         *area_rect,
                                         columns,
                                         splitters,
                                         point,
                                         *metrics,
+                                        *show_close_button,
                                     )
                                 },
                             )
@@ -1568,6 +1570,7 @@ fn floating_dock_area_title_pointer_region(
     splitters: &[SplitterRect],
     point: Point,
     metrics: DockMetrics,
+    show_close_button: bool,
 ) -> Option<bool> {
     let header_height = metrics.column_header_height.min(area_rect.size.height);
     let right = area_rect.origin.x + area_rect.size.width;
@@ -1587,6 +1590,7 @@ fn floating_dock_area_title_pointer_region(
         point,
         header_height,
         metrics.column_control_button_width,
+        show_close_button,
     ))
 }
 
@@ -1719,6 +1723,7 @@ pub(crate) struct FloatingPartHost {
     theme: Theme,
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
+    manager_observed: bool,
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
@@ -1775,6 +1780,7 @@ impl FloatingPartHost {
             theme,
             manager,
             controller_observed: false,
+            manager_observed: false,
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
@@ -1825,6 +1831,12 @@ impl Render for FloatingPartHost {
             .detach();
             self.focus_observed = true;
         }
+        if !self.manager_observed {
+            if let Some(manager) = self.manager.upgrade() {
+                cx.observe(&manager, |_, _, host_cx| host_cx.notify()).detach();
+            }
+            self.manager_observed = true;
+        }
         if matches!(self.part, FloatingPartKind::Group { .. }) {
             self.controller.update(cx, |controller, panel_cx| {
                 controller.ensure_panel_views(window, panel_cx);
@@ -1872,6 +1884,9 @@ impl Render for FloatingPartHost {
                     ),
                 );
                 let local_column = ColumnRect::new(column, header_rect);
+                let show_close_button = self.manager.upgrade().is_some_and(|manager| {
+                    manager.update(cx, |manager, _| manager.is_rightmost_header(column))
+                });
                 let pointer_input = render_floating_pointer_input(
                     self.floating_group,
                     self.manager.clone(),
@@ -1884,6 +1899,7 @@ impl Render for FloatingPartHost {
                         vec![*column_rect],
                         Vec::new(),
                         snapshot.metrics,
+                        show_close_button,
                     )),
                     false,
                     self.tab_press.clone(),
@@ -1900,6 +1916,7 @@ impl Render for FloatingPartHost {
                         &[local_column],
                         snapshot.metrics,
                         self.theme,
+                        show_close_button,
                     ));
                 let manager_for_escape = self.manager.clone();
                 let controller_for_escape = self.controller.clone();
@@ -2486,6 +2503,7 @@ impl Render for FloatingHost {
                 snapshot.rects.columns.clone(),
                 snapshot.rects.splitters.clone(),
                 snapshot.metrics,
+                true,
             )
         });
         root = root.child(render_floating_pointer_input(
