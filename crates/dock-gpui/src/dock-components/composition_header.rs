@@ -12,6 +12,7 @@ use ui::Theme;
 
 pub use collapse_column_button::CollapseColumnButton;
 pub use close_composition_button::CloseCompositionButton;
+pub(crate) use close_composition_button::CloseCompositionAction;
 pub use drag_area::CompositionDragArea;
 
 /// Shared renderer for a Column header or a complete legacy composition header.
@@ -27,6 +28,7 @@ impl CompositionHeader {
         metrics: DockMetrics,
         theme: Theme,
         show_close_button: bool,
+        close_action: Option<CloseCompositionAction>,
     ) -> impl IntoElement {
         let button_width = metrics.column_control_button_width;
         let mut header = div()
@@ -77,11 +79,12 @@ impl CompositionHeader {
                     .top_0()
                     .w(px(button_width))
                     .h_full()
-                    .child(CloseCompositionButton::render_with_metrics(
+                    .child(CloseCompositionButton::render_with_action(
                         format!("{id}-close"),
                         theme,
                         button_width,
                         metrics.control_icon_size,
+                        close_action.unwrap_or_else(|| Box::new(|_| {})),
                     )),
             );
         }
