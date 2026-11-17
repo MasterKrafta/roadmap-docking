@@ -301,8 +301,14 @@ struct NativeMoveSession {
     threshold_crossed: bool,
     high_resolution_timer: bool,
     drop_target: Option<NativeMoveTarget>,
-    /// Header HWND that initiated this gesture, independent of move scope.
+    /// Header HWND that initiated a whole-WindowGrid move.
     source_header: Option<NodeId>,
+    /// Group HWND that initiated a single-Group move.
+    source_group: Option<NodeId>,
+    /// Original Column for a GroupGrip move.
+    source_column: Option<NodeId>,
+    /// Whether the Group was the only Group in its source Column.
+    source_column_is_single_group: bool,
 }
 
 #[derive(Clone)]
@@ -742,7 +748,7 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
-    fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
+    pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
             WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
@@ -2002,8 +2008,169 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
             source_header: Some(column),
+            source_group: None,
+            source_column: None,
+            source_column_is_single_group: false,
         });
         self.schedule_native_move(cx, group, source_window_id);
+        true
+    }
+
+    /// Moves the existing Group HWND directly instead of transporting its PanelViews.
+    ///
+    /// A Column with several Groups moves only the selected Group HWND. A one-Group
+    /// Column moves its Header and Group together so the pair can be separated intact.
+    pub(crate) fn begin_existing_floating_group_move(
+        &mut self,
+        floating_group: FloatingGroupId,
+        group: NodeId,
+        pointer: Point,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() || self.native_resize.is_some() {
+            return false;
+        }
+
+        let group_member = WindowGridMember::Group(group);
+        let Some(group_entry) = self.registry.members.get(&group_member) else {
+            return false;
+        };
+        if group_entry.host_group != Some(floating_group)
+            || group_entry.visibility != PanelWindowVisibility::Visible
+        {
+            return false;
+        }
+        let (Some(group_window), source_window_id) =
+            (group_entry.native_window, group_entry.window_id)
+        else {
+            return false;
+        };
+        let Ok(cursor) = self.native_ops.cursor_position() else {
+            return false;
+        };
+        let Ok(group_rect) = self.native_ops.window_rect(group_window) else {
+            return false;
+        };
+        let scale = self
+            .native_ops
+            .scale_factor(group_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let floating = controller.layout().floating_group(floating_group)?;
+            let area = controller.layout().dock_area(floating.area)?;
+            let (column_id, column) = controller.layout().nodes().find_map(|(column_id, node)| {
+                match node {
+                    Node::Column(column) if column.groups.contains(&group) => {
+                        Some((column_id, column))
+                    }
+                    _ => None,
+                }
+            })?;
+            let is_single_group = column.groups.len() == 1;
+            let metrics = controller.metrics();
+            let rects = controller
+                .layout()
+                .compute_floating_rects(floating_group, &metrics)
+                .ok()?;
+            let start_bounds = if is_single_group {
+                if area.root == column_id {
+                    floating.bounds
+                } else {
+                    let column_rect = rects.columns.iter().find(|rect| rect.column == column_id)?;
+                    Rect::new(
+                        Point::new(
+                            floating.bounds.origin.x + column_rect.rect.origin.x * scale,
+                            floating.bounds.origin.y,
+                        ),
+                        Size::new(column_rect.rect.size.width, floating.bounds.size.height),
+                    )
+                }
+            } else {
+                let group_rect = rects.groups.iter().find(|rect| rect.group == group)?;
+                Rect::new(
+                    Point::new(
+                        floating.bounds.origin.x + group_rect.rect.origin.x * scale,
+                        floating.bounds.origin.y + group_rect.rect.origin.y * scale,
+                    ),
+                    group_rect.rect.size,
+                )
+            };
+            Some((column_id, is_single_group, start_bounds, metrics))
+        });
+        let Some((column, is_single_group, start_bounds, metrics)) = snapshot else {
+            return false;
+        };
+
+        let members = if is_single_group {
+            vec![
+                WindowGridMember::Header(column),
+                WindowGridMember::Group(group),
+            ]
+        } else {
+            vec![group_member]
+        };
+        let mut move_windows = Vec::with_capacity(members.len());
+        for member in members {
+            let Some(entry) = self.registry.members.get(&member) else {
+                return false;
+            };
+            if entry.host_group != Some(floating_group)
+                || entry.visibility != PanelWindowVisibility::Visible
+            {
+                return false;
+            }
+            let Some(native_window) = entry.native_window else {
+                return false;
+            };
+            let rect = if native_window == group_window {
+                group_rect
+            } else {
+                match self.native_ops.window_rect(native_window) {
+                    Ok(rect) => rect,
+                    Err(_) => return false,
+                }
+            };
+            let origin = PhysicalPoint {
+                x: rect.left,
+                y: rect.top,
+            };
+            move_windows.push(NativeMoveWindow {
+                group: floating_group,
+                member,
+                native_window,
+                drag_origin: origin,
+                cancel_origin: origin,
+            });
+        }
+
+        if !self.controller.update(cx, |controller, _| {
+            controller.begin_floating_group_move(group, pointer)
+        }) {
+            return false;
+        }
+
+        self.native_move_windows = move_windows;
+        let high_resolution_timer = self.native_ops.begin_high_resolution_timer().is_ok();
+        self.native_move = Some(NativeMoveSession {
+            group: floating_group,
+            native_window: group_window,
+            hide_header: false,
+            initial_cursor: cursor,
+            start_bounds,
+            start_pointer: pointer,
+            drag_threshold: metrics.drag_threshold * scale,
+            threshold_crossed: false,
+            high_resolution_timer,
+            drop_target: None,
+            source_header: None,
+            source_group: Some(group),
+            source_column: Some(column),
+            source_column_is_single_group: is_single_group,
+        });
+        self.schedule_native_move(cx, floating_group, source_window_id);
         true
     }
 
@@ -2121,6 +2288,9 @@ impl FloatingWindowManager {
             high_resolution_timer,
             drop_target: None,
             source_header: None,
+            source_group: None,
+            source_column: None,
+            source_column_is_single_group: false,
         });
         self.schedule_native_move(cx, group, window_id);
         if hide_header {
