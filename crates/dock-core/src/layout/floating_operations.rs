@@ -194,7 +194,9 @@ impl Layout {
         &self,
         group: NodeId,
     ) -> Option<(NodeId, Vec<f32>)> {
-        if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+        if !matches!(self.nodes.get(group), Some(Node::Tabs(_)))
+            || self.group_is_collapsed(group)
+        {
             return None;
         }
         let column_id = self.find_owner_column(group)?;
