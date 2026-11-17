@@ -2278,7 +2278,7 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
-        let source_is_current = if let Some(column) = state.moving_column {
+        let source_is_current = if let Some(column) = state.source_header {
             self.registry.members.get(&WindowGridMember::Header(column)).is_some_and(|entry| {
                 entry.window_id == window_id
                     && entry.native_window == Some(state.native_window)
@@ -2312,7 +2312,7 @@ impl FloatingWindowManager {
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
-                    if state.moving_column.is_some() {
+                    if state.source_header.is_some() {
                         self.cancel_native_move(state, cx);
                     } else {
                         self.finish_native_move(state, cx);
@@ -3853,10 +3853,15 @@ impl FloatingWindowManager {
     ) {
         let mut interaction_chain_members = HashSet::new();
         if let Some(session) = self.native_move {
-            interaction_chain_members.extend(self.window_chains.members_for(window_grid_member(session.group)));
+            let anchor = session
+                .source_header
+                .map(WindowGridMember::Header)
+                .unwrap_or_else(|| self.grid_anchor_member_for_group(session.group));
+            interaction_chain_members.extend(self.window_chains.members_for(anchor));
         }
         if let Some(session) = self.native_resize {
-            interaction_chain_members.extend(self.window_chains.members_for(window_grid_member(session.group)));
+            let anchor = self.grid_anchor_member_for_group(session.group);
+            interaction_chain_members.extend(self.window_chains.members_for(anchor));
         }
 
         for group_id in floating_groups_in_native_z_order(groups, &self.window_chains) {
