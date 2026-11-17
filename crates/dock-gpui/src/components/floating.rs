@@ -1826,12 +1826,56 @@ impl FloatingPartHost {
     }
 }
 
+fn floating_group_for_part_node(
+    layout: &dock_core::Layout,
+    target: NodeId,
+) -> Option<FloatingGroupId> {
+    fn contains(layout: &dock_core::Layout, root: NodeId, target: NodeId) -> bool {
+        if root == target {
+            return true;
+        }
+        match layout.node(root) {
+            Some(Node::Split(split)) => split
+                .children
+                .iter()
+                .any(|child| contains(layout, *child, target)),
+            Some(Node::Column(column)) => column
+                .groups
+                .iter()
+                .any(|group| contains(layout, *group, target)),
+            Some(Node::Tabs(tabs)) => tabs
+                .children
+                .iter()
+                .any(|child| contains(layout, *child, target)),
+            Some(Node::Panel(_)) | None => false,
+        }
+    }
+
+    layout.floating_groups().find_map(|(group, floating)| {
+        let area = layout.dock_area(floating.area)?;
+        contains(layout, area.root, target).then_some(group)
+    })
+}
+
 impl Render for FloatingPartHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.controller_observed {
             cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
                 .detach();
             self.controller_observed = true;
+        }
+
+        // A preserved Group HWND can become part of a different Core FloatingGroup
+        // after a direct GroupGrip extraction. Resolve the current owner by NodeId,
+        // rather than keeping the creation-time FloatingGroupId forever.
+        let part_node = match self.part {
+            FloatingPartKind::Header { column } => column,
+            FloatingPartKind::Group { group, .. } => group,
+        };
+        if let Some(current_group) = self.controller.update(cx, |controller, _| {
+            floating_group_for_part_node(controller.layout(), part_node)
+        }) {
+            self.floating_group = current_group;
         }
 
         let window_id = window.window_handle().window_id();
