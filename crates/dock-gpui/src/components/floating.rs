@@ -2883,14 +2883,17 @@ mod floating_dock_area_header_hit_tests {
                 &[],
                 Point::new(100.0, 30.0),
                 metrics,
+                true,
             ),
             Some(true),
         );
-        let collapse_button_center = column.origin.x
+
+        let rightmost_collapse_button_center = column.origin.x
             + super::CompositionDragArea::collapse_button_left(
                 column,
                 columns[0],
                 metrics.column_control_button_width,
+                true,
             )
             + metrics.column_control_button_width * 0.5;
         assert_eq!(
@@ -2898,11 +2901,14 @@ mod floating_dock_area_header_hit_tests {
                 column,
                 &columns,
                 &[],
-                Point::new(collapse_button_center, 30.0),
+                Point::new(rightmost_collapse_button_center, 30.0),
                 metrics,
+                true,
             ),
             Some(false),
         );
+
+        // The close control owns the far-right button only on the rightmost Header.
         assert_eq!(
             super::floating_dock_area_title_pointer_region(
                 column,
@@ -2910,9 +2916,32 @@ mod floating_dock_area_header_hit_tests {
                 &[],
                 Point::new(240.0, 30.0),
                 metrics,
+                true,
             ),
             Some(false),
         );
+
+        // A Header without X uses the outermost button slot for its own collapse control.
+        let regular_collapse_button_center = column.origin.x
+            + super::CompositionDragArea::collapse_button_left(
+                column,
+                columns[0],
+                metrics.column_control_button_width,
+                false,
+            )
+            + metrics.column_control_button_width * 0.5;
+        assert_eq!(
+            super::floating_dock_area_title_pointer_region(
+                column,
+                &columns,
+                &[],
+                Point::new(regular_collapse_button_center, 30.0),
+                metrics,
+                false,
+            ),
+            Some(false),
+        );
+
         assert_eq!(
             super::floating_dock_area_title_pointer_region(
                 column,
@@ -2920,6 +2949,7 @@ mod floating_dock_area_header_hit_tests {
                 &[],
                 Point::new(100.0, 60.0),
                 metrics,
+                true,
             ),
             None,
         );
@@ -2946,6 +2976,7 @@ mod floating_dock_area_header_hit_tests {
                 &splitters,
                 Point::new(250.0, 30.0),
                 metrics,
+                true,
             ),
             Some(false),
         );
