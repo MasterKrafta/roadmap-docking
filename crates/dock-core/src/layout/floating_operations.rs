@@ -164,8 +164,14 @@ impl Layout {
             });
         }
         let next_z = self.next_floating_z_order()?;
+        let main_group_ratios = self.main_group_ratios_after_group_float(*node);
         self.remember_subtree_dock_locations(*node);
         self.detach_node(*node)?;
+        if let Some((column, ratios)) = main_group_ratios
+            && let Some(Node::Column(value)) = self.nodes.get_mut(column)
+        {
+            value.group_ratios = ratios;
+        }
         let root = self.floating_root_for_node(*node, bounds.size.width, metrics)?;
         let preferred_height = self.floating_preferred_height_for_node(root, metrics)?;
         let floating_bounds = Rect::new(
@@ -178,6 +184,66 @@ impl Layout {
             inverse: None,
             persistent: true,
         })
+    }
+
+    /// Reassigns the removed middle Group's height equally to its immediate
+    /// Main-column neighbours. Edge extraction deliberately keeps the existing
+    /// ratio normalization: all remaining Groups expand while preserving their
+    /// relative heights.
+    fn main_group_ratios_after_group_float(
+        &self,
+        group: NodeId,
+    ) -> Option<(NodeId, Vec<f32>)> {
+        if !matches!(self.nodes.get(group), Some(Node::Tabs(_))) {
+            return None;
+        }
+        let column_id = self.find_owner_column(group)?;
+        self.main_column_position(column_id)?;
+        let Node::Column(column) = self.nodes.get(column_id)? else {
+            return None;
+        };
+        if column.groups.len() < 3
+            || column.group_ratios.len() != column.groups.len()
+        {
+            return None;
+        }
+
+        let index = column.groups.iter().position(|candidate| *candidate == group)?;
+        if index == 0 || index + 1 >= column.groups.len() {
+            return None;
+        }
+
+        let left_group = column.groups[index - 1];
+        let right_group = column.groups[index + 1];
+        let left_expanded = !self.group_is_collapsed(left_group);
+        let right_expanded = !self.group_is_collapsed(right_group);
+        if !left_expanded && !right_expanded {
+            // There is no adjacent expanded Group to receive the released space.
+            // Leave the established ratio normalization as the safe fallback.
+            return None;
+        }
+
+        let removed_weight = column.group_ratios[index];
+        if !removed_weight.is_finite() || removed_weight <= 0.0 {
+            return None;
+        }
+
+        let mut ratios = column.group_ratios.clone();
+        ratios.remove(index);
+        match (left_expanded, right_expanded) {
+            (true, true) => {
+                ratios[index - 1] += removed_weight * 0.5;
+                ratios[index] += removed_weight * 0.5;
+            }
+            (true, false) => ratios[index - 1] += removed_weight,
+            (false, true) => ratios[index] += removed_weight,
+            (false, false) => unreachable!(),
+        }
+
+        Some((
+            column_id,
+            normalized_ratios(ratios.into_iter().map(Some).collect()),
+        ))
     }
 
     fn insert_floating_group(
