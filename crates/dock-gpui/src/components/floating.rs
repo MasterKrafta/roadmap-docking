@@ -11,7 +11,7 @@ use dock_core::{
 use gpui::{
     Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, WeakEntity, Window, WindowId, canvas,
-    prelude::InteractiveElement as _, rgb,
+    prelude::InteractiveElement as _,
 };
 use crate::{
     dock_components::{
@@ -33,9 +33,7 @@ use crate::{
     DockController, DockWindowPart, DragSourceHost, FloatingWindowManager,
 };
 
-use super::{
-    drop_overlay::DropOverlay,
-};
+use super::drop_overlay::DropOverlay;
 
 #[path = "floating/floating_host_open_menu.rs"]
 mod floating_host_open_menu;
