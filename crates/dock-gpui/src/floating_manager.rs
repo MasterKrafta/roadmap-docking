@@ -1529,12 +1529,6 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return false;
         }
-        let scale_factor = self
-            .native_ops
-            .scale_factor(native_window)
-            .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(1.0);
         let Some(start_bounds) = self.controller.update(cx, |controller, _| {
             controller.layout().floating_group(group).map(|floating| floating.bounds)
         }) else {
