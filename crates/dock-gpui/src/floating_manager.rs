@@ -1254,19 +1254,18 @@ impl FloatingWindowManager {
         self.ensure_native_resize_session(group, window_id, cx);
     }
 
-    /// Adopts the already-visible Main-origin DragHost HWND as the permanent
-    /// Floating Group member. The caller changes its root surface to FloatingPartHost
-    /// before publishing LayoutChanged, so reconciliation never creates a second HWND.
-    pub(crate) fn adopt_drag_host_group_window(
+    /// Adopts the already-visible Group DragHost HWND as a complete Floating Column.
+    /// The same native surface now owns the Column Header and its Group stack.
+    pub(crate) fn adopt_drag_host_column_window(
         &mut self,
-        group: NodeId,
+        column: NodeId,
         floating_group: FloatingGroupId,
         window: WindowHandle<crate::drag_host_manager::DragHostSurface>,
         window_id: WindowId,
         native_window: NativeWindowId,
         cx: &mut Context<Self>,
     ) -> bool {
-        let member = WindowGridMember::Group(group);
+        let member = WindowGridMember::Column(column);
         if self.registry.members.contains_key(&member)
             || window.update(cx, |_, _, _| ()).is_err()
         {
@@ -1306,15 +1305,12 @@ impl FloatingWindowManager {
         let Some(bounds) = bounds else {
             return false;
         };
-        // Match the current Core Group rectangle before adopting the HWND. The
-        // DragHost's original size can differ after the new Header row or an
-        // insertion into an existing Floating composition changes the layout.
         self.sync_part_window_bounds(native_window, bounds);
         if let Err(error) = window.update(cx, |_, window, app| window.bounds_changed(app)) {
             tracing::warn!(
                 ?member,
                 %error,
-                "could not refresh the adopted DragHost GPUI bounds"
+                "could not refresh the promoted DragHost Column bounds"
             );
             return false;
         }
