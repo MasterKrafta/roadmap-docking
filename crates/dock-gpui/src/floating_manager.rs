@@ -1727,8 +1727,8 @@ impl FloatingWindowManager {
         });
 
         // Column HWND bounds use physical desktop origins and logical client sizes.
-        // Convert only edge deltas to the composition's logical width; Core then
-        // resizes the first/last Column and preserves all internal split positions.
+        // Core receives only the width delta; its edge command preserves internal
+        // Column widths and split positions.
         let width_delta = native_column_bounds.size.width - current_column_bounds.size.width;
         let target_group_bounds = match edge {
             Some(dock_core::FloatingResizeEdge::Left) => Rect::new(
@@ -1770,6 +1770,42 @@ impl FloatingWindowManager {
             return;
         }
 
+        // Capture the current Column HWND grid before Core changes any Floating
+        // bounds. WindowGrid contains Column identities, including internal
+        // Axis::X neighbours and external Floating compositions.
+        let grid_links = self
+            .window_chains
+            .links_for(member)
+            .unwrap_or_default()
+            .to_vec();
+        let grid_members = self.window_chains.members_for(member);
+        let grid_bounds = if grid_links.is_empty() {
+            None
+        } else {
+            grid_members
+                .iter()
+                .map(|grid_member| {
+                    self.panel_window_for_grid_member(*grid_member)
+                        .map(|entry| (*grid_member, entry.bounds))
+                })
+                .collect::<Option<Vec<_>>>()
+        };
+        let grid_frames = grid_bounds
+            .as_ref()
+            .and_then(|bounds| self.frame_geometries_for_bounds(bounds));
+        let grid_owner_groups = grid_members
+            .iter()
+            .filter_map(|grid_member| {
+                self.panel_window_for_grid_member(*grid_member)
+                    .and_then(|entry| entry.host_group)
+                    .map(|owner| (*grid_member, owner))
+            })
+            .collect::<HashMap<_, _>>();
+        let grid_geometry = match (grid_bounds, grid_frames) {
+            (Some(bounds), Some(frames)) => Some((bounds, frames, grid_owner_groups)),
+            _ => None,
+        };
+
         let command = match edge {
             Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
                 group,
@@ -1782,19 +1818,183 @@ impl FloatingWindowManager {
                 bounds: target_group_bounds,
             },
         };
+
         self.controller.update(cx, |controller, controller_cx| {
-            if let Err(error) = controller.dispatch(command) {
-                tracing::warn!(
+            let primary_result = controller.dispatch(command);
+            match primary_result {
+                Ok(_) => {
+                    // Use Core's accepted Column rectangle, not the raw native
+                    // proposal: a Core minimum may clamp a WM_SIZING sample.
+                    let accepted_column_bounds = floating_column_core_bounds(
+                        controller.layout(),
+                        &controller.metrics(),
+                        group,
+                        column,
+                        scale_factor,
+                    )
+                    .map(|(_, bounds)| bounds);
+
+                    if let (Some(accepted_column_bounds), Some((grid_bounds, grid_frames, owners))) =
+                        (accepted_column_bounds, grid_geometry.as_ref())
+                    {
+                        let right_edge_delta = native_resize_right_edge_delta(
+                            current_column_bounds,
+                            accepted_column_bounds,
+                            scale_factor,
+                        )
+                        .unwrap_or(0.0);
+                        let bottom_edge_delta = native_resize_bottom_edge_delta(
+                            current_column_bounds,
+                            accepted_column_bounds,
+                            scale_factor,
+                        )
+                        .unwrap_or(0.0);
+
+                        if right_edge_delta.abs() > 0.01 || bottom_edge_delta.abs() > 0.01 {
+                            let accepted_grid_bounds = grid_bounds
+                                .iter()
+                                .map(|(grid_member, bounds)| {
+                                    if *grid_member == member {
+                                        (member, accepted_column_bounds)
+                                    } else {
+                                        (*grid_member, *bounds)
+                                    }
+                                })
+                                .collect::<Vec<_>>();
+                            let accepted_grid_frames = grid_bounds
+                                .iter()
+                                .zip(grid_frames.iter())
+                                .map(|((grid_member, _), frame)| {
+                                    if *grid_member == member {
+                                        frame.with_logical_client_size(
+                                            accepted_column_bounds.size,
+                                        )
+                                    } else {
+                                        Some(*frame)
+                                    }
+                                })
+                                .collect::<Option<Vec<_>>>();
+
+                            if let Some(accepted_grid_frames) = accepted_grid_frames {
+                                if let Some(shifted_bounds) = shift_window_grid_after_resize(
+                                    accepted_grid_bounds,
+                                    &accepted_grid_frames,
+                                    &grid_links,
+                                    member,
+                                    right_edge_delta,
+                                    bottom_edge_delta,
+                                ) {
+                                    // One FloatingGroup can own several Column HWNDs.
+                                    // Convert all shifted member rectangles back to one
+                                    // composition-origin move and reject inconsistent
+                                    // per-Column translations instead of moving it twice.
+                                    let mut group_deltas =
+                                        HashMap::<FloatingGroupId, (f32, f32)>::new();
+                                    let mut consistent = true;
+
+                                    for (shifted_member, shifted) in shifted_bounds {
+                                        if shifted_member == member {
+                                            continue;
+                                        }
+                                        let Some(owner) = owners.get(&shifted_member).copied()
+                                        else {
+                                            continue;
+                                        };
+                                        if owner == group {
+                                            continue;
+                                        }
+                                        let Some((_, previous)) = grid_bounds
+                                            .iter()
+                                            .find(|(candidate, _)| *candidate == shifted_member)
+                                        else {
+                                            continue;
+                                        };
+                                        let delta = (
+                                            shifted.origin.x - previous.origin.x,
+                                            shifted.origin.y - previous.origin.y,
+                                        );
+                                        if delta.0.abs() <= 0.01 && delta.1.abs() <= 0.01 {
+                                            continue;
+                                        }
+
+                                        if let Some(existing) = group_deltas.get(&owner) {
+                                            if (existing.0 - delta.0).abs() > 0.5
+                                                || (existing.1 - delta.1).abs() > 0.5
+                                            {
+                                                consistent = false;
+                                                break;
+                                            }
+                                        } else {
+                                            group_deltas.insert(owner, delta);
+                                        }
+                                    }
+
+                                    if consistent {
+                                        let neighbour_commands = group_deltas
+                                            .into_iter()
+                                            .filter_map(|(neighbour, delta)| {
+                                                let floating =
+                                                    controller.layout().floating_group(neighbour)?;
+                                                let origin = Point::new(
+                                                    floating.bounds.origin.x + delta.0,
+                                                    floating.bounds.origin.y + delta.1,
+                                                );
+                                                (origin != floating.bounds.origin).then_some(
+                                                    DockCommand::MoveFloating {
+                                                        group: neighbour,
+                                                        origin,
+                                                    },
+                                                )
+                                            })
+                                            .collect::<Vec<_>>();
+                                        if !neighbour_commands.is_empty() {
+                                            if let Err(error) =
+                                                controller.dispatch_sequence(neighbour_commands)
+                                            {
+                                                tracing::warn!(
+                                                    ?group,
+                                                    ?column,
+                                                    %error,
+                                                    "could not reflow the external Column WindowGrid after native Resize"
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        tracing::warn!(
+                                            ?group,
+                                            ?column,
+                                            "Column WindowGrid resize produced inconsistent offsets within one Floating composition"
+                                        );
+                                    }
+                                } else {
+                                    tracing::warn!(
+                                        ?group,
+                                        ?column,
+                                        "could not calculate the affected Column WindowGrid region after native Resize"
+                                    );
+                                }
+                            } else {
+                                tracing::warn!(
+                                    ?group,
+                                    ?column,
+                                    "could not measure the accepted Column HWND frame after native Resize"
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(error) => tracing::warn!(
                     ?group,
                     ?column,
                     %error,
                     "could not synchronize Floating Column native bounds with Core"
-                );
+                ),
             }
             controller.flush_events(controller_cx);
             controller_cx.notify();
         });
     }
+
     fn apply_native_resize_bounds(
         &mut self,
         group: FloatingGroupId,
