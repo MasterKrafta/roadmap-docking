@@ -12,7 +12,7 @@ use gpui::{
     prelude::InteractiveElement as _, px, rgb,
 };
 
-#[path = "dock_host/open_context_menu.rs"]
+#[path = "open_context_menu.rs"]
 mod open_context_menu;
 
 use self::open_context_menu::OpenContextMenu;

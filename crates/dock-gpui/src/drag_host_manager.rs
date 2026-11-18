@@ -30,27 +30,27 @@ use crate::{
 };
 
 
-#[path = "drag_host_manager/active_drag_host.rs"]
+#[path = "active_drag_host.rs"]
 mod active_drag_host;
 use active_drag_host::ActiveDragHost;
 
-#[path = "drag_host_manager/drag_host_handoff.rs"]
+#[path = "drag_host_handoff.rs"]
 mod drag_host_handoff;
 use drag_host_handoff::DragHostHandoff;
 
-#[path = "drag_host_manager/drag_host_error.rs"]
+#[path = "drag_host_error.rs"]
 mod drag_host_error;
 pub use drag_host_error::DragHostError;
 
-#[path = "drag_host_manager/drag_host_surface.rs"]
+#[path = "drag_host_surface.rs"]
 mod drag_host_surface;
 pub(crate) use drag_host_surface::DragHostSurface;
 
-#[path = "drag_host_manager/drag_group_presentation.rs"]
+#[path = "drag_group_presentation.rs"]
 mod drag_group_presentation;
 use drag_group_presentation::DragGroupPresentation;
 
-#[path = "drag_host_manager/drag_dock_area_presentation.rs"]
+#[path = "drag_dock_area_presentation.rs"]
 mod drag_dock_area_presentation;
 use drag_dock_area_presentation::DragDockAreaPresentation;
 

@@ -1,12 +1,12 @@
-#[path = "registry/icon_source.rs"]
+#[path = "icon_source.rs"]
 mod icon_source;
-#[path = "registry/panel_descriptor.rs"]
+#[path = "panel_descriptor.rs"]
 mod panel_descriptor;
-#[path = "registry/panel_registry.rs"]
+#[path = "panel_registry.rs"]
 mod panel_registry;
-#[path = "registry/panel_registry_error.rs"]
+#[path = "panel_registry_error.rs"]
 mod panel_registry_error;
-#[path = "registry/panel_view_cache.rs"]
+#[path = "panel_view_cache.rs"]
 mod panel_view_cache;
 
 pub use icon_source::IconSource;

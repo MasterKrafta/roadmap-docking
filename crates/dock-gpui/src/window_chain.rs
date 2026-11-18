@@ -3,33 +3,33 @@
 //! A WindowGrid stores only relationships between windows. It does not own
 //! native handles, window bounds, or Core layout state.
 
-#[path = "window_chain/window_grid_member.rs"]
+#[path = "window_grid_member.rs"]
 mod window_grid_member;
 
 pub(crate) use window_grid_member::WindowGridMember;
 
-#[path = "window_chain/window_grid_direction.rs"]
+#[path = "window_grid_direction.rs"]
 mod window_grid_direction;
 
 pub(crate) use window_grid_direction::WindowGridDirection;
 
-#[path = "window_chain/window_grid_link.rs"]
+#[path = "window_grid_link.rs"]
 mod window_grid_link;
 
 pub(crate) use window_grid_link::WindowGridLink;
 
-#[path = "window_chain/window_grid.rs"]
+#[path = "window_grid.rs"]
 mod window_grid;
 
 use window_grid::WindowGrid;
 
 
-#[path = "window_chain/window_grid_prune_result.rs"]
+#[path = "window_grid_prune_result.rs"]
 mod window_grid_prune_result;
 
 pub(crate) use window_grid_prune_result::WindowGridPruneResult;
 
-#[path = "window_chain/window_grid_registry.rs"]
+#[path = "window_grid_registry.rs"]
 mod window_grid_registry;
 
 pub(crate) use window_grid_registry::WindowGridRegistry;

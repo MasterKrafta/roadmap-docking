@@ -19,27 +19,27 @@ mod commands;
 mod layout_cache;
 
 
-#[path = "controller/dock_event.rs"]
+#[path = "dock_event.rs"]
 mod dock_event;
-#[path = "controller/rect_cache_key.rs"]
+#[path = "rect_cache_key.rs"]
 mod rect_cache_key;
-#[path = "controller/floating_rect_cache_key.rs"]
+#[path = "floating_rect_cache_key.rs"]
 mod floating_rect_cache_key;
-#[path = "controller/resolver_cache_key.rs"]
+#[path = "resolver_cache_key.rs"]
 mod resolver_cache_key;
-#[path = "controller/floating_geometry_cache.rs"]
+#[path = "floating_geometry_cache.rs"]
 mod floating_geometry_cache;
-#[path = "controller/dock_controller_config_error.rs"]
+#[path = "dock_controller_config_error.rs"]
 mod dock_controller_config_error;
-#[path = "controller/panel_command_error.rs"]
+#[path = "panel_command_error.rs"]
 mod panel_command_error;
-#[path = "controller/drag_controller.rs"]
+#[path = "drag_controller.rs"]
 mod drag_controller;
-#[path = "controller/resize_interaction.rs"]
+#[path = "resize_interaction.rs"]
 mod resize_interaction;
-#[path = "controller/resize_interaction_error.rs"]
+#[path = "resize_interaction_error.rs"]
 mod resize_interaction_error;
-#[path = "controller/resize_frame_throttle.rs"]
+#[path = "resize_frame_throttle.rs"]
 mod resize_frame_throttle;
 
 pub use dock_event::DockEvent;

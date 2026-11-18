@@ -1,6 +1,10 @@
+#[path = "context_menu_callbacks.rs"]
 mod context_menu_callbacks;
+#[path = "context_menu_entry.rs"]
 mod context_menu_entry;
+#[path = "context_menu_item.rs"]
 mod context_menu_item;
+#[path = "context_menu_target.rs"]
 mod context_menu_target;
 
 pub use context_menu_callbacks::{

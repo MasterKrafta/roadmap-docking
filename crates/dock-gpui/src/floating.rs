@@ -36,35 +36,35 @@ use crate::{
 
 use super::drop_overlay::DropOverlay;
 
-#[path = "floating/floating_host_open_menu.rs"]
+#[path = "floating_host_open_menu.rs"]
 mod floating_host_open_menu;
 use floating_host_open_menu::FloatingHostOpenMenu;
 
-#[path = "floating/floating_tab_press.rs"]
+#[path = "floating_tab_press.rs"]
 mod floating_tab_press;
 use floating_tab_press::FloatingTabPress;
 
-#[path = "floating/floating_group_press.rs"]
+#[path = "floating_group_press.rs"]
 mod floating_group_press;
 use floating_group_press::FloatingGroupPress;
 
-#[path = "floating/floating_host_snapshot.rs"]
+#[path = "floating_host_snapshot.rs"]
 mod floating_host_snapshot;
 use floating_host_snapshot::FloatingHostSnapshot;
 
-#[path = "floating/floating_part_kind.rs"]
+#[path = "floating_part_kind.rs"]
 mod floating_part_kind;
 pub(crate) use floating_part_kind::FloatingPartKind;
 
-#[path = "floating/floating_part_host.rs"]
+#[path = "floating_part_host.rs"]
 mod floating_part_host;
 pub(crate) use floating_part_host::FloatingPartHost;
 
-#[path = "floating/floating_host.rs"]
+#[path = "floating_host.rs"]
 mod floating_host;
 pub use floating_host::FloatingHost;
 
-#[path = "floating/floating_window_content.rs"]
+#[path = "floating_window_content.rs"]
 mod floating_window_content;
 use floating_window_content::FloatingWindowContent;
 

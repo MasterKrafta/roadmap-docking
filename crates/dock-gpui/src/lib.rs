@@ -31,12 +31,12 @@ pub use dock_core;
 #[cfg(windows)]
 use gpui::AppContext;
 
-#[path = "lib/run_options.rs"]
+#[path = "run_options.rs"]
 mod run_options;
 pub use run_options::RunOptions;
 
 #[cfg(windows)]
-#[path = "lib/starter_panel.rs"]
+#[path = "starter_panel.rs"]
 mod starter_panel;
 
 #[cfg(windows)]

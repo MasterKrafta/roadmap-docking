@@ -34,31 +34,31 @@ use crate::{
     },
 };
 
-#[path = "floating_manager/panel_layout_location.rs"]
+#[path = "panel_layout_location.rs"]
 mod panel_layout_location;
-#[path = "floating_manager/panel_window_visibility.rs"]
+#[path = "panel_window_visibility.rs"]
 mod panel_window_visibility;
-#[path = "floating_manager/panel_window_handle.rs"]
+#[path = "panel_window_handle.rs"]
 mod panel_window_handle;
-#[path = "floating_manager/panel_window_entry.rs"]
+#[path = "panel_window_entry.rs"]
 mod panel_window_entry;
-#[path = "floating_manager/panel_window_registry.rs"]
+#[path = "panel_window_registry.rs"]
 mod panel_window_registry;
-#[path = "floating_manager/composition_host_registry.rs"]
+#[path = "composition_host_registry.rs"]
 mod composition_host_registry;
-#[path = "floating_manager/docking_window_at_point.rs"]
+#[path = "docking_window_at_point.rs"]
 mod docking_window_at_point;
-#[path = "floating_manager/native_move_target.rs"]
+#[path = "native_move_target.rs"]
 mod native_move_target;
-#[path = "floating_manager/native_move_window.rs"]
+#[path = "native_move_window.rs"]
 mod native_move_window;
-#[path = "floating_manager/native_move_session.rs"]
+#[path = "native_move_session.rs"]
 mod native_move_session;
-#[path = "floating_manager/floating_group_snapshot.rs"]
+#[path = "floating_group_snapshot.rs"]
 mod floating_group_snapshot;
-#[path = "floating_manager/floating_part_window_snapshot.rs"]
+#[path = "floating_part_window_snapshot.rs"]
 mod floating_part_window_snapshot;
-#[path = "floating_manager/native_resize_session.rs"]
+#[path = "native_resize_session.rs"]
 mod native_resize_session;
 
 pub use composition_host_registry::CompositionHostRegistry;

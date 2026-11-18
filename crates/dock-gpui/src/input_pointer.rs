@@ -26,17 +26,17 @@ use super::{
     scroll::map_hit_test_point,
 };
 
-#[path = "input_pointer/main_drag_host_kind.rs"]
+#[path = "main_drag_host_kind.rs"]
 mod main_drag_host_kind;
-#[path = "input_pointer/pointer_click_intent.rs"]
+#[path = "pointer_click_intent.rs"]
 mod pointer_click_intent;
-#[path = "input_pointer/pointer_down_intent.rs"]
+#[path = "pointer_down_intent.rs"]
 mod pointer_down_intent;
-#[path = "input_pointer/pointer_event_state.rs"]
+#[path = "pointer_event_state.rs"]
 mod pointer_event_state;
-#[path = "input_pointer/pointer_press.rs"]
+#[path = "pointer_press.rs"]
 mod pointer_press;
-#[path = "input_pointer/pointer_press_target.rs"]
+#[path = "pointer_press_target.rs"]
 mod pointer_press_target;
 
 use self::{
