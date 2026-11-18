@@ -1292,6 +1292,17 @@ impl FloatingWindowManager {
             return false;
         }
 
+        let resize_enabled = match self.native_ops.enable_resize(native_window) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    ?member,
+                    %error,
+                    "could not enable native resize before promoting DragHost to Column"
+                );
+                false
+            }
+        };
         let scale = self
             .native_ops
             .scale_factor(native_window)
@@ -1348,7 +1359,7 @@ impl FloatingWindowManager {
                 native_top_resize_enabled: None,
                 native_scale_factor: Some(scale),
                 native_bounds_dirty: false,
-                resize_enabled: false,
+                resize_enabled,
                 host_group: Some(floating_group),
                 visibility: PanelWindowVisibility::Visible,
             },
@@ -5371,7 +5382,8 @@ impl FloatingWindowManager {
             // Their custom drag and resize behavior is connected in later stages.
             is_movable: false,
             app_owns_titlebar_drag: false,
-            is_resizable: false,
+            is_resizable: spec.main_drag_side.is_none()
+                && matches!(spec.kind, FloatingPartKind::Column { .. }),
             is_minimizable: false,
             ..Default::default()
         };
@@ -5753,24 +5765,18 @@ impl FloatingWindowManager {
                 previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
             });
             if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
-                let resizing_this_member = self
-                    .native_resize
-                    .is_some_and(|session| session.member == spec.member);
+                let resizing_this_member = self.native_resize.is_some_and(|session| {
+                    session.group == spec.floating_group() && session.member == spec.member
+                });
+                if !resizing_this_member
+                    && let Some(native_window) = native_window
+                {
+                    self.sync_part_window_bounds(native_window, target_bounds);
+                }
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                    if resizing_this_member {
-                        // Windows owns this HWND until WM_EXITSIZEMOVE. Remember
-                        // the newest Core target but leave its live bounds untouched.
-                        entry.bounds = target_bounds;
-                        entry.native_scale_factor = current_scale;
-                        entry.native_bounds_dirty = true;
-                    } else {
-                        if let Some(native_window) = native_window {
-                            self.sync_part_window_bounds(native_window, target_bounds);
-                        }
-                        entry.bounds = target_bounds;
-                        entry.native_scale_factor = current_scale;
-                        entry.native_bounds_dirty = false;
-                    }
+                    entry.bounds = target_bounds;
+                    entry.native_scale_factor = current_scale;
+                    entry.native_bounds_dirty = resizing_this_member;
                 }
             }
 
