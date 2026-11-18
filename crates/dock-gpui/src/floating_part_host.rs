@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
     rc::Rc,
+    time::Duration,
 };
 
 use dock_core::{
@@ -38,6 +39,44 @@ use super::super::{
     },
     panel_host::PanelHost,
 };
+
+fn schedule_manager_update<T: 'static>(
+    cx: &mut Context<T>,
+    manager: WeakEntity<FloatingWindowManager>,
+    update: impl FnOnce(
+            &mut FloatingWindowManager,
+            &mut Context<FloatingWindowManager>,
+        ) + 'static,
+) {
+    cx.spawn(async move |_, app| {
+        app.background_executor()
+            .timer(Duration::from_millis(1))
+            .await;
+        if let Some(manager) = manager.upgrade() {
+            let _ = manager.update(app, update);
+        }
+    })
+    .detach();
+}
+
+fn schedule_manager_update_from_app(
+    app: &App,
+    manager: WeakEntity<FloatingWindowManager>,
+    update: impl FnOnce(
+            &mut FloatingWindowManager,
+            &mut Context<FloatingWindowManager>,
+        ) + 'static,
+) {
+    app.spawn(async move |app| {
+        app.background_executor()
+            .timer(Duration::from_millis(1))
+            .await;
+        if let Some(manager) = manager.upgrade() {
+            let _ = manager.update(app, update);
+        }
+    })
+    .detach();
+}
 
 /// Root view for one complete Floating Column window.
 ///
@@ -225,9 +264,9 @@ impl Render for FloatingPartHost {
                     };
                     let window_id = window.window_handle().window_id();
 
-                    // FloatingWindowManager can call bounds_changed() while it
-                    // is reconciling this HWND. Defer manager updates to avoid
-                    // re-entering the manager entity from GPUI's observer.
+                    // bounds_changed() may run while the manager is reconciling
+                    // this HWND. Wait until that update has fully unwound before
+                    // syncing the native resize sample back into the manager.
                     host_cx.defer_in(window, move |host, _, deferred_cx| {
                         if host.floating_group != Some(group)
                             || !matches!(
@@ -237,16 +276,18 @@ impl Render for FloatingPartHost {
                         {
                             return;
                         }
-                        if let Some(manager) = host.manager.upgrade() {
-                            let _ = manager.update(deferred_cx, |manager, manager_cx| {
+                        schedule_manager_update(
+                            deferred_cx,
+                            host.manager.clone(),
+                            move |manager, manager_cx| {
                                 manager.sync_native_column_resize_bounds(
                                     column,
                                     group,
                                     window_id,
                                     manager_cx,
                                 );
-                            });
-                        }
+                            },
+                        );
                     });
                 })
                 .detach();
@@ -262,16 +303,19 @@ impl Render for FloatingPartHost {
                             host.part,
                             FloatingPartKind::Column { column: current } if current == column
                         )
-                        && let Some(manager) = host.manager.upgrade()
                     {
-                        manager.update(host_cx, |manager, manager_cx| {
-                            manager.observe_native_column_resize(
-                                column,
-                                group,
-                                window_id,
-                                manager_cx,
-                            );
-                        });
+                        schedule_manager_update(
+                            host_cx,
+                            host.manager.clone(),
+                            move |manager, manager_cx| {
+                                manager.observe_native_column_resize(
+                                    column,
+                                    group,
+                                    window_id,
+                                    manager_cx,
+                                );
+                            },
+                        );
                     }
                 });
             }
@@ -1077,27 +1121,30 @@ impl FloatingPartHost {
         let manager_for_handoff = self.manager.clone();
         let floating_group = snapshot.floating.group;
         window.on_next_frame(move |_, app| {
-            let Some(manager) = manager_for_handoff.upgrade() else {
-                return;
-            };
-            let Some(required_panels) = manager.update(app, |manager, manager_cx| {
-                manager.pending_drag_host_handoff_panels(floating_group, window_id, manager_cx)
-            }) else {
-                return;
-            };
-            if required_panels
-                .iter()
-                .all(|panel| rendered_panels.contains(panel))
-            {
-                let _ = manager.update(app, |manager, manager_cx| {
-                    manager.notify_drag_host_handoff_rendered(
+            schedule_manager_update_from_app(
+                app,
+                manager_for_handoff,
+                move |manager, manager_cx| {
+                    let Some(required_panels) = manager.pending_drag_host_handoff_panels(
                         floating_group,
                         window_id,
-                        &required_panels,
                         manager_cx,
-                    );
-                });
-            }
+                    ) else {
+                        return;
+                    };
+                    if required_panels
+                        .iter()
+                        .all(|panel| rendered_panels.contains(panel))
+                    {
+                        manager.notify_drag_host_handoff_rendered(
+                            floating_group,
+                            window_id,
+                            &required_panels,
+                            manager_cx,
+                        );
+                    }
+                },
+            );
         });
 
         let toggle_host = cx.entity().downgrade();
@@ -1429,32 +1476,30 @@ impl FloatingPartHost {
         let manager = self.manager.clone();
         let floating_group = self.floating_group();
         window.on_next_frame(move |_, app| {
-            let Some(manager) = manager.upgrade() else {
-                return;
-            };
-            let Some(required_panels) = manager.update(app, |manager, manager_cx| {
-                manager.pending_drag_host_handoff_panels(
-                    floating_group,
-                    window_id,
-                    manager_cx,
-                )
-            }) else {
-                return;
-            };
-            if !required_panels
-                .iter()
-                .all(|panel| rendered_panels.contains(panel))
-            {
-                return;
-            }
-            let _ = manager.update(app, |manager, manager_cx| {
-                manager.notify_drag_host_handoff_rendered(
-                    floating_group,
-                    window_id,
-                    &required_panels,
-                    manager_cx,
-                );
-            });
+            schedule_manager_update_from_app(
+                app,
+                manager,
+                move |manager, manager_cx| {
+                    let Some(required_panels) = manager.pending_drag_host_handoff_panels(
+                        floating_group,
+                        window_id,
+                        manager_cx,
+                    ) else {
+                        return;
+                    };
+                    if required_panels
+                        .iter()
+                        .all(|panel| rendered_panels.contains(panel))
+                    {
+                        manager.notify_drag_host_handoff_rendered(
+                            floating_group,
+                            window_id,
+                            &required_panels,
+                            manager_cx,
+                        );
+                    }
+                },
+            );
         });
 
         root = root
