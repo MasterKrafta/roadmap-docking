@@ -9,8 +9,10 @@ mod group_presentation;
 pub(crate) use group::DockGroupView;
 pub(crate) use group_presentation::{
     active_panels_for_groups, collect_group_presentations, GroupPresentation,
-    PanelTransferPresentation, TabPresentation,
+    PanelTransferPresentation,
 };
+#[cfg(test)]
+pub(crate) use group_presentation::TabPresentation;
 
 pub use composition_header::{
     CloseCompositionButton, CollapseColumnButton, CompositionDragArea, CompositionHeader,
