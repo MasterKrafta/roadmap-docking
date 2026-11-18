@@ -1211,7 +1211,7 @@ impl DragHostManager {
                                                     ?id,
                                                     ?group,
                                                     %error,
-                                                    "could not preserve the source Floating size for a detached tab"
+                                                    "could not preserve the source Group size for a detached tab"
                                                 );
                                             }
                                         }
