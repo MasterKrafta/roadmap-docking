@@ -1080,7 +1080,12 @@ impl DragHostManager {
                 active.target_role,
             )
         });
-        let restored_free_area_bounds = if defer_layout_events_until_parts_ready
+        // A Main DockArea DragHost is only a hidden pointer/drop coordinator.
+        // Its HWND stays at the creation point while the temporary Header/Group
+        // windows follow the cursor, so its native bounds are stale at release.
+        // Use the cursor-tracked free_area_bounds for DockArea drags instead.
+        let restored_free_area_bounds = if dock_area.is_none()
+            && defer_layout_events_until_parts_ready
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
