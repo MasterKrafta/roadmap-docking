@@ -21,6 +21,10 @@ pub(super) struct ActiveDragHost {
     pub(super) visible: bool,
     pub(super) drop_target: Option<DropTarget>,
     pub(super) target_role: Option<DockWindowRole>,
+    /// Prevents repeated console output for the first Main DockArea tracking event.
+    pub(super) tracking_diagnostic_started: bool,
+    /// Allows the first resolved target to be logged even when it remains `None`.
+    pub(super) target_diagnostic_started: bool,
     pub(super) free_area_bounds: Option<Rect>,
     /// Defers layout publication until permanent Floating part windows are ready.
     pub(super) defer_layout_events_until_parts_ready: bool,
