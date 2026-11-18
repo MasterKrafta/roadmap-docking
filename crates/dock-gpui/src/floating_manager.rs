@@ -1355,6 +1355,7 @@ impl FloatingWindowManager {
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
                 native_left_resize_enabled: None,
+            native_bottom_resize_enabled: None,
                 native_right_resize_enabled: None,
                 native_top_resize_enabled: None,
                 native_scale_factor: Some(scale),
@@ -1534,17 +1535,12 @@ impl FloatingWindowManager {
             .ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let Some((start_bounds, start_column_bounds)) = self.controller.update(cx, |controller, _| {
-            floating_column_core_bounds(
-                controller.layout(),
-                &controller.metrics(),
-                group,
-                column,
-                scale_factor,
-            )
+        let Some(start_bounds) = self.controller.update(cx, |controller, _| {
+            controller.layout().floating_group(group).map(|floating| floating.bounds)
         }) else {
             return false;
         };
+        let start_column_bounds = entry.bounds;
 
         // Protect metric updates from the moment Windows enters its modal sizing
         // loop, even before the first size delta opens the Core history transaction.
@@ -5530,6 +5526,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
+            native_bottom_resize_enabled: None,
             native_right_resize_enabled: None,
             native_top_resize_enabled: None,
             native_scale_factor: scale,
@@ -6149,6 +6146,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
+            native_bottom_resize_enabled: None,
             native_right_resize_enabled: None,
             native_top_resize_enabled: None,
             native_scale_factor: None,
@@ -6280,6 +6278,9 @@ impl FloatingWindowManager {
         let desired_top_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Above);
+        let desired_bottom_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(member, WindowGridDirection::Below);
 
         if entry.native_left_resize_enabled != Some(desired_left_enabled) {
             match self.native_ops.set_left_resize_enabled(native_window, desired_left_enabled) {
@@ -6313,6 +6314,17 @@ impl FloatingWindowManager {
                     ?column,
                     %error,
                     "could not synchronize the Floating Column top resize edge"
+                ),
+            }
+        }
+        if entry.native_bottom_resize_enabled != Some(desired_bottom_enabled) {
+            match self.native_ops.set_bottom_resize_enabled(native_window, desired_bottom_enabled) {
+                Ok(()) => entry.native_bottom_resize_enabled = Some(desired_bottom_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize the Floating Column bottom resize edge"
                 ),
             }
         }
