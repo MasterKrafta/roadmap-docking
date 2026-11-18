@@ -122,64 +122,36 @@ fn collect_floating_part_windows(
             let Some(Node::Column(column)) = layout.node(column_rect.column) else {
                 continue;
             };
-            let header_local = Rect::new(
-                column_rect.rect.origin,
-                Size::new(
-                    column_rect.rect.size.width,
-                    metrics.column_header_height,
-                ),
-            );
-            let header_bounds =
-                floating_part_screen_bounds(floating.bounds, header_local, scale_factor);
-            if header_bounds.validate_non_empty().is_ok() {
-                result.push(FloatingPartWindowSnapshot {
-                    member: WindowGridMember::Header(column_rect.column),
-                    floating_group: Some(floating_group),
-                    kind: FloatingPartKind::Header {
-                        column: column_rect.column,
-                    },
-                    main_drag_side: None,
-                    bounds: header_bounds,
-                    floating_origin: floating.bounds.origin,
-                    local_origin: header_local.origin,
-                    contains_transferred_panels: false,
-                });
-            }
 
+            let mut panels = Vec::new();
+            let mut seen = HashSet::new();
             for group_id in &column.groups {
-                let Some(group_rect) = rects.groups.iter().find(|group| group.group == *group_id)
-                else {
-                    continue;
-                };
-                let mut panels = Vec::new();
-                let mut seen = HashSet::new();
                 collect_panel_order(layout, *group_id, &mut panels, &mut seen);
-                let contains_transferred_panels = panels
-                    .iter()
-                    .any(|panel| transferred_panels.contains(panel));
-                let bounds = floating_part_screen_bounds(
-                    floating.bounds,
-                    group_rect.rect,
-                    scale_factor,
-                );
-                if bounds.validate_non_empty().is_err() {
-                    continue;
-                }
-
-                result.push(FloatingPartWindowSnapshot {
-                    member: WindowGridMember::Group(*group_id),
-                    floating_group: Some(floating_group),
-                    kind: FloatingPartKind::Group {
-                        column: column_rect.column,
-                        group: *group_id,
-                    },
-                    main_drag_side: None,
-                    bounds,
-                    floating_origin: floating.bounds.origin,
-                    local_origin: group_rect.rect.origin,
-                    contains_transferred_panels,
-                });
             }
+            let contains_transferred_panels = panels
+                .iter()
+                .any(|panel| transferred_panels.contains(panel));
+            let bounds = floating_part_screen_bounds(
+                floating.bounds,
+                column_rect.rect,
+                scale_factor,
+            );
+            if bounds.validate_non_empty().is_err() {
+                continue;
+            }
+
+            result.push(FloatingPartWindowSnapshot {
+                member: WindowGridMember::Column(column_rect.column),
+                floating_group: Some(floating_group),
+                kind: FloatingPartKind::Column {
+                    column: column_rect.column,
+                },
+                main_drag_side: None,
+                bounds,
+                floating_origin: floating.bounds.origin,
+                local_origin: column_rect.rect.origin,
+                contains_transferred_panels,
+            });
         }
     }
 
@@ -198,40 +170,16 @@ fn floating_part_internal_links(
 
     let mut links = Vec::new();
     for floating_group in floating_groups {
-        let headers = specs
+        let mut columns = specs
             .iter()
-            .filter_map(|spec| {
-                (spec.floating_group() == floating_group
-                    && matches!(spec.kind, FloatingPartKind::Header { .. }))
-                .then_some(spec)
+            .filter(|spec| {
+                spec.floating_group() == floating_group
+                    && matches!(spec.kind, FloatingPartKind::Column { .. })
             })
             .collect::<Vec<_>>();
+        columns.sort_by(|left, right| left.local_origin.x.total_cmp(&right.local_origin.x));
 
-        for header in &headers {
-            let FloatingPartKind::Header { column } = header.kind else {
-                continue;
-            };
-            let mut previous = header.member;
-            for group in specs.iter().filter(|spec| {
-                spec.floating_group() == floating_group
-                    && matches!(
-                        spec.kind,
-                        FloatingPartKind::Group {
-                            column: group_column,
-                            ..
-                        } if group_column == column
-                    )
-            }) {
-                links.push(WindowGridLink {
-                    from: previous,
-                    to: group.member,
-                    direction: WindowGridDirection::Below,
-                });
-                previous = group.member;
-            }
-        }
-
-        for pair in headers.windows(2) {
+        for pair in columns.windows(2) {
             links.push(WindowGridLink {
                 from: pair[0].member,
                 to: pair[1].member,
