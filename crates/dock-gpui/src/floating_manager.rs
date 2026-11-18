@@ -1773,7 +1773,14 @@ impl FloatingWindowManager {
             .unwrap_or_default()
             .to_vec();
         let grid_members = self.window_chains.members_for(member);
-        let grid_bounds = if grid_links.is_empty() {
+        let grid_has_only_columns = grid_members
+            .iter()
+            .all(|grid_member| matches!(grid_member, WindowGridMember::Column(_)))
+            && grid_links.iter().all(|link| {
+                matches!(link.from, WindowGridMember::Column(_))
+                    && matches!(link.to, WindowGridMember::Column(_))
+            });
+        let grid_bounds = if grid_links.is_empty() || !grid_has_only_columns {
             None
         } else {
             grid_members
