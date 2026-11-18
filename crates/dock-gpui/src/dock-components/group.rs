@@ -124,16 +124,17 @@ impl DockGroupView {
             )
     }
 
-    /// Renders one detached tab through the same Core Group and PanelHost
-    /// components used by Main, Floating and Group DragHost surfaces.
+    /// Renders one detached tab with the exact Group geometry supplied by Core.
     ///
-    /// A PanelTab DragHost uses the source Group viewport, matching GroupGrip sizing.
-    /// The source Core header supplies the tab's identity, index and size; only its
-    /// origin moves into the temporary host.
+    /// Only the selected tab and its PanelView are mounted, while the Group,
+    /// strip and panel retain the same positions as in the GroupGrip DragHost.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_detached_tab(
-        source_header: TabHeaderRect,
-        content_size: Size,
+        column: Option<NodeId>,
+        group: GroupRect,
+        strip: TabStripRect,
+        header: TabHeaderRect,
+        panel_rect: PanelRect,
         presentation: &GroupPresentation,
         panel_view: gpui::AnyView,
         metrics: DockMetrics,
@@ -141,54 +142,19 @@ impl DockGroupView {
         theme: Theme,
         toggle_menu: GroupMenuToggle,
     ) -> impl IntoElement {
-        // The temporary drag surface contains only the Group. Its permanent
-        // Column Header is created separately after a successful Floating drop.
-        let group_origin = Point::ZERO;
-        let group_rect = Rect::new(group_origin, content_size);
-        let group = GroupRect::new(source_header.group, group_rect);
-
-        // Match dock-core's layout_tabs(column_group = true) geometry for a
-        // root Floating Group: the strip starts at the Group top, leaves room
-        // for the Group grip and menu, and the Panel starts below that strip.
-        let strip_height = metrics
-            .header_height
-            .max(metrics.tab_strip_height)
-            .min(content_size.height);
-        let control_width = metrics
-            .group_control_button_width
-            .min(content_size.width / 3.0)
-            .max(1.0);
-        let strip_width = (content_size.width - 2.0 * control_width).max(0.0);
-        let strip_rect = Rect::new(group_origin, Size::new(strip_width, strip_height));
-        let strip = TabStripRect::new(source_header.group, strip_rect);
-        // Re-anchor the source Core header in DragHost without recalculating
-        // its width, height or tab index.
-        let header_rect = Rect::new(strip_rect.origin, source_header.rect.size);
-        let header = TabHeaderRect::new(
-            source_header.group,
-            source_header.panel,
-            source_header.index,
-            header_rect,
-        );
-        let panel_rect = Rect::new(
-            Point::new(group_origin.x, group_origin.y + strip_height),
-            Size::new(
-                content_size.width,
-                (content_size.height - strip_height).max(0.0),
-            ),
-        );
+        let content_origin = group.rect.origin;
 
         div()
             .relative()
             .size_full()
             .child(Self::render_core(
-                None,
+                column,
                 group,
                 strip,
                 &[header],
                 None,
                 presentation,
-                Point::ZERO,
+                content_origin,
                 metrics,
                 0.0,
                 controller,
@@ -196,8 +162,8 @@ impl DockGroupView {
                 toggle_menu,
             ))
             .child(PanelHost::render(
-                vec![(PanelRect::new(source_header.panel, panel_rect), Some(panel_view))],
-                Point::ZERO,
+                vec![(panel_rect, Some(panel_view))],
+                content_origin,
                 theme,
             ))
     }
