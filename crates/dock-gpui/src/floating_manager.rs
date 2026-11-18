@@ -15,7 +15,8 @@ use gpui::{
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId,
+    hide_from_taskbar, NativeHorizontalResizeEdge, NativeKey, NativeWindowAtPoint,
+    NativeWindowId,
     NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
 };
 
@@ -116,6 +117,53 @@ fn floating_first_column(
     group: FloatingGroupId,
 ) -> Option<NodeId> {
     floating_root_columns(layout, group)?.first().copied()
+}
+
+fn floating_column_core_resize_edge(
+    native_edge: Option<NativeHorizontalResizeEdge>,
+    is_first_column: bool,
+    column_count: usize,
+    width_changed: bool,
+    left_edge_moved: bool,
+) -> Option<dock_core::FloatingResizeEdge> {
+    match native_edge {
+        Some(NativeHorizontalResizeEdge::Left) => Some(dock_core::FloatingResizeEdge::Left),
+        Some(NativeHorizontalResizeEdge::Right)
+            if is_first_column && column_count > 1 =>
+        {
+            Some(dock_core::FloatingResizeEdge::Left)
+        }
+        Some(NativeHorizontalResizeEdge::Right) => Some(dock_core::FloatingResizeEdge::Right),
+        None if width_changed && left_edge_moved => {
+            Some(dock_core::FloatingResizeEdge::Left)
+        }
+        None if width_changed && is_first_column && column_count > 1 => {
+            Some(dock_core::FloatingResizeEdge::Left)
+        }
+        None if width_changed => Some(dock_core::FloatingResizeEdge::Right),
+        None => None,
+    }
+}
+
+fn floating_column_resize_target_bounds(
+    current_group_bounds: Rect,
+    native_column_bounds: Rect,
+    edge: Option<dock_core::FloatingResizeEdge>,
+    width_delta: f32,
+) -> Rect {
+    let origin_x = match edge {
+        Some(dock_core::FloatingResizeEdge::Left) => native_column_bounds.origin.x,
+        Some(dock_core::FloatingResizeEdge::Right) | None => current_group_bounds.origin.x,
+    };
+    let horizontal_delta = if edge.is_some() { width_delta } else { 0.0 };
+
+    Rect::new(
+        Point::new(origin_x, native_column_bounds.origin.y),
+        Size::new(
+            current_group_bounds.size.width + horizontal_delta,
+            native_column_bounds.size.height,
+        ),
+    )
 }
 
 fn floating_root_x_splitters(
@@ -1756,45 +1804,35 @@ impl FloatingWindowManager {
         let native_edge = native_window
             .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
             .flatten();
-        let width_changed =
-            (native_column_bounds.size.width - current_column_bounds.size.width).abs() > 0.5;
-        // The only enabled internal right edge belongs to the first Column.
-        // Core's Left edge selector means "resize the first Column", regardless
-        // of whether its native left or right border initiated the resize.
-        let edge = native_edge
-            .map(|_| dock_core::FloatingResizeEdge::Left)
-            .or_else(|| width_changed.then_some(dock_core::FloatingResizeEdge::Left));
+        let width_delta =
+            native_column_bounds.size.width - current_column_bounds.size.width;
+        let width_changed = width_delta.abs() > 0.5;
+        let left_edge_moved =
+            (native_column_bounds.origin.x - current_column_bounds.origin.x).abs() > 0.5;
+        let (is_first_column, column_count) = self.controller.update(cx, |controller, _| {
+            let columns = floating_root_columns(controller.layout(), group)?;
+            Some((
+                columns.first().is_some_and(|first| *first == column),
+                columns.len(),
+            ))
+        }).unwrap_or((false, 0));
+        let edge = floating_column_core_resize_edge(
+            native_edge,
+            is_first_column,
+            column_count,
+            width_changed,
+            left_edge_moved,
+        );
 
         // Column HWND bounds use physical desktop origins and logical client sizes.
-        // Core receives only the width delta; its edge command preserves internal
-        // Column widths and split positions.
-        let width_delta = native_column_bounds.size.width - current_column_bounds.size.width;
-        let target_group_bounds = match edge {
-            Some(dock_core::FloatingResizeEdge::Left) => Rect::new(
-                Point::new(native_column_bounds.origin.x, current_group_bounds.origin.y),
-                Size::new(
-                    current_group_bounds.size.width + width_delta,
-                    current_group_bounds.size.height,
-                ),
-            ),
-            Some(dock_core::FloatingResizeEdge::Right) => Rect::new(
-                current_group_bounds.origin,
-                Size::new(
-                    current_group_bounds.size.width + width_delta,
-                    current_group_bounds.size.height,
-                ),
-            ),
-            None => Rect::new(
-                Point::new(
-                    current_group_bounds.origin.x,
-                    native_column_bounds.origin.y,
-                ),
-                Size::new(
-                    current_group_bounds.size.width,
-                    native_column_bounds.size.height,
-                ),
-            ),
-        };
+        // Keep the untouched horizontal edge anchored, while also applying the
+        // native Y/height so diagonal corner resizing updates both axes.
+        let target_group_bounds = floating_column_resize_target_bounds(
+            current_group_bounds,
+            native_column_bounds,
+            edge,
+            width_delta,
+        );
         if target_group_bounds == current_group_bounds {
             return;
         }
@@ -7656,6 +7694,118 @@ mod floating_part_pointer_tests {
         assert_eq!(
             clamp_floating_part_local_point(point, Size::new(280.0, 320.0)),
             point,
+        );
+    }
+}
+
+#[cfg(test)]
+mod floating_column_native_resize_tests {
+    use super::{
+        floating_column_core_resize_edge, floating_column_resize_target_bounds,
+    };
+    use dock_core::{FloatingResizeEdge, Point, Rect, Size};
+    use platform::NativeHorizontalResizeEdge;
+
+    #[test]
+    fn left_native_edge_resizes_the_first_core_column() {
+        assert_eq!(
+            floating_column_core_resize_edge(
+                Some(NativeHorizontalResizeEdge::Left),
+                true,
+                2,
+                true,
+                true,
+            ),
+            Some(FloatingResizeEdge::Left),
+        );
+    }
+
+    #[test]
+    fn first_columns_right_edge_is_the_internal_first_column_resize_handle() {
+        assert_eq!(
+            floating_column_core_resize_edge(
+                Some(NativeHorizontalResizeEdge::Right),
+                true,
+                2,
+                true,
+                false,
+            ),
+            Some(FloatingResizeEdge::Left),
+        );
+    }
+
+    #[test]
+    fn single_columns_right_edge_keeps_the_outer_right_resize_semantics() {
+        assert_eq!(
+            floating_column_core_resize_edge(
+                Some(NativeHorizontalResizeEdge::Right),
+                true,
+                1,
+                true,
+                false,
+            ),
+            Some(FloatingResizeEdge::Right),
+        );
+    }
+
+    #[test]
+    fn vertical_resize_updates_height_without_changing_column_width() {
+        let current = Rect::new(
+            Point::new(100.0, 200.0),
+            Size::new(500.0, 400.0),
+        );
+        let native = Rect::new(
+            Point::new(100.0, 200.0),
+            Size::new(500.0, 460.0),
+        );
+
+        assert_eq!(
+            floating_column_resize_target_bounds(current, native, None, 0.0),
+            Rect::new(Point::new(100.0, 200.0), Size::new(500.0, 460.0)),
+        );
+    }
+
+    #[test]
+    fn corner_resize_applies_both_horizontal_and_vertical_changes() {
+        let current = Rect::new(
+            Point::new(100.0, 200.0),
+            Size::new(500.0, 400.0),
+        );
+        let native = Rect::new(
+            Point::new(100.0, 200.0),
+            Size::new(470.0, 430.0),
+        );
+
+        assert_eq!(
+            floating_column_resize_target_bounds(
+                current,
+                native,
+                Some(FloatingResizeEdge::Left),
+                -30.0,
+            ),
+            Rect::new(Point::new(100.0, 200.0), Size::new(470.0, 430.0)),
+        );
+    }
+
+    #[test]
+    fn left_corner_resize_keeps_the_native_top_origin() {
+        let current = Rect::new(
+            Point::new(100.0, 200.0),
+            Size::new(500.0, 400.0),
+        );
+        let native = Rect::new(
+            Point::new(130.0, 170.0),
+            Size::new(470.0, 430.0),
+        );
+
+        assert_eq!(
+            floating_column_resize_target_bounds(
+                current,
+                native,
+                Some(FloatingResizeEdge::Left),
+                -30.0,
+            ),
+            Rect::new(Point::new(130.0, 170.0), Size::new(470.0, 430.0)),
         );
     }
 }
