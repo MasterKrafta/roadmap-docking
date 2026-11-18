@@ -2289,6 +2289,52 @@ fn valid_scale(scale: f32) -> Option<f32> {
     (scale.is_finite() && scale > 0.0).then_some(scale)
 }
 
+fn preferred_drag_host_scale(
+    source_scale: Option<f32>,
+    fallback_scale: Option<f32>,
+) -> Option<f32> {
+    source_scale
+        .and_then(valid_scale)
+        .or_else(|| fallback_scale.and_then(valid_scale))
+}
+
+#[cfg(test)]
+mod drag_host_scale_tests {
+    use super::preferred_drag_host_scale;
+
+    #[test]
+    fn source_window_scale_takes_precedence_over_main_window_scale() {
+        assert_eq!(
+            preferred_drag_host_scale(Some(1.5), Some(1.0)),
+            Some(1.5),
+        );
+    }
+
+    #[test]
+    fn main_window_scale_is_the_fallback_when_source_scale_is_unavailable() {
+        assert_eq!(
+            preferred_drag_host_scale(None, Some(1.25)),
+            Some(1.25),
+        );
+    }
+
+    #[test]
+    fn invalid_source_scale_falls_back_to_a_valid_main_scale() {
+        assert_eq!(
+            preferred_drag_host_scale(Some(f32::NAN), Some(1.0)),
+            Some(1.0),
+        );
+    }
+
+    #[test]
+    fn invalid_source_and_main_scales_are_rejected() {
+        assert_eq!(
+            preferred_drag_host_scale(Some(0.0), Some(f32::INFINITY)),
+            None,
+        );
+    }
+}
+
 #[cfg(test)]
 mod floating_window_chain_target_tests {
     use super::{dock_area_drag_uses_free_area, floating_window_chain_target, DockingWindowAtPoint};
