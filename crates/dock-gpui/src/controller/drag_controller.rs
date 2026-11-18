@@ -1,6 +1,6 @@
 use dock_core::{
-    DockMetrics, DragCancelReason, DragHandle, DragPayload, DragSession, DragSessionError,
-    DragState, DropSource, DropZoneResolver, FloatingGroupId,
+    DockMetrics, DragCancelReason, DragSession, DragSessionError, DropSource, DropZoneResolver,
+    PanelId,
 };
 use gpui::WindowId;
 

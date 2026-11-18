@@ -7,8 +7,8 @@
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use gpui::{
-    Bounds, Context, Entity, Window, WindowBounds, WindowHandle,
-    WindowId, WindowKind, WindowOptions, point, px, size,
+    AppContext, Bounds, Context, Entity, Window, WindowBounds, WindowHandle, WindowId, WindowKind,
+    WindowOptions, point, px, size,
 };
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 

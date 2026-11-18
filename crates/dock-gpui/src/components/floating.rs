@@ -11,9 +11,8 @@ use dock_core::{
 };
 use gpui::{
     App, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
-    KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, WeakEntity, Window, WindowId, canvas,
-    prelude::InteractiveElement as _,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Styled, WeakEntity,
+    Window, WindowId, canvas,
 };
 use crate::{
     dock_components::{
