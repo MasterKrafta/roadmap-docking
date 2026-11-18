@@ -306,8 +306,23 @@ impl Render for FloatingPartHost {
             });
         }
 
+        let column_viewport = match self.part {
+            FloatingPartKind::Column { column } => {
+                Some((column, f32::from(window.bounds().size.height)))
+            }
+            _ => None,
+        };
+        let floating_group = self.floating_group();
         let snapshot = self.controller.update(cx, |controller, _| {
-            floating_host_snapshot(controller, window_id, self.floating_group())
+            if let Some((column, height)) = column_viewport {
+                controller.set_floating_column_viewport(
+                    window_id,
+                    floating_group,
+                    column,
+                    height,
+                );
+            }
+            floating_host_snapshot(controller, window_id, floating_group)
         });
         let snapshot = match snapshot {
             Ok(Some(snapshot)) => snapshot,
