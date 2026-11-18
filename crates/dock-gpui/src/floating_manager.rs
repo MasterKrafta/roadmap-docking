@@ -89,6 +89,22 @@ fn floating_part_screen_bounds(
     )
 }
 
+fn floating_part_reference_group(
+    spec: FloatingPartWindowSnapshot,
+    desired: &[FloatingPartWindowSnapshot],
+) -> Option<NodeId> {
+    let FloatingPartKind::Header { column } = spec.kind else {
+        return None;
+    };
+    desired.iter().find_map(|candidate| match candidate.kind {
+        FloatingPartKind::Group {
+            column: group_column,
+            group,
+        } if group_column == column => Some(group),
+        _ => None,
+    })
+}
+
 fn collect_floating_part_windows(
     layout: &dock_core::Layout,
     metrics: &dock_core::DockMetrics,
@@ -806,14 +822,58 @@ impl FloatingWindowManager {
         spec: FloatingPartWindowSnapshot,
         native_window: NativeWindowId,
         fallback_scale: Option<f32>,
+        reference_group: Option<NodeId>,
     ) -> Option<Rect> {
         let frame = self.native_frame_geometry(native_window, fallback_scale)?;
-        floating_part_outer_bounds(
-            spec.floating_origin,
-            spec.local_origin,
-            spec.bounds.size,
-            frame,
-        )
+        let Some(reference_group) = reference_group else {
+            return floating_part_outer_bounds(
+                spec.floating_origin,
+                spec.local_origin,
+                spec.bounds.size,
+                frame,
+            );
+        };
+        let Some(reference_window) = self
+            .registry
+            .members
+            .get(&WindowGridMember::Group(reference_group))
+            .and_then(|entry| entry.native_window)
+        else {
+            return floating_part_outer_bounds(
+                spec.floating_origin,
+                spec.local_origin,
+                spec.bounds.size,
+                frame,
+            );
+        };
+        let reference_scale = self
+            .registry
+            .members
+            .get(&WindowGridMember::Group(reference_group))
+            .and_then(|entry| entry.native_scale_factor);
+        let Some(reference_frame) = self.native_frame_geometry(reference_window, reference_scale)
+        else {
+            return floating_part_outer_bounds(
+                spec.floating_origin,
+                spec.local_origin,
+                spec.bounds.size,
+                frame,
+            );
+        };
+
+        // A promoted PanelTab DragHost can retain a different native frame from
+        // a newly created Header HWND. Align their client origins, not just their
+        // outer rectangles, so the Header's visible content starts exactly above
+        // the existing Group content.
+        let client_origin = Point::new(
+            spec.floating_origin.x
+                + spec.local_origin.x * reference_frame.scale_factor
+                + reference_frame.client_left_inset,
+            spec.floating_origin.y
+                + frame.client_top_inset
+                + spec.local_origin.y * frame.scale_factor,
+        );
+        frame.outer_bounds_for_client_rect(Rect::new(client_origin, spec.bounds.size))
     }
 
     /// Returns each member's measured native frame using its own HWND and DPI.
@@ -1265,7 +1325,7 @@ impl FloatingWindowManager {
         });
         let bounds = spec
             .and_then(|spec| {
-                self.part_outer_bounds_for_target(spec, native_window, Some(scale))
+                self.part_outer_bounds_for_target(spec, native_window, Some(scale), None)
                     .or(Some(spec.bounds))
             })
             .or_else(|| {
@@ -2757,6 +2817,7 @@ impl FloatingWindowManager {
                 spec,
                 native_window,
                 current_scale,
+                None,
             ).unwrap_or(spec.bounds);
             self.sync_part_window_bounds(native_window, target_bounds);
             entry.bounds = target_bounds;
@@ -4951,6 +5012,7 @@ impl FloatingWindowManager {
     fn create_part_window(
         &mut self,
         spec: FloatingPartWindowSnapshot,
+        reference_group: Option<NodeId>,
         cx: &mut Context<Self>,
     ) -> Option<PanelWindowEntry> {
         let controller = self.controller.clone();
@@ -5092,8 +5154,13 @@ impl FloatingWindowManager {
         let outer_bounds = if spec.main_drag_side.is_some() {
             spec.bounds
         } else {
-            self.part_outer_bounds_for_target(spec, native_window, scale)
-                .unwrap_or(spec.bounds)
+            self.part_outer_bounds_for_target(
+                spec,
+                native_window,
+                scale,
+                reference_group,
+            )
+            .unwrap_or(spec.bounds)
         };
         self.sync_part_window_bounds(native_window, outer_bounds);
 
@@ -5298,8 +5365,9 @@ impl FloatingWindowManager {
             std::mem::replace(&mut self.part_members_by_group, members_by_group);
 
         for spec in desired.iter().copied() {
+            let reference_group = floating_part_reference_group(spec, &desired);
             if !self.registry.members.contains_key(&spec.member) {
-                if let Some(entry) = self.create_part_window(spec, cx) {
+                if let Some(entry) = self.create_part_window(spec, reference_group, cx) {
                     self.registry.members.insert(spec.member, entry);
                 } else {
                     continue;
@@ -5325,7 +5393,12 @@ impl FloatingWindowManager {
                 .or(previous_scale);
             let target_bounds = native_window
                 .and_then(|native_window| {
-                    self.part_outer_bounds_for_target(spec, native_window, current_scale)
+                    self.part_outer_bounds_for_target(
+                        spec,
+                        native_window,
+                        current_scale,
+                        reference_group,
+                    )
                 })
                 .unwrap_or_else(|| {
                     if native_window.is_some() { current_bounds } else { spec.bounds }
