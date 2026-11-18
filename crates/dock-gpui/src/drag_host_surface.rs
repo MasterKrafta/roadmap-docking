@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, rc::Rc};
 
 use dock_core::{
     ColumnRect, DockSide, DragPayload, GroupRect, Node, NodeId, PanelId, PanelRect,
-    Size, SplitterRect,
+    SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div};
@@ -31,7 +31,6 @@ pub(crate) struct DragHostSurface {
     pub(super) group: Option<NodeId>,
     pub(super) dock_area: Option<DockSide>,
     pub(super) render_detached_tab: bool,
-    pub(super) drag_content_size: Size,
     pub(super) handoff_placeholder: bool,
     /// When a Main-origin GroupGrip or detached PanelTab succeeds, this same
     /// HWND becomes the permanent Floating Group host instead of being replaced.
@@ -408,32 +407,54 @@ impl Render for DragHostSurface {
                             .then_some(id)
                     });
                     group.and_then(|group| {
-                        let mut presentation = collect_group_presentations(
-                            controller.layout(),
-                            controller.registry(),
-                            &HashSet::from([group]),
-                            None,
-                        )
-                        .remove(&group)?;
-                        presentation.tabs.retain(|tab| tab.panel == panel);
-                        presentation.tabs.first()?;
                         let (source_host, source_window_id) = {
                             let session = controller.drag().host_session()?;
                             (session.source_host(), session.source_window_id()?)
                         };
                         let rects =
                             source_layout_rects(controller, source_host, source_window_id)?;
-                        let source_header = rects
+                        let group_rect = rects
+                            .groups
+                            .iter()
+                            .find(|group_rect| group_rect.group == group)
+                            .copied()?;
+                        let strip = rects
+                            .tab_strips
+                            .iter()
+                            .find(|strip| strip.group == group)
+                            .copied()?;
+                        let header = rects
                             .tab_headers
                             .iter()
                             .find(|header| header.group == group && header.panel == panel)
                             .copied()?;
+                        let panel_rect = rects
+                            .panels
+                            .iter()
+                            .find(|panel_rect| panel_rect.panel == panel)
+                            .copied()?;
+                        let column = controller.layout().nodes().find_map(|(id, node)| {
+                            matches!(
+                                node,
+                                Node::Column(value) if value.groups.contains(&group)
+                            )
+                            .then_some(id)
+                        });
+                        let mut presentation = collect_group_presentations(
+                            controller.layout(),
+                            controller.registry(),
+                            &HashSet::from([group]),
+                            Some(&rects),
+                        )
+                        .remove(&group)?;
+                        presentation.tabs.retain(|tab| tab.panel == panel);
+                        presentation.tabs.first()?;
                         presentation.active_panel = Some(panel);
                         presentation.collapsed = false;
                         presentation.model_collapsed = false;
                         presentation.auto_collapsed = false;
                         presentation.auto_expanded = false;
-                        Some((source_header, presentation))
+                        Some((column, group_rect, strip, header, panel_rect, presentation))
                     })
                 } else {
                     None
@@ -441,13 +462,16 @@ impl Render for DragHostSurface {
                 Some((view, title, metrics, detached_group))
             })
         {
-            // A detached tab uses the shared Group renderer without drawing a
-            // CompositionHeader in the temporary DragHost.
-            if let Some((source_header, presentation)) = detached_group {
+            // Reuse the exact Core Group geometry. The permanent CompositionHeader
+            // is not part of this DragHost and is created only after the Floating drop.
+            if let Some((column, group, strip, header, panel_rect, presentation)) = detached_group {
                 let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
                 root = root.child(DockGroupView::render_detached_tab(
-                    source_header,
-                    self.drag_content_size,
+                    column,
+                    group,
+                    strip,
+                    header,
+                    panel_rect,
                     &presentation,
                     view,
                     metrics,
