@@ -395,7 +395,6 @@ impl DragHostManager {
                     .update(cx, |manager, _| {
                         manager.native_scale_factor_for_window_id(source_window_id)
                     })
-                    .flatten()
             })
         });
         let owner_scale = preferred_drag_host_scale(
