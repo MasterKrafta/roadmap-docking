@@ -1,4 +1,4 @@
-use dock_core::{DropTarget, PanelId, Point, Rect};
+use dock_core::{DockSide, DropTarget, PanelId, Point, Rect};
 use gpui::{Subscription, WindowHandle, WindowId};
 use platform::{NativeWindowFrameState, NativeWindowId};
 
@@ -12,6 +12,7 @@ pub(super) struct ActiveDragHost {
     pub(super) window_id: WindowId,
     pub(super) native_window: NativeWindowId,
     pub(super) panels: Vec<PanelId>,
+    pub(super) dock_area: Option<DockSide>,
     pub(super) grab_offset: Point,
     pub(super) frame_state: Option<NativeWindowFrameState>,
     /// Remembers whether DragHost began with its native frame removed. A promoted
