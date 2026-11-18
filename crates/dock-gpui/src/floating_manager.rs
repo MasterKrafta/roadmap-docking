@@ -7506,12 +7506,53 @@ mod coordinate_tests {
 #[cfg(test)]
 mod floating_window_chain_drop_destination_tests {
     use super::{
-        floating_chain_drop_target_is_supported, floating_window_chain_direction,
-        floating_window_drop_destination, NativeMoveTarget,
+        floating_chain_drop_target_is_supported, floating_column_for_group,
+        floating_window_chain_direction, floating_window_drop_destination, NativeMoveTarget,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridMember};
-    use dock_core::{DropTarget, DropZone, FloatingGroupId, NodeId, Point};
+    use dock_core::{
+        create_initial_layout, DockCommand, DockMetrics, DockSide, DropTarget, DropZone,
+        FloatingGroupId, Node, NodeId, PanelConstraints, PanelKey, Point, Profile, Rect, Size,
+    };
     use slotmap::Key;
+
+    #[test]
+    fn group_edge_target_resolves_to_its_owning_floating_column() {
+        let metrics = DockMetrics::default();
+        let constraints = PanelConstraints::new(
+            Size::new(80.0, 60.0),
+            Size::new(280.0, 220.0),
+            None,
+            false,
+        );
+        let descriptors = ["layers", "color", "properties", "history"]
+            .into_iter()
+            .map(|key| (PanelKey::new(key).unwrap(), constraints))
+            .collect::<Vec<_>>();
+        let mut layout =
+            create_initial_layout(Profile::Photoshop, &descriptors, metrics).unwrap();
+
+        let column = layout.main_area(DockSide::Right).unwrap().root;
+        let group = match layout.node(column).unwrap() {
+            Node::Column(column) => column.groups[1],
+            other => panic!("expected a Column root, got {other:?}"),
+        };
+        layout
+            .apply(
+                DockCommand::Float {
+                    node: column,
+                    bounds: Rect::new(Point::new(120.0, 80.0), Size::new(420.0, 360.0)),
+                },
+                &metrics,
+            )
+            .unwrap();
+        let (floating, _) = layout.floating_groups().next().unwrap();
+
+        assert_eq!(
+            floating_column_for_group(&layout, floating, group),
+            Some(column),
+        );
+    }
 
     #[test]
     fn floating_window_drop_maps_all_four_zones_to_grid_directions() {
