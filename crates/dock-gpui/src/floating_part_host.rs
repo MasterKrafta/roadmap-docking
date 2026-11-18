@@ -9,7 +9,6 @@ use gpui::{
     App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, Styled,
     WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
 };
-use slotmap::Key as _;
 use ui::Theme;
 
 use crate::{
@@ -40,7 +39,7 @@ use super::super::{
 /// permanent Floating windows are created by FloatingWindowManager as parts.
 pub(crate) struct FloatingPartHost {
     controller: Entity<DockController>,
-    floating_group: FloatingGroupId,
+    floating_group: Option<FloatingGroupId>,
     part: FloatingPartKind,
     main_drag_side: Option<DockSide>,
     theme: Theme,
@@ -74,7 +73,7 @@ impl FloatingPartHost {
     ) -> Self {
         Self::new(
             controller,
-            floating_group,
+            Some(floating_group),
             FloatingPartKind::Header { column },
             theme,
             manager,
@@ -107,7 +106,7 @@ impl FloatingPartHost {
     ) -> Self {
         let mut host = Self::new(
             controller,
-            FloatingGroupId::null(),
+            None,
             part,
             theme,
             manager,
@@ -120,13 +119,13 @@ impl FloatingPartHost {
         if self.main_drag_side.take().is_none() {
             return false;
         }
-        self.floating_group = floating_group;
+        self.floating_group = Some(floating_group);
         true
     }
 
     fn new(
         controller: Entity<DockController>,
-        floating_group: FloatingGroupId,
+        floating_group: Option<FloatingGroupId>,
         part: FloatingPartKind,
         theme: Theme,
         manager: WeakEntity<FloatingWindowManager>,
@@ -169,7 +168,7 @@ impl Render for FloatingPartHost {
         if let Some((current_group, current_column)) = self.controller.update(cx, |controller, _| {
             floating_part_owner_and_column(controller.layout(), self.part)
         }) {
-            self.floating_group = current_group;
+            self.floating_group = Some(current_group);
             if let FloatingPartKind::Group { group, .. } = self.part {
                 self.part = FloatingPartKind::Group {
                     column: current_column,
@@ -209,7 +208,7 @@ impl Render for FloatingPartHost {
         }
 
         let snapshot = self.controller.update(cx, |controller, _| {
-            floating_host_snapshot(controller, window_id, self.floating_group)
+            floating_host_snapshot(controller, window_id, self.floating_group())
         });
         let snapshot = match snapshot {
             Ok(Some(snapshot)) => snapshot,
@@ -259,7 +258,7 @@ impl Render for FloatingPartHost {
                 );
                 let pointer_column_rect = ColumnRect::new(column, pointer_header_rect);
                 let pointer_input = render_floating_pointer_input(
-                    self.floating_group,
+                    self.floating_group(),
                     self.manager.clone(),
                     self.controller.clone(),
                     window.window_handle().window_id(),
@@ -279,7 +278,7 @@ impl Render for FloatingPartHost {
                     Some(DockWindowPart::Header { column }),
                     column_rect.rect.origin,
                 );
-                let close_group = self.floating_group;
+                let close_group = self.floating_group();
                 let manager_for_close = self.manager.clone();
                 let close_action = Box::new(move |app: &mut App| {
                     if let Some(manager) = manager_for_close.upgrade() {
@@ -506,6 +505,11 @@ impl FloatingPartHost {
         }
     }
 
+    fn floating_group(&self) -> FloatingGroupId {
+        self.floating_group
+            .expect("FloatingPartHost must receive its Core FloatingGroup before permanent rendering")
+    }
+
     fn render_group(
         &mut self,
         window: &mut Window,
@@ -621,7 +625,7 @@ impl FloatingPartHost {
             });
 
         let pointer_input = render_floating_pointer_input(
-            self.floating_group,
+            self.floating_group(),
             self.manager.clone(),
             self.controller.clone(),
             window.window_handle().window_id(),
@@ -684,7 +688,7 @@ impl FloatingPartHost {
         // A new Group HWND may render synchronously while the manager is still
         // reconciling it. Defer both the handoff lookup and its confirmation.
         let manager = self.manager.clone();
-        let floating_group = self.floating_group;
+        let floating_group = self.floating_group();
         window.on_next_frame(move |_, app| {
             let Some(manager) = manager.upgrade() else {
                 return;
