@@ -4898,22 +4898,32 @@ impl FloatingWindowManager {
         };
 
         let window = match cx.open_window(options, move |_, app| {
-            let host = match spec.kind {
-                FloatingPartKind::Header { column } => FloatingPartHost::new_header(
+            let host = if let Some(side) = spec.main_drag_side {
+                FloatingPartHost::new_main_drag(
                     controller,
-                    spec.floating_group,
-                    column,
+                    side,
+                    spec.kind,
                     theme,
                     manager,
-                ),
-                FloatingPartKind::Group { column, group } => FloatingPartHost::new_group(
-                    controller,
-                    spec.floating_group,
-                    column,
-                    group,
-                    theme,
-                    manager,
-                ),
+                )
+            } else {
+                match spec.kind {
+                    FloatingPartKind::Header { column } => FloatingPartHost::new_header(
+                        controller,
+                        spec.floating_group,
+                        column,
+                        theme,
+                        manager,
+                    ),
+                    FloatingPartKind::Group { column, group } => FloatingPartHost::new_group(
+                        controller,
+                        spec.floating_group,
+                        column,
+                        group,
+                        theme,
+                        manager,
+                    ),
+                }
             };
             app.new(|_| host)
         }) {
@@ -5001,9 +5011,12 @@ impl FloatingWindowManager {
             .scale_factor(native_window)
             .ok()
             .filter(|scale| scale.is_finite() && *scale > 0.0);
-        let outer_bounds = self
-            .part_outer_bounds_for_target(spec, native_window, scale)
-            .unwrap_or(spec.bounds);
+        let outer_bounds = if spec.main_drag_side.is_some() {
+            spec.bounds
+        } else {
+            self.part_outer_bounds_for_target(spec, native_window, scale)
+                .unwrap_or(spec.bounds)
+        };
         self.sync_part_window_bounds(native_window, outer_bounds);
 
         Some(PanelWindowEntry {
@@ -5018,7 +5031,7 @@ impl FloatingWindowManager {
             native_scale_factor: scale,
             native_bounds_dirty: false,
             resize_enabled: false,
-            host_group: Some(spec.floating_group),
+            host_group: spec.main_drag_side.is_none().then_some(spec.floating_group),
             visibility: PanelWindowVisibility::Hidden,
         })
     }
