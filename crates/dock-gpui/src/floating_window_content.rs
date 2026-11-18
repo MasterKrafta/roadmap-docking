@@ -24,11 +24,10 @@ use super::super::{
     splitter::SplitterView,
 };
 
-/// Content view for one legacy whole-composition Floating window.
+/// Shared Floating presentation helpers.
 ///
-/// Permanent Floating Headers and Groups use FloatingPartHost. This renderer
-/// remains for the transitional whole-window host but shares the same
-/// independent Header and Group components as Main.
+/// `render` remains the legacy whole-composition path. `render_column` is used
+/// by permanent Floating Column hosts and shares the Main Column/Group renderers.
 pub(super) struct FloatingWindowContent;
 
 impl FloatingWindowContent {
