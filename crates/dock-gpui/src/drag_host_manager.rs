@@ -2361,10 +2361,11 @@ mod floating_window_chain_target_tests {
         use slotmap::SlotMap;
 
         let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
         let source = groups.insert(());
         let target_group = groups.insert(());
-        let source_node = NodeId::null();
-        let target_node = NodeId::null();
+        let source_node = nodes.insert(());
+        let target_node = nodes.insert(());
         let target_roles = [
             Some(DockWindowRole::Floating { group: target_group }),
             Some(DockWindowRole::FloatingPart {
