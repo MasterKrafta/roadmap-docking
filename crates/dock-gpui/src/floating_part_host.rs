@@ -190,9 +190,9 @@ impl Render for FloatingPartHost {
             return self.render_main_drag_part(window, cx, side);
         }
 
-        // A preserved Group HWND can become part of a different Core FloatingGroup
-        // and Column after a direct GroupGrip extraction. Resolve both identities from
-        // the current Layout so geometry and hit-testing follow the unchanged HWND.
+        // A persistent Column HWND or preserved Group HWND can survive a Core
+        // ownership transfer. Resolve the current FloatingGroup and Column from Layout
+        // so geometry, hit-testing and native resize callbacks follow the unchanged HWND.
         if let Some((current_group, current_column)) = self.controller.update(cx, |controller, _| {
             floating_part_owner_and_column(controller.layout(), self.part)
         }) {
