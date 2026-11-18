@@ -6,7 +6,7 @@ use dock_core::{FloatingGroupId, NodeId};
 /// Current Floating presentation uses one member per Core Column; Header and Group
 /// variants are retained only for transitional/legacy host paths.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[allow(dead_code)] // Header and Group variants are consumed by the dedicated-window stage.
+#[allow(dead_code)] // Header and Group variants remain for transitional migration paths.
 pub(crate) enum WindowGridMember {
     FloatingComposition(FloatingGroupId),
     /// Complete native window containing one Core Column's Header and Group stack.
@@ -21,7 +21,7 @@ impl WindowGridMember {
     }
 
     /// Returns the legacy Core FloatingGroup represented by this member.
-    /// Header and Group members will resolve through the dedicated host registry.
+    /// Column, Header and Group members resolve through the member-owner registry.
     pub(crate) const fn floating_group(self) -> Option<FloatingGroupId> {
         match self {
             Self::FloatingComposition(group) => Some(group),
