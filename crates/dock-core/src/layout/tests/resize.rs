@@ -1280,6 +1280,71 @@ fn floating_edge_minimum_width_keeps_non_edge_columns_at_current_widths() {
 }
 
 #[test]
+fn floating_first_column_right_edge_resize_pushes_later_columns_without_resizing_them() {
+    let metrics = DockMetrics::default();
+    let (mut layout, floating, _split, columns) = three_column_floating_layout(&metrics);
+    let initial_bounds = layout.floating_group(floating).unwrap().bounds;
+    let before = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let before_columns = columns
+        .iter()
+        .map(|column_id| {
+            before
+                .columns
+                .iter()
+                .find(|rect| rect.column == *column_id)
+                .copied()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let delta = 36.0;
+
+    layout
+        .apply(
+            DockCommand::ResizeFloatingBoundsFromEdge {
+                group: floating,
+                bounds: Rect::new(
+                    initial_bounds.origin,
+                    Size::new(
+                        initial_bounds.size.width + delta,
+                        initial_bounds.size.height,
+                    ),
+                ),
+                // Floating's first Column owns the native right-edge handle.
+                // Core's Left selector resizes that first Column and pushes
+                // every following Column by the same delta.
+                edge: crate::FloatingResizeEdge::Left,
+                scale_factor: 1.0,
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let after = layout.compute_floating_rects(floating, &metrics).unwrap();
+    for (index, column_id) in columns.iter().copied().enumerate() {
+        let current = after
+            .columns
+            .iter()
+            .find(|rect| rect.column == column_id)
+            .copied()
+            .unwrap();
+        let previous = before_columns[index];
+
+        if index == 0 {
+            assert!((current.rect.size.width - (previous.rect.size.width + delta)).abs() < 1.0e-3);
+            assert!((current.rect.origin.x - previous.rect.origin.x).abs() < 1.0e-3);
+        } else {
+            assert!((current.rect.size.width - previous.rect.size.width).abs() < 1.0e-3);
+            assert!((current.rect.origin.x - (previous.rect.origin.x + delta)).abs() < 1.0e-3);
+        }
+    }
+
+    let resized = layout.floating_group(floating).unwrap().bounds;
+    assert_eq!(resized.origin, initial_bounds.origin);
+    assert!((resized.size.width - (initial_bounds.size.width + delta)).abs() < 1.0e-3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn floating_left_edge_resize_changes_only_first_column_and_keeps_inner_splitters_still() {
     let metrics = DockMetrics::default();
     let (mut layout, floating, split, columns) = three_column_floating_layout(&metrics);
