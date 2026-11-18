@@ -9,8 +9,8 @@ use dock_core::{
     GroupRect, NodeId, Point, Rect, TabHeaderRect, TabStripRect, PanelRect,
 };
 use gpui::{
-    App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, Styled,
-    WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
+    App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, ScrollHandle,
+    Styled, WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
 };
 use ui::Theme;
 
@@ -28,7 +28,7 @@ use super::{
     floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_part_owner_and_column, handle_floating_escape, observe_floating_focus_loss,
     render_floating_pointer_input, FloatingHostOpenMenu, FloatingHostSnapshot, FloatingPartKind,
-    FloatingTabPress, FloatingGroupPress,
+    FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
 };
 use super::super::{
     context_menu::{
@@ -56,6 +56,7 @@ pub(crate) struct FloatingPartHost {
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
+    column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
 }
@@ -67,6 +68,22 @@ impl FloatingPartHost {
         }
         self.show_close_button = show;
         true
+    }
+
+    pub(crate) fn new_column(
+        controller: Entity<DockController>,
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
+    ) -> Self {
+        Self::new(
+            controller,
+            Some(floating_group),
+            FloatingPartKind::Column { column },
+            theme,
+            manager,
+        )
     }
 
     pub(crate) fn new_header(
@@ -149,6 +166,7 @@ impl FloatingPartHost {
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
             pointer_capture: Rc::new(Cell::new(None)),
+            column_scroll_handles: HashMap::new(),
             root_focus_handle: None,
             focus_observed: false,
         }
@@ -174,12 +192,18 @@ impl Render for FloatingPartHost {
             floating_part_owner_and_column(controller.layout(), self.part)
         }) {
             self.floating_group = Some(current_group);
-            if let FloatingPartKind::Group { group, .. } = self.part {
-                self.part = FloatingPartKind::Group {
+            self.part = match self.part {
+                FloatingPartKind::Column { .. } => FloatingPartKind::Column {
+                    column: current_column,
+                },
+                FloatingPartKind::Group { group, .. } => FloatingPartKind::Group {
                     column: current_column,
                     group,
-                };
-            }
+                },
+                FloatingPartKind::Header { .. } => FloatingPartKind::Header {
+                    column: current_column,
+                },
+            };
         }
 
         let window_id = window.window_handle().window_id();
@@ -206,7 +230,7 @@ impl Render for FloatingPartHost {
             }
             self.manager_observed = true;
         }
-        if matches!(self.part, FloatingPartKind::Group { .. }) {
+        if !matches!(self.part, FloatingPartKind::Header { .. }) {
             self.controller.update(cx, |controller, panel_cx| {
                 controller.ensure_panel_views(window, panel_cx);
             });
@@ -229,6 +253,15 @@ impl Render for FloatingPartHost {
         };
 
         match self.part {
+            FloatingPartKind::Column { column } => div()
+                .id(format!("floating-column-part-window-root-{:?}", column))
+                .track_focus(&focus_handle)
+                .relative()
+                .size_full()
+                .overflow_hidden()
+                .bg(rgb(self.theme.colors.panel_surface_background))
+                .child(self.render_floating_column(window, cx, &snapshot, column))
+                .into_any_element(),
             FloatingPartKind::Header { column } => {
                 let root = div()
                     .id(format!("floating-header-host-root-{:?}", column))
@@ -434,6 +467,10 @@ impl FloatingPartHost {
         side: DockSide,
     ) -> gpui::AnyElement {
         match self.part {
+            FloatingPartKind::Column { column } => div()
+                .id(format!("main-drag-column-waiting-{:?}", column))
+                .size_full()
+                .into_any_element(),
             FloatingPartKind::Header { column } => {
                 let header = self.controller.update(cx, |controller, _| {
                     let session = controller.drag().host_session()?;
@@ -604,6 +641,288 @@ impl FloatingPartHost {
     fn floating_group(&self) -> FloatingGroupId {
         self.floating_group
             .expect("FloatingPartHost must receive its Core FloatingGroup before permanent rendering")
+    }
+
+    fn render_floating_column(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        snapshot: &FloatingHostSnapshot,
+        column_id: NodeId,
+    ) -> impl IntoElement {
+        let window_id = window.window_handle().window_id();
+        let Some(column_rect) = snapshot
+            .rects
+            .columns
+            .iter()
+            .find(|candidate| candidate.column == column_id)
+            .copied()
+        else {
+            return div().id("missing-floating-column").size_full();
+        };
+        let group_ids = snapshot
+            .column_groups
+            .get(&column_id)
+            .cloned()
+            .unwrap_or_default();
+        let group_id_set = group_ids.iter().copied().collect::<HashSet<_>>();
+        let groups = snapshot
+            .rects
+            .groups
+            .iter()
+            .filter(|group| group_id_set.contains(&group.group))
+            .copied()
+            .collect::<Vec<_>>();
+        let tab_strips = snapshot
+            .rects
+            .tab_strips
+            .iter()
+            .filter(|strip| group_id_set.contains(&strip.group))
+            .copied()
+            .collect::<Vec<_>>();
+        let tab_headers = snapshot
+            .rects
+            .tab_headers
+            .iter()
+            .filter(|header| group_id_set.contains(&header.group))
+            .copied()
+            .collect::<Vec<_>>();
+        let tab_overflows = snapshot
+            .rects
+            .tab_overflows
+            .iter()
+            .filter(|overflow| group_id_set.contains(&overflow.group))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let transferred_panels = self.controller.update(cx, |controller, _| {
+            controller.transferred_panel_views_from(window_id)
+        });
+        let transfer = PanelTransferPresentation::new(
+            &snapshot.group_presentations,
+            &transferred_panels,
+        );
+        let mut presentations = snapshot.group_presentations.clone();
+        transfer.apply_to_group_presentations(&mut presentations);
+
+        let dragged_group = self.controller.update(cx, |controller, _| {
+            controller.dragged_group_from(window_id)
+        });
+        let active_panels =
+            active_panels_for_groups(group_ids.iter().copied(), &presentations, dragged_group);
+        let panels = transfer
+            .panel_rects_with_active_replacements(&snapshot.rects.panels)
+            .into_iter()
+            .filter(|panel| {
+                active_panels.contains(&panel.panel)
+                    && !transfer.transferred_panels.contains(&panel.panel)
+                    && !transfer.panels_in_hidden_groups.contains(&panel.panel)
+            })
+            .map(|panel| {
+                let view = self.controller.update(cx, |controller, panel_cx| {
+                    controller.panel_view(panel.panel, window, panel_cx)
+                });
+                (panel, view)
+            })
+            .collect::<Vec<_>>();
+
+        let has_vertical_overflow = snapshot
+            .rects
+            .vertical_overflow
+            .iter()
+            .any(|overflow| overflow.owner == column_id);
+        self.column_scroll_handles
+            .retain(|column, _| *column == column_id && has_vertical_overflow);
+        if has_vertical_overflow {
+            self.column_scroll_handles.entry(column_id).or_default();
+        }
+
+        let show_close_button = snapshot
+            .rects
+            .columns
+            .iter()
+            .max_by(|left, right| {
+                (left.rect.origin.x + left.rect.size.width)
+                    .total_cmp(&(right.rect.origin.x + right.rect.size.width))
+            })
+            .is_some_and(|rightmost| rightmost.column == column_id);
+        let close_action = if show_close_button {
+            let close_group = snapshot.floating.group;
+            let manager_for_close = self.manager.clone();
+            Some(Box::new(move |app: &mut App| {
+                if let Some(manager) = manager_for_close.upgrade() {
+                    let _ = manager.update(app, |manager, manager_cx| {
+                        if let Err(error) = manager.close_window_grid(close_group, manager_cx) {
+                            tracing::warn!(%error, ?close_group, "could not close the Floating WindowGrid");
+                        }
+                    });
+                }
+            }) as Box<dyn Fn(&mut App) + 'static>)
+        } else {
+            None
+        };
+
+        let pointer_input = render_floating_pointer_input(
+            self.floating_group(),
+            self.manager.clone(),
+            self.controller.clone(),
+            window_id,
+            Some(snapshot.floating.rect),
+            floating_dock_component_tab_zones(snapshot),
+            Some((
+                snapshot.floating.rect,
+                snapshot.rects.columns.clone(),
+                snapshot.rects.splitters.clone(),
+                snapshot.metrics,
+                show_close_button,
+            )),
+            false,
+            self.tab_press.clone(),
+            self.group_press.clone(),
+            self.pointer_capture.clone(),
+            Some(DockWindowPart::Column { column: column_id }),
+            column_rect.rect.origin,
+        );
+
+        let toggle_host = cx.entity().downgrade();
+        let toggle_context_menu: GroupMenuToggle = Rc::new(move |target, anchor, app| {
+            if let Some(host) = toggle_host.upgrade() {
+                host.update(app, |host, host_cx| {
+                    host.open_context_menu = if host
+                        .open_context_menu
+                        .as_ref()
+                        .is_some_and(|open| open.target == target)
+                    {
+                        None
+                    } else {
+                        Some(FloatingHostOpenMenu {
+                            target,
+                            anchor,
+                            open_submenu: None,
+                        })
+                    };
+                    host_cx.notify();
+                });
+            }
+        });
+
+        let mut root = div()
+            .id(format!("floating-column-content-{:?}", column_id))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.panel_surface_background))
+            .child(pointer_input)
+            .child(FloatingWindowContent::render_column(
+                snapshot.floating,
+                column_rect,
+                column_rect.rect.origin,
+                &groups,
+                &panels,
+                dragged_group,
+                &tab_strips,
+                &tab_headers,
+                &tab_overflows,
+                &presentations,
+                &snapshot.column_groups,
+                &snapshot.column_modes,
+                &snapshot.rail_display_orders,
+                &snapshot.rects.splitters,
+                snapshot.resize_preview.and_then(|preview| preview.splitter),
+                &snapshot.rects.vertical_overflow,
+                &self.column_scroll_handles,
+                None,
+                snapshot.metrics,
+                true,
+                show_close_button,
+                close_action,
+                None,
+                toggle_context_menu,
+                self.controller.clone(),
+                self.theme,
+            ));
+
+        if snapshot.drag_preview.is_some() {
+            root = root.child(render_floating_drop_overlay(
+                snapshot,
+                column_rect.rect.origin,
+                self.theme,
+            ));
+        }
+
+        if let Some(open) = self.open_context_menu.as_ref()
+            && context_menu_target_exists(
+                open.target,
+                &presentations,
+                &snapshot.column_ids,
+                Some(&snapshot.rects),
+            )
+        {
+            let entries = build_context_menu_entries(
+                open.target,
+                &snapshot.rects,
+                &presentations,
+                &snapshot.column_modes,
+                self.controller.clone(),
+                false,
+            );
+            if !entries.is_empty() {
+                let submenu_host = cx.entity().downgrade();
+                let toggle_context_submenu: ContextMenuSubmenuToggle = Rc::new(move |index, app| {
+                    if let Some(host) = submenu_host.upgrade() {
+                        host.update(app, |host, host_cx| {
+                            if let Some(open) = host.open_context_menu.as_mut() {
+                                open.open_submenu = index;
+                                host_cx.notify();
+                            }
+                        });
+                    }
+                });
+                let dismiss_host = cx.entity().downgrade();
+                let dismiss_context_menu: ContextMenuDismiss = Rc::new(move |app| {
+                    if let Some(host) = dismiss_host.upgrade() {
+                        host.update(app, |host, host_cx| {
+                            host.open_context_menu = None;
+                            host_cx.notify();
+                        });
+                    }
+                });
+                root = root.child(ContextMenu::render(
+                    "floating-column-context-menu",
+                    Rect::new(Point::ZERO, column_rect.rect.size),
+                    open.anchor,
+                    &entries,
+                    open.open_submenu,
+                    ContextMenuCallbacks {
+                        on_submenu: toggle_context_submenu,
+                        on_dismiss: dismiss_context_menu,
+                    },
+                    self.theme,
+                ));
+            }
+        }
+
+        let manager_for_escape = self.manager.clone();
+        let controller_for_escape = self.controller.clone();
+        let tab_press_for_escape = self.tab_press.clone();
+        let group_press_for_escape = self.group_press.clone();
+        let pointer_capture_for_escape = self.pointer_capture.clone();
+        let context_menu_is_open = self.open_context_menu.is_some();
+        root = root.capture_key_down(move |event, window, app| {
+            handle_floating_escape(
+                event,
+                context_menu_is_open,
+                &manager_for_escape,
+                &controller_for_escape,
+                &tab_press_for_escape,
+                &group_press_for_escape,
+                &pointer_capture_for_escape,
+                window,
+                app,
+            );
+        });
+
+        root
     }
 
     fn render_group(
