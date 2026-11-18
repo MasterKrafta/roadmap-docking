@@ -329,6 +329,92 @@ impl Layout {
 
         Ok(output)
     }
+
+    /// Resolves one Floating Column independently at its native viewport height.
+    ///
+    /// Floating Column HWNDs share horizontal Core geometry but own their vertical
+    /// client heights. This computes the selected Column's complete subtree without
+    /// changing the heights of sibling Columns in the same Floating composition.
+    pub fn compute_floating_column_rects(
+        &self,
+        group: crate::FloatingGroupId,
+        column: crate::NodeId,
+        height: f32,
+        metrics: &DockMetrics,
+    ) -> Result<LayoutRects, ComputeRectsError> {
+        if !height.is_finite() || height <= 0.0 {
+            return Err(ComputeRectsError::Geometry(GeometryError::NonPositiveDimension));
+        }
+
+        let floating = self
+            .floating_group(group)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let area = self
+            .dock_area(floating.area)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+
+        if !self.chrome().dock_visible() {
+            return Ok(LayoutRects::default());
+        }
+
+        let root_columns = match self.node(area.root) {
+            Some(Node::Column(_)) if area.root == column => vec![column],
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().all(|child| {
+                        matches!(self.node(*child), Some(Node::Column(_)))
+                    })
+                    && split.children.contains(&column) =>
+            {
+                split.children.clone()
+            }
+            _ => return Err(ComputeRectsError::InvalidLayoutState),
+        };
+        if !root_columns.contains(&column) {
+            return Err(ComputeRectsError::InvalidLayoutState);
+        }
+
+        let base_rects = self.compute_floating_rects(group, metrics)?;
+        let base_column = base_rects
+            .columns
+            .iter()
+            .find(|candidate| candidate.column == column)
+            .ok_or(ComputeRectsError::InvalidLayoutState)?;
+        let column_rect = Rect::new(
+            base_column.rect.origin,
+            Size::new(base_column.rect.size.width, height),
+        );
+        column_rect
+            .validate_non_empty()
+            .map_err(ComputeRectsError::Geometry)?;
+
+        let viewport = Rect::new(
+            Point::ZERO,
+            Size::new(floating.bounds.size.width, height),
+        );
+        let mut output = LayoutRects {
+            viewport: Some(viewport),
+            ..LayoutRects::default()
+        };
+        output.floating_groups.push(FloatingGroupRect::new(
+            group,
+            viewport,
+            floating.z_order,
+        ));
+
+        let mut minimum_sizes = HashMap::new();
+        node_layout::layout_node(
+            self,
+            column,
+            column_rect,
+            metrics,
+            Some(area.root),
+            &mut minimum_sizes,
+            &mut output,
+        )?;
+
+        Ok(output)
+    }
 }
 
 #[cfg(test)]
