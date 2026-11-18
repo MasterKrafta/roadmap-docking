@@ -1,8 +1,11 @@
-use dock_core::{PanelRect, Point};
-use gpui::{AnyView, InteractiveElement, IntoElement, ParentElement, Styled, div, px, rgb};
+use dock_core::{PanelId, PanelRect, Point};
+use gpui::{
+    AnyView, Entity, InteractiveElement, IntoElement, ParentElement, Styled, Window, WindowId, div,
+    px, rgb,
+};
 use ui::Theme;
 
-use crate::dock_components::PanelContent;
+use crate::{DockController, dock_components::PanelContent};
 
 /// Places cached panel views in the rectangles emitted by dock-core.
 ///
@@ -16,6 +19,42 @@ use crate::dock_components::PanelContent;
 pub struct PanelHost;
 
 impl PanelHost {
+    /// Confirms that transferred views are no longer mounted by this source host.
+    ///
+    /// DragHost may mount a transferred PanelView only after this window has
+    /// rendered its placeholder (or its replacement active tab).
+    pub(crate) fn confirm_source_detached_after_render(
+        controller: &Entity<DockController>,
+        window: &mut Window,
+        source_window_id: WindowId,
+        pending_transfers: Vec<PanelId>,
+        panel_views: &[(PanelRect, Option<AnyView>)],
+    ) {
+        if pending_transfers.is_empty()
+            || !pending_transfers.iter().all(|panel| {
+                panel_views
+                    .iter()
+                    .all(|(rect, view)| rect.panel != *panel || view.is_none())
+            })
+        {
+            return;
+        }
+
+        let controller = controller.clone();
+        window.on_next_frame(move |_, app| {
+            controller.update(app, |controller, controller_cx| {
+                let mut confirmed = false;
+                for panel in pending_transfers {
+                    confirmed |=
+                        controller.confirm_panel_view_source_detached(panel, source_window_id);
+                }
+                if confirmed {
+                    controller_cx.notify();
+                }
+            });
+        });
+    }
+
     pub(crate) fn render(
         panels: Vec<(PanelRect, Option<AnyView>)>,
         coordinate_origin: Point,
