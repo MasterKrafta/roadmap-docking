@@ -19,7 +19,7 @@ use self::open_context_menu::OpenContextMenu;
 
 use crate::{
     dock_metrics_from_theme, DockController, DockControllerConfigError, DockTheme,
-    DragHostManager, FloatingWindowManager,
+    DragHostManager, DragSourceHost, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
         ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
@@ -29,7 +29,7 @@ use crate::{
     },
     geometry::{host_geometry_from_gpui_bounds, point_from_gpui},
     input::{
-        PointerPress, ResizePreview, ResizePreviewKind, floating_bounds, map_hit_test_point,
+        PointerPress, ResizePreview, ResizePreviewKind, map_hit_test_point,
         register_pointer_events, resize_preview_for_interaction, scroll_adjusted_hit_test_point,
         interaction::DockInteractionCoordinator,
     },
@@ -429,7 +429,15 @@ impl Render for DockHost {
                 DropOverlay::resolve_active_zone(resolver, drag_preview);
             let free_area_preview_bounds = drag_preview
                 .filter(|preview| preview.target == Some(DropTarget::FreeArea))
-                .and_then(|preview| floating_bounds(controller, preview.payload, preview.point));
+                .and_then(|preview| {
+                    crate::input::drag::floating_bounds_for_drag(
+                        controller,
+                        preview.payload,
+                        preview.point,
+                        DragSourceHost::Main,
+                        None,
+                    )
+                });
             let resize_preview = controller
                 .resize_interaction_for_window(main_window_id)
                 .and_then(|interaction| {
