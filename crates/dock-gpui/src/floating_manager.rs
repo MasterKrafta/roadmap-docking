@@ -6084,14 +6084,17 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .or(previous_scale);
             let mut target_spec = spec;
+            let mut target_vertical_origin_offset = None;
             if let Some(entry) = self.registry.members.get(&spec.member)
                 && let Some(height) = entry.native_vertical_height
             {
                 let stored_scale = entry.native_scale_factor.unwrap_or(1.0);
                 let target_scale = current_scale.unwrap_or(stored_scale);
                 let logical_offset = entry.native_vertical_origin_offset / stored_scale;
+                let physical_offset = logical_offset * target_scale;
                 target_spec.bounds.size.height = height;
-                target_spec.floating_origin.y += logical_offset * target_scale;
+                target_spec.floating_origin.y += physical_offset;
+                target_vertical_origin_offset = Some(physical_offset);
             }
             let target_bounds = native_window
                 .and_then(|native_window| {
@@ -6119,6 +6122,9 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
                 }
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
                     entry.bounds = target_bounds;
+                    if let Some(offset) = target_vertical_origin_offset {
+                        entry.native_vertical_origin_offset = offset;
+                    }
                     entry.native_scale_factor = current_scale;
                     entry.native_bounds_dirty = resizing_this_member;
                 }
