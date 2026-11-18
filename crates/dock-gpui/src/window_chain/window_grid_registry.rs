@@ -333,7 +333,7 @@ impl WindowGridRegistry {
         })
     }
 
-    fn is_valid(&self) -> bool {
+    pub(super) fn is_valid(&self) -> bool {
         let mut indexed_members = HashSet::new();
 
         for (grid_id, grid) in &self.grids {
