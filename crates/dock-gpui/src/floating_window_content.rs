@@ -301,7 +301,7 @@ impl FloatingWindowContent {
                 active_splitter,
                 overflow,
                 scroll_handles.get(&column.column).cloned(),
-                controller,
+                controller.clone(),
                 theme,
                 Some(floating.group),
                 show_header,
