@@ -9,7 +9,8 @@ pub(super) struct NativeResizeSession {
     pub(super) member: WindowGridMember,
     pub(super) window_id: WindowId,
     pub(super) start_bounds: Rect,
-    /// Initial client bounds of the resized Column HWND; None for the legacy group host.
+    /// Initial native bounds of the resized Column: physical outer origin and logical client size.
+    /// None for the legacy group host.
     pub(super) start_column_bounds: Option<Rect>,
     pub(super) transaction_started: bool,
 }
