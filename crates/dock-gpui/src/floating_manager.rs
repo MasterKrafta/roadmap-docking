@@ -5028,24 +5028,25 @@ impl FloatingWindowManager {
         window_id: WindowId,
         cx: &mut Context<Self>,
     ) -> Option<Vec<PanelId>> {
-        let group_member = self.registry.members.iter().find_map(|(member, entry)| {
+        let host_node = self.registry.members.iter().find_map(|(member, entry)| {
             match member {
-                WindowGridMember::Group(group_node)
+                WindowGridMember::Column(column_node)
+                | WindowGridMember::Group(column_node)
                     if entry.window_id == window_id
                         && entry.host_group == Some(group)
                         && entry.visibility == PanelWindowVisibility::Visible =>
                 {
-                    Some(*group_node)
+                    Some(*column_node)
                 }
                 _ => None,
             }
         });
 
-        if let Some(group_node) = group_member {
-            let group_panels = self.controller.update(cx, |controller, _| {
+        if let Some(host_node) = host_node {
+            let host_panels = self.controller.update(cx, |controller, _| {
                 let mut panels = Vec::new();
                 let mut seen = HashSet::new();
-                collect_panel_order(controller.layout(), group_node, &mut panels, &mut seen);
+                collect_panel_order(controller.layout(), host_node, &mut panels, &mut seen);
                 panels
             });
             let drag_host = self.drag_host_manager.as_ref()?.upgrade()?;
@@ -5054,7 +5055,7 @@ impl FloatingWindowManager {
             })?;
             let local_required = required
                 .into_iter()
-                .filter(|panel| group_panels.contains(panel))
+                .filter(|panel| host_panels.contains(panel))
                 .collect::<Vec<_>>();
             return Some(local_required);
         }
@@ -5083,7 +5084,7 @@ impl FloatingWindowManager {
     ) {
         let part_member = self.registry.members.iter().find_map(|(member, entry)| {
             match member {
-                WindowGridMember::Group(_)
+                WindowGridMember::Column(_) | WindowGridMember::Group(_)
                     if entry.window_id == window_id
                         && entry.host_group == Some(group)
                         && entry.visibility == PanelWindowVisibility::Visible =>
