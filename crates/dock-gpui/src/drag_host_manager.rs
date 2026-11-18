@@ -1059,7 +1059,9 @@ impl DragHostManager {
         // restore it (or Main) after DragHost closes; a different window appearing
         // afterward means the user deliberately changed focus during handoff.
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
+        let closing_drag_host = active.native_window;
         let target = active.drop_target;
+        let target_role = active.target_role;
         let free_area_bounds = active.free_area_bounds;
         let dock_area = active.dock_area;
         let panel = active.panels.first().copied();
@@ -1396,6 +1398,24 @@ impl DragHostManager {
         }
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
+        }
+
+        if finished
+            && drag_handle == Some(DragHandle::PanelTab)
+            && target_role == Some(DockWindowRole::Main)
+            && matches!(
+                source_host,
+                Some(DragSourceHost::Floating { .. } | DragSourceHost::FloatingPart { .. })
+            )
+            && let Some(manager) = self.floating_manager.clone()
+        {
+            manager.update(cx, |manager, manager_cx| {
+                manager.schedule_main_activation_after_drag_host_drop(
+                    closing_drag_host,
+                    foreground_at_release,
+                    manager_cx,
+                );
+            });
         }
     }
 
