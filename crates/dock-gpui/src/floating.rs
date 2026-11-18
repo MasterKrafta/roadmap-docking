@@ -103,9 +103,9 @@ fn floating_drag_source(
     }
 }
 
-/// Installs the same pointer/capture/drag pipeline on the legacy FloatingHost and
-/// typed Header/Group part windows. point_origin is zero for the legacy host and
-/// the Core origin of the corresponding detached part HWND.
+/// Installs the shared pointer/capture/drag pipeline on the legacy FloatingHost
+/// and typed Floating part hosts. point_origin is zero for the legacy host and
+/// the Core origin of the Column (or transitional detached part) HWND.
 fn render_floating_pointer_input(
     group: FloatingGroupId,
     manager: WeakEntity<FloatingWindowManager>,
