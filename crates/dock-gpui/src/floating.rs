@@ -1470,33 +1470,28 @@ fn floating_dock_area_title_pointer_region(
 
 fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap<PanelId, Rect> {
     let mut zones = HashMap::new();
-    for column in &snapshot.rects.columns {
-        let group_ids = snapshot
-            .column_groups
-            .get(&column.column)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let group_rects = snapshot
-            .rects
-            .groups
-            .iter()
-            .filter(|group| group_ids.contains(&group.group))
-            .collect::<Vec<_>>();
-        if group_rects.len() != 1 {
-            continue;
-        }
-        let group = group_rects[0];
-        let Some(presentation) = snapshot.group_presentations.get(&group.group) else {
-            continue;
-        };
-        if presentation.is_single_tab()
-            && presentation.active_panel == presentation.tabs.first().map(|tab| tab.panel)
-            && let Some(tab) = presentation.tabs.first()
-        {
-            zones.insert(
-                tab.panel,
-                DockTab::drag_zone(group.rect, snapshot.metrics),
-            );
+    for group_ids in snapshot.column_groups.values() {
+        for group_id in group_ids {
+            let Some(group) = snapshot
+                .rects
+                .groups
+                .iter()
+                .find(|group| group.group == *group_id)
+            else {
+                continue;
+            };
+            let Some(presentation) = snapshot.group_presentations.get(group_id) else {
+                continue;
+            };
+            if presentation.is_single_tab()
+                && presentation.active_panel == presentation.tabs.first().map(|tab| tab.panel)
+                && let Some(tab) = presentation.tabs.first()
+            {
+                zones.insert(
+                    tab.panel,
+                    DockTab::drag_zone(group.rect, snapshot.metrics),
+                );
+            }
         }
     }
     zones
@@ -1694,6 +1689,108 @@ mod floating_tab_drag_host_tests {
     #[test]
     fn dragging_over_another_docking_window_uses_drag_host() {
         assert!(floating_tab_drag_host_required(false, true));
+    }
+}
+
+#[cfg(test)]
+mod floating_tab_drag_zone_tests {
+    use std::collections::{HashMap, HashSet};
+
+    use dock_core::{
+        ColumnRect, DockMetrics, FloatingGroupId, FloatingGroupRect, GroupRect, LayoutRects,
+        NodeId, PanelId, Point, Rect, Size,
+    };
+    use slotmap::SlotMap;
+
+    use crate::dock_components::{GroupPresentation, TabPresentation};
+
+    use super::{FloatingHostSnapshot, floating_dock_component_tab_zones};
+
+    #[test]
+    fn every_single_tab_group_in_a_multi_group_column_gets_its_own_drag_zone() {
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let column = node_ids.insert(());
+        let first_group = node_ids.insert(());
+        let second_group = node_ids.insert(());
+        let mut panel_ids = SlotMap::<PanelId, ()>::with_key();
+        let first_panel = panel_ids.insert(());
+        let second_panel = panel_ids.insert(());
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating_group = floating_ids.insert(());
+
+        let first_group_rect = Rect::new(Point::new(0.0, 40.0), Size::new(420.0, 220.0));
+        let second_group_rect = Rect::new(Point::new(0.0, 270.0), Size::new(420.0, 220.0));
+        let metrics = DockMetrics::default();
+        let snapshot = FloatingHostSnapshot {
+            rects: LayoutRects {
+                columns: vec![ColumnRect::new(
+                    column,
+                    Rect::new(Point::ZERO, Size::new(420.0, 520.0)),
+                )],
+                groups: vec![
+                    GroupRect::new(first_group, first_group_rect),
+                    GroupRect::new(second_group, second_group_rect),
+                ],
+                ..LayoutRects::default()
+            },
+            floating: FloatingGroupRect::new(
+                floating_group,
+                Rect::new(Point::ZERO, Size::new(420.0, 520.0)),
+                0,
+            ),
+            column_ids: HashSet::from([column]),
+            column_groups: HashMap::from([(
+                column,
+                vec![first_group, second_group],
+            )]),
+            column_modes: HashMap::new(),
+            group_presentations: HashMap::from([
+                (
+                    first_group,
+                    GroupPresentation {
+                        active_panel: Some(first_panel),
+                        tabs: vec![TabPresentation {
+                            panel: first_panel,
+                            title: "First".into(),
+                            icon: None,
+                            index: 0,
+                        }],
+                        ..GroupPresentation::default()
+                    },
+                ),
+                (
+                    second_group,
+                    GroupPresentation {
+                        active_panel: Some(second_panel),
+                        tabs: vec![TabPresentation {
+                            panel: second_panel,
+                            title: "Second".into(),
+                            icon: None,
+                            index: 0,
+                        }],
+                        ..GroupPresentation::default()
+                    },
+                ),
+            ]),
+            rail_display_orders: HashMap::new(),
+            metrics,
+            drag_preview: None,
+            drag_zones: Vec::new(),
+            active_drop_zone: None,
+            resize_preview: None,
+        };
+
+        let zones = floating_dock_component_tab_zones(&snapshot);
+
+        assert_eq!(zones.len(), 2);
+        assert_eq!(
+            zones.get(&first_panel),
+            Some(&DockTab::drag_zone(first_group_rect, metrics)),
+        );
+        assert_eq!(
+            zones.get(&second_panel),
+            Some(&DockTab::drag_zone(second_group_rect, metrics)),
+        );
     }
 }
 
