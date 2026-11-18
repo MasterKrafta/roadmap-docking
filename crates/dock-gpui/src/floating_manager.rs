@@ -4825,6 +4825,59 @@ impl FloatingWindowManager {
         .detach();
     }
 
+    /// Restores Main after a Floating tab has been dropped into it.
+    ///
+    /// Wait until the source Floating HWND and its DragHost have been hidden,
+    /// then restore Main only while focus still belongs to this drag handoff.
+    pub(crate) fn schedule_main_activation_after_drag_host_drop(
+        &self,
+        closing_drag_host: NativeWindowId,
+        foreground_at_release: Option<NativeWindowId>,
+        cx: &mut Context<Self>,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            app.background_executor()
+                .timer(Duration::from_millis(32))
+                .await;
+
+            let _ = manager.update(app, |manager, _| {
+                let Some(main_window) = manager.main_native_window else {
+                    return;
+                };
+                let foreground = match manager.native_ops.foreground_window() {
+                    Ok(foreground) => foreground,
+                    Err(error) => {
+                        tracing::debug!(
+                            %error,
+                            "could not inspect foreground window after Floating tab dock"
+                        );
+                        return;
+                    }
+                };
+
+                if foreground == Some(main_window) {
+                    return;
+                }
+                if foreground.is_some()
+                    && foreground != Some(closing_drag_host)
+                    && foreground != foreground_at_release
+                {
+                    // A different window became foreground after release.
+                    return;
+                }
+
+                if let Err(error) = manager.native_ops.activate(main_window) {
+                    tracing::warn!(
+                        %error,
+                        "could not activate Main after Floating tab dock"
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Activates the persistent destination after its temporary DragHost has closed.
     ///
     /// Closing the owned DragHost can restore Main or the window that was
