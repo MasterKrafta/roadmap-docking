@@ -968,6 +968,24 @@ impl FloatingWindowManager {
             .chain(self.registry.members.values())
     }
 
+    /// Returns the current DPI scale for a managed GPUI window.
+    ///
+    /// DragHost uses the source HWND's scale when converting the original
+    /// logical grab offset into physical screen coordinates.
+    pub(crate) fn native_scale_factor_for_window_id(&self, window_id: WindowId) -> Option<f32> {
+        let native_window = if self.host_registry.main_window_id == Some(window_id) {
+            self.main_native_window
+        } else {
+            self.all_native_window_entries()
+                .find(|entry| entry.window_id == window_id)
+                .and_then(|entry| entry.native_window)
+        }?;
+        self.native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+    }
+
     /// Reads one HWND's actual outer frame, DWM-visible bounds, client insets
     /// and monitor scale. The fallback is used only before native measurements exist.
     fn native_frame_geometry(
