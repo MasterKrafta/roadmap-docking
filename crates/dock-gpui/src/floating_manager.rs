@@ -313,7 +313,7 @@ fn current_member_floating_group(
             .values()
             .any(|owner| *owner == group)
             .then_some(group),
-        WindowGridMember::Header(_) | WindowGridMember::Group(_) => current_owners.get(&member).copied(),
+        WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => current_owners.get(&member).copied(),
     }
 }
 
@@ -323,7 +323,7 @@ fn previous_member_floating_group(
 ) -> Option<FloatingGroupId> {
     match member {
         WindowGridMember::FloatingComposition(group) => Some(group),
-        WindowGridMember::Header(_) | WindowGridMember::Group(_) => previous_owners.get(&member).copied(),
+        WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => previous_owners.get(&member).copied(),
     }
 }
 
@@ -333,6 +333,7 @@ fn window_grid_member(group: FloatingGroupId) -> WindowGridMember {
 
 fn window_grid_member_for_part(part: DockWindowPart) -> WindowGridMember {
     match part {
+        DockWindowPart::Column { column } => WindowGridMember::Column(column),
         DockWindowPart::Header { column } => WindowGridMember::Header(column),
         DockWindowPart::Group { group } => WindowGridMember::Group(group),
     }
@@ -340,6 +341,7 @@ fn window_grid_member_for_part(part: DockWindowPart) -> WindowGridMember {
 
 fn dock_window_part_for_member(member: WindowGridMember) -> Option<DockWindowPart> {
     match member {
+        WindowGridMember::Column(column) => Some(DockWindowPart::Column { column }),
         WindowGridMember::Header(column) => Some(DockWindowPart::Header { column }),
         WindowGridMember::Group(group) => Some(DockWindowPart::Group { group }),
         WindowGridMember::FloatingComposition(_) => None,
@@ -501,7 +503,7 @@ impl FloatingWindowManager {
     pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
-            WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
+            WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
                 .part_members_by_group
                 .iter()
                 .find_map(|(group, members)| members.contains(&member).then_some(*group)),
@@ -576,7 +578,12 @@ impl FloatingWindowManager {
             .and_then(|members| {
                 members
                     .iter()
-                    .find(|member| matches!(member, WindowGridMember::Header(_)))
+                    .find(|member| matches!(member, WindowGridMember::Column(_)))
+                    .or_else(|| {
+                        members
+                            .iter()
+                            .find(|member| matches!(member, WindowGridMember::Header(_)))
+                    })
                     .or_else(|| {
                         members
                             .iter()
@@ -759,7 +766,7 @@ impl FloatingWindowManager {
     /// remains a temporary bridge and resolves to the first Group window in that composition.
     fn panel_window_for_grid_member(&self, member: WindowGridMember) -> Option<&PanelWindowEntry> {
         match member {
-            WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
+            WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
                 .registry
                 .members
                 .get(&member)
@@ -1042,6 +1049,11 @@ impl FloatingWindowManager {
         let part_origin = self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, source_group).ok()?;
             match part {
+                DockWindowPart::Column { column } => rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .map(|rect| rect.rect.origin),
                 DockWindowPart::Header { column } => rects
                     .columns
                     .iter()
@@ -1785,7 +1797,7 @@ impl FloatingWindowManager {
             return false;
         }
 
-        let source_member = WindowGridMember::Header(column);
+        let source_member = WindowGridMember::Column(column);
         let Some(source_entry) = self.registry.members.get(&source_member) else {
             return false;
         };
@@ -3117,6 +3129,11 @@ impl FloatingWindowManager {
         let core_bounds = self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, group).ok()?;
             match member {
+                WindowGridMember::Column(column) => rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .map(|rect| rect.rect),
                 WindowGridMember::Header(column) => {
                     let column = rects.columns.iter().find(|rect| rect.column == column)?;
                     Some(Rect::new(
@@ -5128,6 +5145,13 @@ impl FloatingWindowManager {
                 )
             } else {
                 match spec.kind {
+                    FloatingPartKind::Column { column } => FloatingPartHost::new_column(
+                        controller,
+                        spec.floating_group(),
+                        column,
+                        theme,
+                        manager,
+                    ),
                     FloatingPartKind::Header { column } => FloatingPartHost::new_header(
                         controller,
                         spec.floating_group(),
