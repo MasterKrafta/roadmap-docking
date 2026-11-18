@@ -7,7 +7,7 @@ use dock_core::{
 };
 use gpui::{
     AnyView, App, Entity, IntoElement, ParentElement, Styled, WeakEntity, div,
-    prelude::InteractiveElement as _, rgb,
+    prelude::InteractiveElement as _, px, rgb,
 };
 use ui::Theme;
 
