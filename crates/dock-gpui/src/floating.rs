@@ -148,8 +148,9 @@ fn floating_drag_source(
 }
 
 /// Installs the shared pointer/capture/drag pipeline on the legacy FloatingHost
-/// and typed Floating part hosts. point_origin is zero for the legacy host and
-/// the Core origin of the Column (or transitional detached part) HWND.
+/// and typed Floating part hosts. point_origin is zero for the legacy host and the
+/// Core-space origin represented by the HWND client area. A Column host may extend
+/// half-way into each adjacent Axis::X splitter gap.
 fn render_floating_pointer_input(
     group: FloatingGroupId,
     manager: WeakEntity<FloatingWindowManager>,
@@ -1861,7 +1862,7 @@ mod floating_part_host_geometry_tests {
 
 #[cfg(test)]
 mod floating_column_host_geometry_tests {
-    use super::floating_column_host_rect;
+    use super::{floating_column_host_rect, floating_local_point_to_core};
     use dock_core::{NodeId, Point, Rect, Size, SplitterRect};
 
     #[test]
@@ -1870,7 +1871,7 @@ mod floating_column_host_geometry_tests {
             NodeId::null(),
             0,
             dock_core::Axis::X,
-            Rect::new(Point::new(241.0, 0.0), Size::new(6.0, 400.0)),
+            Rect::new(Point::new(238.0, 0.0), Size::new(12.0, 400.0)),
         );
         let splitters = [splitter];
 
@@ -1894,6 +1895,11 @@ mod floating_column_host_geometry_tests {
             left.origin.x + left.size.width,
             right.origin.x,
             "neighbouring native client areas must meet without a gap or overlap",
+        );
+        assert_eq!(
+            floating_local_point_to_core(Point::ZERO, right.origin).unwrap().x,
+            244.0,
+            "the inner edge of the right host must map to the shared Core splitter center",
         );
     }
 
