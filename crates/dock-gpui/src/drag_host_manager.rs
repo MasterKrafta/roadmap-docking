@@ -1062,6 +1062,7 @@ impl DragHostManager {
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let target = active.drop_target;
         let free_area_bounds = active.free_area_bounds;
+        let dock_area = active.dock_area;
         let panel = active.panels.first().copied();
         let defer_layout_events_until_parts_ready =
             active.defer_layout_events_until_parts_ready;
@@ -1214,6 +1215,33 @@ impl DragHostManager {
             }
         }
 
+        if finished
+            && dock_area.is_some()
+            && source_host == Some(DragSourceHost::Main)
+            && drag_handle == Some(DragHandle::DockAreaHeader)
+            && !created_groups.is_empty()
+        {
+            if self.promote_main_dock_area_parts(id, cx) {
+                if let Some((anchor, direction)) = chain_join {
+                    self.join_created_groups_to_chain(
+                        id,
+                        anchor,
+                        &created_groups,
+                        direction,
+                        cx,
+                    );
+                }
+                return;
+            }
+            // Fall back to the established two-phase transfer if any temporary part
+            // could not be adopted. Do not leave a second visible set above Main.
+            if let Some(manager) = self.floating_manager.as_ref() {
+                manager.update(cx, |manager, manager_cx| {
+                    manager.close_main_drag_parts(manager_cx);
+                });
+            }
+        }
+
         if let Some(panel) = panel
             && !finished
         {
@@ -1359,6 +1387,42 @@ impl DragHostManager {
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close DragHost after release");
         }
+    }
+
+    /// Keeps every temporary Main DockArea Header/Group HWND and registers it
+    /// under the Core identities created by the successful release.
+    fn promote_main_dock_area_parts(
+        &mut self,
+        id: DragHostId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let has_main_dock_area = self.active.as_ref()
+            .filter(|active| active.id == id)
+            .is_some_and(|active| active.dock_area.is_some());
+        if !has_main_dock_area {
+            return false;
+        }
+        let Some(manager) = self.floating_manager.clone() else {
+            return false;
+        };
+        let adopted = manager.update(cx, |manager, _| {
+            manager.adopt_main_drag_parts(cx)
+        });
+        if !adopted {
+            return false;
+        }
+
+        // The same Group HWNDs now own their PanelViews. Closing only the hidden
+        // coordinator releases the transfer session; it does not touch adopted parts.
+        if let Err(error) = self.close(id, cx) {
+            tracing::warn!(?id, %error, "could not close the Main DockArea drag coordinator");
+        }
+
+        manager.update(cx, |manager, manager_cx| {
+            manager.reconcile(manager_cx);
+        });
+        self.flush_controller_events(cx);
+        true
     }
 
     fn promote_drag_host_content_to_floating(
