@@ -117,8 +117,8 @@ fn floating_window_chain_target(
         }
     };
     if source_group == Some(group) {
-        // Sibling Header/Group HWNDs in one Core Floating composition are not
-        // separate WindowGrid targets. Their edge drops stay in Core's resolver.
+        // Side drops inside the same Core Floating composition are logical
+        // Group/Column docking, not a separate WindowGrid connection.
         return None;
     }
     // Side drops that detach a native composition may join its HWNDs through
@@ -284,7 +284,7 @@ impl DragHostManager {
     /// Opens DragHost with every cached PanelView belonging to the source Group.
     ///
     /// The active tab is first so the temporary transport window can present the
-    /// Group's visible content while its permanent Group host is prepared.
+    /// Group's visible content while its permanent Column host is prepared.
     pub fn open_group_at_cursor(
         &mut self,
         group: NodeId,
@@ -1144,7 +1144,7 @@ impl DragHostManager {
             )
         });
         // A Main DockArea DragHost is only a hidden pointer/drop coordinator.
-        // Its HWND stays at the creation point while the temporary Header/Group
+        // Its HWND stays at the creation point while the temporary Column
         // windows follow the cursor, so its native bounds are stale at release.
         // Use the cursor-tracked free_area_bounds for DockArea drags instead.
         // Drop tracking already computes Group bounds from the original
@@ -1238,7 +1238,7 @@ impl DragHostManager {
                         Ok(DragDropAction::Command(command)) => {
                             let result = if defer_layout_events_until_parts_ready {
                                 // Delay LayoutChanged publication until permanent
-                                // Header/Group hosts can reconcile the new Core layout.
+                                // Column hosts can reconcile the new Core layout.
                                 controller.dispatch(command)
                             } else {
                                 controller.dispatch_in(command, controller_cx)
@@ -1273,8 +1273,8 @@ impl DragHostManager {
             (true, created_groups)
         });
 
-        // Register the complete source-ordered chain before its separate
-        // Header/Group hosts are reconciled for every Core FloatingGroup.
+        // Register the complete source-ordered chain before its permanent
+        // Column hosts are reconciled for every Core FloatingGroup.
         if finished && created_groups.len() > 1 && chain_join.is_none() {
             let registered = self.floating_manager.as_ref().is_some_and(|manager| {
                 manager.update(cx, |manager, _| {
@@ -1480,7 +1480,7 @@ impl DragHostManager {
         }
     }
 
-    /// Keeps every temporary Main DockArea Header/Group HWND and registers it
+    /// Keeps every temporary Main DockArea Column HWND and registers it
     /// under the Core identities created by the successful release.
     fn promote_main_dock_area_parts(
         &mut self,
@@ -1503,7 +1503,7 @@ impl DragHostManager {
             return false;
         }
 
-        // The same Group HWNDs now own their PanelViews. Closing only the hidden
+        // The same Column HWNDs now own their PanelViews. Closing only the hidden
         // coordinator releases the transfer session; it does not touch adopted parts.
         if let Err(error) = self.close(id, cx) {
             tracing::warn!(?id, %error, "could not close the Main DockArea drag coordinator");
@@ -1858,7 +1858,7 @@ impl DragHostManager {
 
     /// Releases the cached views only after the empty DragHost frame has rendered.
     /// The temporary DragHost releases its PanelViews only after rendering an empty
-    /// placeholder; permanent Group hosts are then shown before their next frame.
+    /// placeholder; permanent Column hosts are then shown before their next frame.
     fn try_release_handoff_source(
         &mut self,
         id: DragHostId,
@@ -1929,7 +1929,7 @@ impl DragHostManager {
         handoff.required_panels_by_group.get(&target_group).cloned()
     }
 
-    /// Returns every FloatingGroup whose permanent Group hosts belong to this
+    /// Returns every FloatingGroup whose permanent Column hosts belong to this
     /// released transfer. A DockArea tear-off may need several destinations.
     pub(crate) fn pending_handoff_groups(
         &self,
