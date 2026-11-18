@@ -127,9 +127,9 @@ impl DockGroupView {
     /// Renders one detached tab through the same Core Group and PanelHost
     /// components used by Main, Floating and Group DragHost surfaces.
     ///
-    /// A PanelTab DragHost uses the panel's preferred content size rather than
-    /// the original Group rectangle. The source Core header supplies the tab's
-    /// identity, index and size; only its origin moves into the temporary host.
+    /// A PanelTab DragHost uses the source Group viewport, matching GroupGrip sizing.
+    /// The source Core header supplies the tab's identity, index and size; only its
+    /// origin moves into the temporary host.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_detached_tab(
         source_header: TabHeaderRect,
