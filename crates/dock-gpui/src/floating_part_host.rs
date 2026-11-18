@@ -853,28 +853,6 @@ impl FloatingPartHost {
             .filter(|group| group_id_set.contains(&group.group))
             .copied()
             .collect::<Vec<_>>();
-        let tab_strips = snapshot
-            .rects
-            .tab_strips
-            .iter()
-            .filter(|strip| group_id_set.contains(&strip.group))
-            .copied()
-            .collect::<Vec<_>>();
-        let tab_headers = snapshot
-            .rects
-            .tab_headers
-            .iter()
-            .filter(|header| group_id_set.contains(&header.group))
-            .copied()
-            .collect::<Vec<_>>();
-        let tab_overflows = snapshot
-            .rects
-            .tab_overflows
-            .iter()
-            .filter(|overflow| group_id_set.contains(&overflow.group))
-            .cloned()
-            .collect::<Vec<_>>();
-
         let transferred_panels = self.controller.update(cx, |controller, _| {
             controller.transferred_panel_views_from(window_id)
         });
@@ -888,6 +866,39 @@ impl FloatingPartHost {
         let dragged_group = self.controller.update(cx, |controller, _| {
             controller.dragged_group_from(window_id)
         });
+        let tab_strips = snapshot
+            .rects
+            .tab_strips
+            .iter()
+            .filter(|strip| {
+                group_id_set.contains(&strip.group)
+                    && (!transfer.groups_without_visible_tabs.contains(&strip.group)
+                        || dragged_group == Some(strip.group))
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let tab_headers = transfer
+            .visible_tab_headers(
+                &snapshot.rects.tab_headers,
+                &snapshot.rects.tab_strips,
+                &snapshot.rects.tab_overflows,
+                &presentations,
+                &group_id_set,
+                snapshot.metrics,
+            )
+            .into_iter()
+            .filter(|header| group_id_set.contains(&header.group))
+            .collect::<Vec<_>>();
+        let tab_overflows = snapshot
+            .rects
+            .tab_overflows
+            .iter()
+            .filter(|overflow| {
+                group_id_set.contains(&overflow.group)
+                    && !transfer.groups_without_visible_tabs.contains(&overflow.group)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         let active_panels =
             active_panels_for_groups(group_ids.iter().copied(), &presentations, dragged_group);
         let panels = transfer
