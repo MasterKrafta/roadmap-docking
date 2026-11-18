@@ -306,29 +306,23 @@ impl Render for FloatingPartHost {
             });
         }
 
+        let floating_group = self.floating_group();
         let column_viewport = match self.part {
-            FloatingPartKind::Column { column } => {
-                let origin_y_offset = self
-                    .manager
-                    .upgrade()
-                    .and_then(|manager| {
-                        manager
-                            .update(cx, |manager, _| {
-                                manager.floating_column_vertical_origin_offset(
-                                    column,
-                                    self.floating_group(),
-                                )
-                            })
-                            .ok()
-                    })
-                    .unwrap_or(0.0);
-                Some((column, f32::from(window.bounds().size.height), origin_y_offset))
-            }
+            FloatingPartKind::Column { column } => Some((
+                column,
+                f32::from(window.bounds().size.height),
+            )),
             _ => None,
         };
-        let floating_group = self.floating_group();
         let snapshot = self.controller.update(cx, |controller, _| {
-            if let Some((column, height, origin_y_offset)) = column_viewport {
+            if let Some((column, height)) = column_viewport {
+                let origin_y_offset = controller
+                    .floating_column_viewport_origin_y_offset(
+                        window_id,
+                        floating_group,
+                        column,
+                    )
+                    .unwrap_or(0.0);
                 controller.set_floating_column_viewport(
                     window_id,
                     floating_group,
