@@ -349,7 +349,7 @@ fn render_floating_drop_overlay(
     snapshot: &FloatingHostSnapshot,
     origin: Point,
     theme: Theme,
-) -> impl IntoElement {
+) -> impl IntoElement + 'static {
     let groups = snapshot
         .rects
         .groups
