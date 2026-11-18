@@ -2357,6 +2357,63 @@ mod floating_window_chain_target_tests {
     }
 
     #[test]
+    fn floating_group_grip_side_drops_keep_the_core_target_across_compositions() {
+        use slotmap::SlotMap;
+
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let source = groups.insert(());
+        let target_group = groups.insert(());
+        let source_node = NodeId::null();
+        let target_node = NodeId::null();
+        let target_roles = [
+            Some(DockWindowRole::Floating { group: target_group }),
+            Some(DockWindowRole::FloatingPart {
+                group: target_group,
+                part: DockWindowPart::Header {
+                    column: target_node,
+                },
+            }),
+            Some(DockWindowRole::FloatingPart {
+                group: target_group,
+                part: DockWindowPart::Group {
+                    group: target_node,
+                },
+            }),
+        ];
+
+        for zone in [
+            DropZone::Left,
+            DropZone::Right,
+            DropZone::Top,
+            DropZone::Bottom,
+            DropZone::FloatingTop,
+            DropZone::FloatingBottom,
+        ] {
+            let target = Some(DropTarget::GroupEdge {
+                group: target_node,
+                zone,
+            });
+            for target_role in target_roles {
+                assert_eq!(
+                    floating_window_chain_target(
+                        DragSourceHost::FloatingPart {
+                            group: source,
+                            part: DockWindowPart::Group {
+                                group: source_node,
+                            },
+                        },
+                        Some(DragHandle::GroupGrip),
+                        target,
+                        target_role,
+                    ),
+                    None,
+                    "Floating → Floating GroupGrip {zone:?} must preserve its Core DropTarget",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn main_dock_area_header_side_drops_keep_the_core_target() {
         let anchor = FloatingGroupId::null();
         let group = NodeId::null();
