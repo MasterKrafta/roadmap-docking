@@ -26,7 +26,7 @@ use crate::{
 };
 
 use super::{
-    floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
+    floating_column_host_rect, floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_part_owner_and_column, handle_floating_escape, observe_floating_focus_loss,
     render_floating_pointer_input, FloatingHostOpenMenu, FloatingHostSnapshot, FloatingPartKind,
     FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
@@ -909,6 +909,11 @@ impl FloatingPartHost {
         else {
             return div().id("missing-floating-column").size_full();
         };
+        let host_rect = floating_column_host_rect(
+            column_rect.rect,
+            &snapshot.rects.splitters,
+            snapshot.metrics.splitter_thickness,
+        );
         let group_ids = snapshot
             .column_groups
             .get(&column_id)
@@ -1033,7 +1038,7 @@ impl FloatingPartHost {
             self.group_press.clone(),
             self.pointer_capture.clone(),
             Some(DockWindowPart::Column { column: column_id }),
-            column_rect.rect.origin,
+            host_rect.origin,
         );
 
         let rendered_panels = panels
@@ -1098,7 +1103,7 @@ impl FloatingPartHost {
             .child(FloatingWindowContent::render_column(
                 snapshot.floating,
                 column_rect,
-                column_rect.rect.origin,
+                host_rect.origin,
                 &groups,
                 &panels,
                 dragged_group,
@@ -1118,6 +1123,7 @@ impl FloatingPartHost {
                 true,
                 show_close_button,
                 close_action,
+                true,
                 None,
                 toggle_context_menu,
                 self.controller.clone(),
@@ -1127,7 +1133,7 @@ impl FloatingPartHost {
         if snapshot.drag_preview.is_some() {
             root = root.child(render_floating_drop_overlay(
                 snapshot,
-                column_rect.rect.origin,
+                host_rect.origin,
                 self.theme,
             ));
         }
