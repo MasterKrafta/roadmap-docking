@@ -90,7 +90,7 @@ impl FloatingPartHost {
     ) -> Self {
         Self::new(
             controller,
-            floating_group,
+            Some(floating_group),
             FloatingPartKind::Group { column, group },
             theme,
             manager,
