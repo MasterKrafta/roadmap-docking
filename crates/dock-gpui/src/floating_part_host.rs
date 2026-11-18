@@ -60,6 +60,8 @@ pub(crate) struct FloatingPartHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
+    native_bounds_observed: bool,
+    native_resize_observation_pending: bool,
 }
 
 impl FloatingPartHost {
@@ -170,6 +172,8 @@ impl FloatingPartHost {
             column_scroll_handles: HashMap::new(),
             root_focus_handle: None,
             focus_observed: false,
+            native_bounds_observed: false,
+            native_resize_observation_pending: false,
         }
     }
 }
@@ -208,6 +212,71 @@ impl Render for FloatingPartHost {
         }
 
         let window_id = window.window_handle().window_id();
+
+        if let (Some(group), FloatingPartKind::Column { column }) =
+            (self.floating_group, self.part)
+        {
+            if !self.native_bounds_observed {
+                cx.observe_window_bounds(window, |host, window, host_cx| {
+                    let (Some(group), FloatingPartKind::Column { column }) =
+                        (host.floating_group, host.part)
+                    else {
+                        return;
+                    };
+                    let window_id = window.window_handle().window_id();
+
+                    // FloatingWindowManager can call bounds_changed() while it
+                    // is reconciling this HWND. Defer manager updates to avoid
+                    // re-entering the manager entity from GPUI's observer.
+                    host_cx.defer_in(window, move |host, _, deferred_cx| {
+                        if host.floating_group != Some(group)
+                            || !matches!(
+                                host.part,
+                                FloatingPartKind::Column { column: current } if current == column
+                            )
+                        {
+                            return;
+                        }
+                        if let Some(manager) = host.manager.upgrade() {
+                            let _ = manager.update(deferred_cx, |manager, manager_cx| {
+                                manager.sync_native_column_resize_bounds(
+                                    column,
+                                    group,
+                                    window_id,
+                                    manager_cx,
+                                );
+                            });
+                        }
+                    });
+                })
+                .detach();
+                self.native_bounds_observed = true;
+            }
+
+            if !self.native_resize_observation_pending {
+                self.native_resize_observation_pending = true;
+                cx.defer_in(window, move |host, _, host_cx| {
+                    host.native_resize_observation_pending = false;
+                    if host.floating_group == Some(group)
+                        && matches!(
+                            host.part,
+                            FloatingPartKind::Column { column: current } if current == column
+                        )
+                        && let Some(manager) = host.manager.upgrade()
+                    {
+                        manager.update(host_cx, |manager, manager_cx| {
+                            manager.observe_native_column_resize(
+                                column,
+                                group,
+                                window_id,
+                                manager_cx,
+                            );
+                        });
+                    }
+                });
+            }
+        }
+
         let focus_handle = self
             .root_focus_handle
             .get_or_insert_with(|| cx.focus_handle())
