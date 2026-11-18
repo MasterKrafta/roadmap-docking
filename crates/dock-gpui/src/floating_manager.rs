@@ -597,6 +597,25 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
+    pub(crate) fn floating_column_vertical_origin_offset(
+        &self,
+        column: NodeId,
+        group: FloatingGroupId,
+    ) -> f32 {
+        let Some(entry) = self.registry.members.get(&WindowGridMember::Column(column))
+            .filter(|entry| entry.host_group == Some(group))
+        else {
+            return 0.0;
+        };
+        let scale = entry
+            .native_window
+            .and_then(|window| self.native_ops.scale_factor(window).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .or(entry.native_scale_factor)
+            .unwrap_or(1.0);
+        entry.native_vertical_origin_offset / scale
+    }
+
     pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
