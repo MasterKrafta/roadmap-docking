@@ -928,15 +928,7 @@ impl FloatingPartHost {
             self.column_scroll_handles.entry(column_id).or_default();
         }
 
-        let show_close_button = snapshot
-            .rects
-            .columns
-            .iter()
-            .max_by(|left, right| {
-                (left.rect.origin.x + left.rect.size.width)
-                    .total_cmp(&(right.rect.origin.x + right.rect.size.width))
-            })
-            .is_some_and(|rightmost| rightmost.column == column_id);
+        let show_close_button = self.show_close_button;
         let close_action = if show_close_button {
             let close_group = snapshot.floating.group;
             let manager_for_close = self.manager.clone();
