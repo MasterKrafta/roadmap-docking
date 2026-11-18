@@ -1043,9 +1043,27 @@ impl DragHostManager {
                 manager.screen_bounds_for_drag_source(source_host, bounds, manager_cx)
             })
         });
+        let target_role = target_window.and_then(DockingWindowAtPoint::role);
+        if source_host == DragSourceHost::Main
+            && handle == DragHandle::DockAreaHeader
+        {
+            let previous_target = self.active
+                .as_ref()
+                .filter(|active| active.id == id)
+                .map(|active| (active.drop_target, active.target_role));
+            if previous_target != Some((target, target_role)) {
+                tracing::debug!(
+                    ?cursor,
+                    ?target_window,
+                    ?target,
+                    ?target_role,
+                    "Main DockArea drag target changed"
+                );
+            }
+        }
         if let Some(active) = self.active.as_mut().filter(|active| active.id == id) {
             active.drop_target = target;
-            active.target_role = target_window.and_then(DockingWindowAtPoint::role);
+            active.target_role = target_role;
             active.free_area_bounds = screen_free_area_bounds;
         }
 
