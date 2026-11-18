@@ -257,8 +257,7 @@ pub(crate) fn begin_panel_drag_host(
                 (source_rect, source_group_size)
             }
         };
-        // Tearing a tab out of Floating should keep the actual Group viewport,
-        // including a size the user may have chosen by resizing the window.
+        // A detached tab uses its source Group viewport in both Main and Floating.
         let drag_size = source_group_size.unwrap_or(panel_preferred_size);
         let grab_offset = Point::new(
             (origin.x - source_rect.origin.x)
