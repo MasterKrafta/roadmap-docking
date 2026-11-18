@@ -14,7 +14,6 @@ use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
-use slotmap::Key as _;
 use platform::{
     hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId,
     NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
@@ -119,7 +118,7 @@ fn collect_floating_part_windows(
             if header_bounds.validate_non_empty().is_ok() {
                 result.push(FloatingPartWindowSnapshot {
                     member: WindowGridMember::Header(column_rect.column),
-                    floating_group,
+                    floating_group: Some(floating_group),
                     kind: FloatingPartKind::Header {
                         column: column_rect.column,
                     },
@@ -153,7 +152,7 @@ fn collect_floating_part_windows(
 
                 result.push(FloatingPartWindowSnapshot {
                     member: WindowGridMember::Group(*group_id),
-                    floating_group,
+                    floating_group: Some(floating_group),
                     kind: FloatingPartKind::Group {
                         column: column_rect.column,
                         group: *group_id,
@@ -176,8 +175,8 @@ fn floating_part_internal_links(
 ) -> Vec<WindowGridLink> {
     let mut floating_groups = Vec::new();
     for spec in specs {
-        if !floating_groups.contains(&spec.floating_group) {
-            floating_groups.push(spec.floating_group);
+        if !floating_groups.contains(&spec.floating_group()) {
+            floating_groups.push(spec.floating_group());
         }
     }
 
@@ -186,7 +185,7 @@ fn floating_part_internal_links(
         let headers = specs
             .iter()
             .filter_map(|spec| {
-                (spec.floating_group == floating_group
+                (spec.floating_group() == floating_group
                     && matches!(spec.kind, FloatingPartKind::Header { .. }))
                 .then_some(spec)
             })
@@ -198,7 +197,7 @@ fn floating_part_internal_links(
             };
             let mut previous = header.member;
             for group in specs.iter().filter(|spec| {
-                spec.floating_group == floating_group
+                spec.floating_group() == floating_group
                     && matches!(
                         spec.kind,
                         FloatingPartKind::Group {
@@ -267,7 +266,7 @@ fn floating_part_boundary_member(
 ) -> Option<WindowGridMember> {
     let members = specs
         .iter()
-        .filter(|spec| spec.floating_group == floating_group)
+        .filter(|spec| spec.floating_group() == floating_group)
         .map(|spec| spec.member)
         .collect::<Vec<_>>();
     floating_part_boundary_member_from_members(&members, side)
@@ -1261,7 +1260,7 @@ impl FloatingWindowManager {
             )
             .into_iter()
             .find(|spec| {
-                spec.member == member && spec.floating_group == floating_group
+                spec.member == member && spec.floating_group() == floating_group
             })
         });
         let bounds = spec
@@ -2555,7 +2554,7 @@ impl FloatingWindowManager {
             };
             let spec = FloatingPartWindowSnapshot {
                 member,
-                floating_group: FloatingGroupId::null(),
+                floating_group: None,
                 kind,
                 main_drag_side: Some(side),
                 bounds,
@@ -2714,7 +2713,7 @@ impl FloatingWindowManager {
             };
             let adopted = match entry.window {
                 PanelWindowHandle::Part(window) => window.update(cx, |host, _, host_cx| {
-                    let adopted = host.adopt_main_drag_part(spec.floating_group);
+                    let adopted = host.adopt_main_drag_part(spec.floating_group());
                     if adopted {
                         host_cx.notify();
                     }
@@ -2744,7 +2743,7 @@ impl FloatingWindowManager {
             entry.bounds = target_bounds;
             entry.native_scale_factor = current_scale;
             entry.native_bounds_dirty = false;
-            entry.host_group = Some(spec.floating_group);
+            entry.host_group = Some(spec.floating_group());
             entry.visibility = PanelWindowVisibility::Visible;
             self.registry.members.insert(member, entry);
         }
@@ -4970,14 +4969,14 @@ impl FloatingWindowManager {
                 match spec.kind {
                     FloatingPartKind::Header { column } => FloatingPartHost::new_header(
                         controller,
-                        spec.floating_group,
+                        spec.floating_group(),
                         column,
                         theme,
                         manager,
                     ),
                     FloatingPartKind::Group { column, group } => FloatingPartHost::new_group(
                         controller,
-                        spec.floating_group,
+                        spec.floating_group(),
                         column,
                         group,
                         theme,
@@ -5091,7 +5090,11 @@ impl FloatingWindowManager {
             native_scale_factor: scale,
             native_bounds_dirty: false,
             resize_enabled: false,
-            host_group: spec.main_drag_side.is_none().then_some(spec.floating_group),
+            host_group: if spec.main_drag_side.is_some() {
+                None
+            } else {
+                Some(spec.floating_group())
+            },
             visibility: PanelWindowVisibility::Hidden,
         })
     }
@@ -5161,7 +5164,7 @@ impl FloatingWindowManager {
             .collect::<HashMap<_, _>>();
         let mut owners = HashMap::<WindowGridMember, FloatingGroupId>::new();
         for spec in desired {
-            owners.insert(spec.member, spec.floating_group);
+            owners.insert(spec.member, spec.floating_group());
         }
 
         let mut links = floating_part_internal_links(desired);
@@ -5268,7 +5271,7 @@ impl FloatingWindowManager {
         let mut members_by_group = HashMap::<FloatingGroupId, Vec<WindowGridMember>>::new();
         for spec in &desired {
             members_by_group
-                .entry(spec.floating_group)
+                .entry(spec.floating_group())
                 .or_default()
                 .push(spec.member);
         }
@@ -5288,7 +5291,7 @@ impl FloatingWindowManager {
             // while its FloatingGroup owner changes. Keep the registry owner in sync
             // with the current Layout snapshot instead of the original creation owner.
             if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                entry.host_group = Some(spec.floating_group);
+                entry.host_group = Some(spec.floating_group());
             }
 
             let current = self.registry.members.get(&spec.member).map(|entry| {
@@ -5367,7 +5370,7 @@ impl FloatingWindowManager {
         let mut live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
         let live_floating_groups = desired
             .iter()
-            .map(|spec| spec.floating_group)
+            .map(|spec| spec.floating_group())
             .collect::<HashSet<_>>();
         for link in self.window_chains.all_links() {
             for member in [link.from, link.to] {
@@ -6626,7 +6629,7 @@ mod floating_part_topology_tests {
     ) -> FloatingPartWindowSnapshot {
         FloatingPartWindowSnapshot {
             member,
-            floating_group,
+            floating_group: Some(floating_group),
             kind,
             main_drag_side: None,
             bounds: Rect::new(Point::new(x, y), Size::new(240.0, 180.0)),
