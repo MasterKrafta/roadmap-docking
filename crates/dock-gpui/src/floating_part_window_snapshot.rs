@@ -5,13 +5,14 @@ use crate::{components::floating::FloatingPartKind, window_chain::WindowGridMemb
 #[derive(Clone, Copy)]
 pub(super) struct FloatingPartWindowSnapshot {
     pub(super) member: WindowGridMember,
+    /// Core owner for permanent parts; None while a Main-origin drag is still in progress.
     pub(super) floating_group: Option<FloatingGroupId>,
     pub(super) kind: FloatingPartKind,
     /// Present only for temporary Header/Group hosts created from a Main DockArea drag.
     pub(super) main_drag_side: Option<DockSide>,
     /// Initial client bounds, using the main-monitor scale until the HWND exists.
     pub(super) bounds: Rect,
-    /// Core FloatingGroup origin is already in physical virtual-desktop pixels.
+    /// Permanent FloatingGroup origin in physical virtual-desktop pixels; zero for temporary Main parts.
     pub(super) floating_origin: Point,
     /// Core layout origin inside the Floating client area remains logical.
     pub(super) local_origin: Point,
