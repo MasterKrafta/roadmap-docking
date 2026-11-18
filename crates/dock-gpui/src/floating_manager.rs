@@ -566,7 +566,7 @@ impl FloatingWindowManager {
             .collect()
     }
 
-    /// Returns the connected real Header/Group HWNDs in native front-to-back order.
+    /// Returns the connected real Column HWNDs in native front-to-back order.
     /// A standalone Floating Column still returns its own Header and Group windows.
     pub(crate) fn window_grid_members_in_native_order(
         &self,
@@ -1096,17 +1096,17 @@ impl FloatingWindowManager {
 
     pub(crate) fn native_move_active(&self) -> bool { self.native_move.is_some() }
 
-    /// Only one Header in a connected WindowGrid owns the close control.
+    /// Only one Column in a connected WindowGrid owns the close control.
     ///
     /// Select by actual native right edge so a multi-row WindowGrid still receives
-    /// exactly one X. If several Headers share that edge, prefer the uppermost one.
-    pub(crate) fn is_rightmost_header(&self, column: NodeId) -> bool {
-        let current = WindowGridMember::Header(column);
+    /// exactly one X. If several Columns share that edge, prefer the uppermost one.
+    pub(crate) fn is_rightmost_column(&self, column: NodeId) -> bool {
+        let current = WindowGridMember::Column(column);
         let members = self.window_chains.members_for(current);
         let mut rightmost: Option<(WindowGridMember, i32, i32)> = None;
 
         for member in members {
-            if !matches!(member, WindowGridMember::Header(_)) {
+            if !matches!(member, WindowGridMember::Column(_)) {
                 continue;
             }
             let Some(native_window) = self
@@ -4158,7 +4158,7 @@ impl FloatingWindowManager {
     }
 
     /// Applies Core composition stacking and WindowGrid edge priority to all
-    /// visible Header/Group HWNDs, raising members from back to front.
+    /// visible Column HWNDs, raising members from back to front.
     fn synchronize_native_part_z_order(&self, groups: &[FloatingGroupSnapshot]) {
         let moving_members = self
             .native_move
@@ -5278,7 +5278,7 @@ impl FloatingWindowManager {
     }
 
     /// Detaches one selected Column stack from every previous WindowGrid neighbour.
-    /// Rebuilds internal Header/Group edges from Core and preserves only links
+    /// Rebuilds internal Column edges from Core and preserves only links
     /// that were external both before and after the current Layout transition.
     fn rebuild_floating_part_window_grid(
         &mut self,
@@ -5298,7 +5298,7 @@ impl FloatingWindowManager {
         let mut links = floating_part_internal_links(desired);
         for previous in previous_links {
             if !previous_window_grid_link_is_external(previous, &previous_owners, &owners) {
-                // Internal Header/Group edges are regenerated from the current
+                // Internal Column edges are regenerated from the current
                 // Core layout; keep only relationships between compositions.
                 continue;
             }
@@ -5349,7 +5349,7 @@ impl FloatingWindowManager {
             true
         } else {
             tracing::warn!(
-                "could not rebuild WindowGrid from the current Floating Header/Group topology"
+                "could not rebuild WindowGrid from the current Floating Column topology"
             );
             false
         }
@@ -5416,7 +5416,7 @@ impl FloatingWindowManager {
                 }
             }
 
-            // A persistent Header/Group HWND may survive a Core Float operation
+            // A persistent Column HWND may survive a Core Float operation
             // while its FloatingGroup owner changes. Keep the registry owner in sync
             // with the current Layout snapshot instead of the original creation owner.
             if let Some(entry) = self.registry.members.get_mut(&spec.member) {
@@ -5478,7 +5478,7 @@ impl FloatingWindowManager {
                         Err(error) => tracing::warn!(
                             ?spec.member,
                             %error,
-                            "could not show a Floating part window"
+                            "could not show a Floating Column window"
                         ),
                     }
                 }
@@ -5487,7 +5487,7 @@ impl FloatingWindowManager {
                         tracing::warn!(
                             ?spec.member,
                             %error,
-                            "could not hide a Floating part while its PanelViews are transported"
+                            "could not hide a Floating Column while its PanelViews are transported"
                         );
                     } else if let Some(entry) = self.registry.members.get_mut(&spec.member) {
                         entry.visibility = PanelWindowVisibility::Hidden;
@@ -5540,27 +5540,26 @@ impl FloatingWindowManager {
                 .retain(|candidate| !rebuilt_links.contains(candidate));
         }
 
-        // Resolve the single X owner after the typed WindowGrid has been rebuilt.
-        // Cache the result on each Header host so its Render implementation never
-        // re-enters this manager merely to decide whether to show the close button.
-        let header_windows = self
+        // Cache the single close-button owner on the rightmost Column host.
+        // Render must not re-enter FloatingWindowManager to inspect WindowGrid.
+        let column_windows = self
             .registry
             .members
             .iter()
             .filter_map(|(member, entry)| {
-                let WindowGridMember::Header(column) = member else {
+                let WindowGridMember::Column(column) = member else {
                     return None;
                 };
                 Some((*column, entry.window))
             })
             .collect::<Vec<_>>();
-        for (column, window) in header_windows {
-            let show_close_button = self.is_rightmost_header(column);
-            if let Err(error) = window.set_header_close_button(show_close_button, cx) {
+        for (column, window) in column_windows {
+            let show_close_button = self.is_rightmost_column(column);
+            if let Err(error) = window.set_column_close_button(show_close_button, cx) {
                 tracing::debug!(
                     ?column,
                     %error,
-                    "could not update the Floating Header close-button owner"
+                    "could not update the Floating Column close-button owner"
                 );
             }
         }
