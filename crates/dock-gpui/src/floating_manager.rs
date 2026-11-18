@@ -6750,267 +6750,123 @@ mod floating_part_topology_tests {
         FloatingPartKind, FloatingPartWindowSnapshot, floating_part_boundary_member,
         floating_part_internal_links,
     };
-    use crate::window_chain::{WindowGridDirection, WindowGridMember, WindowGridRegistry};
+    use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
     use dock_core::{FloatingGroupId, NodeId, Point, Rect, Size};
     use slotmap::SlotMap;
 
-    fn part(
-        member: WindowGridMember,
+    fn column(
+        column: NodeId,
         floating_group: FloatingGroupId,
-        kind: FloatingPartKind,
         x: f32,
-        y: f32,
     ) -> FloatingPartWindowSnapshot {
         FloatingPartWindowSnapshot {
-            member,
+            member: WindowGridMember::Column(column),
             floating_group: Some(floating_group),
-            kind,
+            kind: FloatingPartKind::Column { column },
             main_drag_side: None,
-            bounds: Rect::new(Point::new(x, y), Size::new(240.0, 180.0)),
+            bounds: Rect::new(Point::new(x, 0.0), Size::new(240.0, 420.0)),
             floating_origin: Point::new(100.0, 200.0),
-            local_origin: Point::new(x, y),
+            local_origin: Point::new(x, 0.0),
             contains_transferred_panels: false,
         }
     }
 
     #[test]
-    fn two_columns_build_one_header_row_and_two_independent_group_stacks() {
+    fn two_floating_columns_build_one_horizontal_window_grid_link() {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
         let floating = floating_ids.insert(());
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
-        let group_a1 = node_ids.insert(());
-        let group_a2 = node_ids.insert(());
-        let group_b1 = node_ids.insert(());
-        let group_b2 = node_ids.insert(());
 
-        let header_a = WindowGridMember::Header(column_a);
-        let header_b = WindowGridMember::Header(column_b);
-        let a1 = WindowGridMember::Group(group_a1);
-        let a2 = WindowGridMember::Group(group_a2);
-        let b1 = WindowGridMember::Group(group_b1);
-        let b2 = WindowGridMember::Group(group_b2);
-
+        let member_a = WindowGridMember::Column(column_a);
+        let member_b = WindowGridMember::Column(column_b);
         let specs = [
-            part(
-                header_a,
-                floating,
-                FloatingPartKind::Header { column: column_a },
-                0.0,
-                0.0,
-            ),
-            part(
-                a1,
-                floating,
-                FloatingPartKind::Group { column: column_a, group: group_a1 },
-                0.0,
-                40.0,
-            ),
-            part(
-                a2,
-                floating,
-                FloatingPartKind::Group { column: column_a, group: group_a2 },
-                0.0,
-                220.0,
-            ),
-            part(
-                header_b,
-                floating,
-                FloatingPartKind::Header { column: column_b },
-                244.0,
-                0.0,
-            ),
-            part(
-                b1,
-                floating,
-                FloatingPartKind::Group { column: column_b, group: group_b1 },
-                244.0,
-                40.0,
-            ),
-            part(
-                b2,
-                floating,
-                FloatingPartKind::Group { column: column_b, group: group_b2 },
-                244.0,
-                220.0,
-            ),
+            column(column_a, floating, 0.0),
+            column(column_b, floating, 244.0),
         ];
 
         let links = floating_part_internal_links(&specs);
-        assert_eq!(links.len(), 5);
-        assert!(links.contains(&crate::window_chain::WindowGridLink {
-            from: header_a,
-            to: a1,
-            direction: WindowGridDirection::Below,
-        }));
-        assert!(links.contains(&crate::window_chain::WindowGridLink {
-            from: a1,
-            to: a2,
-            direction: WindowGridDirection::Below,
-        }));
-        assert!(links.contains(&crate::window_chain::WindowGridLink {
-            from: header_a,
-            to: header_b,
-            direction: WindowGridDirection::Right,
-        }));
-        assert!(links.contains(&crate::window_chain::WindowGridLink {
-            from: header_b,
-            to: b1,
-            direction: WindowGridDirection::Below,
-        }));
-        assert!(links.contains(&crate::window_chain::WindowGridLink {
-            from: b1,
-            to: b2,
-            direction: WindowGridDirection::Below,
-        }));
+        assert_eq!(
+            links,
+            vec![WindowGridLink {
+                from: member_a,
+                to: member_b,
+                direction: WindowGridDirection::Right,
+            }],
+        );
 
         let mut registry = WindowGridRegistry::default();
         assert!(registry.replace_all_links(&links));
-        assert_eq!(registry.members_for(header_a).len(), 6);
-        assert_eq!(registry.all_links().len(), 5);
+        assert_eq!(registry.members_for(member_a), vec![member_a, member_b]);
+        assert_eq!(registry.all_links().len(), 1);
     }
 
     #[test]
-    fn external_composition_link_migrates_to_real_header_boundaries() {
+    fn external_composition_link_migrates_to_the_outer_column_members() {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
         let floating_a = floating_ids.insert(());
-        let floating_b = floating_ids.insert(());
+        let floating_b = floating_ids.insert();
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
         let column_c = node_ids.insert(());
-        let group_a_id = node_ids.insert(());
-        let group_b_id = node_ids.insert(());
-        let group_c_id = node_ids.insert(());
-        let header_a = WindowGridMember::Header(column_a);
-        let header_b = WindowGridMember::Header(column_b);
-        let header_c = WindowGridMember::Header(column_c);
-        let group_a = WindowGridMember::Group(group_a_id);
-        let group_b = WindowGridMember::Group(group_b_id);
-        let group_c = WindowGridMember::Group(group_c_id);
+        let member_a = WindowGridMember::Column(column_a);
+        let member_b = WindowGridMember::Column(column_b);
+        let member_c = WindowGridMember::Column(column_c);
         let specs = [
-            part(
-                header_a,
-                floating_a,
-                FloatingPartKind::Header { column: column_a },
-                0.0,
-                0.0,
-            ),
-            part(
-                group_a,
-                floating_a,
-                FloatingPartKind::Group { column: column_a, group: group_a_id },
-                0.0,
-                40.0,
-            ),
-            part(
-                header_b,
-                floating_a,
-                FloatingPartKind::Header { column: column_b },
-                244.0,
-                0.0,
-            ),
-            part(
-                group_b,
-                floating_a,
-                FloatingPartKind::Group { column: column_b, group: group_b_id },
-                244.0,
-                40.0,
-            ),
-            part(
-                header_c,
-                floating_b,
-                FloatingPartKind::Header { column: column_c },
-                600.0,
-                0.0,
-            ),
-            part(
-                group_c,
-                floating_b,
-                FloatingPartKind::Group { column: column_c, group: group_c_id },
-                600.0,
-                40.0,
-            ),
+            column(column_a, floating_a, 0.0),
+            column(column_b, floating_a, 244.0),
+            column(column_c, floating_b, 0.0),
         ];
 
         let mut links = floating_part_internal_links(&specs);
-        let migrated = crate::window_chain::WindowGridLink {
+        let migrated = WindowGridLink {
             from: floating_part_boundary_member(&specs, floating_a, WindowGridDirection::Right)
                 .expect("right boundary of the first composition"),
             to: floating_part_boundary_member(&specs, floating_b, WindowGridDirection::Left)
                 .expect("left boundary of the second composition"),
             direction: WindowGridDirection::Right,
         };
-        assert_eq!(migrated.from, header_b);
-        assert_eq!(migrated.to, header_c);
+        assert_eq!(migrated.from, member_b);
+        assert_eq!(migrated.to, member_c);
         links.push(migrated);
 
         let mut registry = WindowGridRegistry::default();
         assert!(registry.replace_all_links(&links));
-        assert_eq!(registry.members_for(header_a).len(), specs.len());
+        assert_eq!(registry.members_for(member_a).len(), specs.len());
         assert!(registry.all_links().contains(&migrated));
     }
 
     #[test]
-    fn composition_boundaries_resolve_to_outermost_header_and_group() {
+    fn composition_boundaries_resolve_to_outermost_columns() {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
         let floating = floating_ids.insert(());
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
-        let group_a = node_ids.insert(());
-        let group_b = node_ids.insert(());
-        let header_a = WindowGridMember::Header(column_a);
-        let header_b = WindowGridMember::Header(column_b);
-        let top_group = WindowGridMember::Group(group_a);
-        let bottom_group = WindowGridMember::Group(group_b);
+        let member_a = WindowGridMember::Column(column_a);
+        let member_b = WindowGridMember::Column(column_b);
         let specs = [
-            part(
-                header_a,
-                floating,
-                FloatingPartKind::Header { column: column_a },
-                0.0,
-                0.0,
-            ),
-            part(
-                top_group,
-                floating,
-                FloatingPartKind::Group { column: column_a, group: group_a },
-                0.0,
-                40.0,
-            ),
-            part(
-                header_b,
-                floating,
-                FloatingPartKind::Header { column: column_b },
-                244.0,
-                0.0,
-            ),
-            part(
-                bottom_group,
-                floating,
-                FloatingPartKind::Group { column: column_b, group: group_b },
-                244.0,
-                40.0,
-            ),
+            column(column_a, floating, 0.0),
+            column(column_b, floating, 244.0),
         ];
 
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Left),
-            Some(header_a),
+            Some(member_a),
         );
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Right),
-            Some(header_b),
+            Some(member_b),
         );
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Above),
-            Some(header_a),
+            Some(member_a),
         );
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Below),
-            Some(bottom_group),
+            Some(member_b),
         );
     }
 }
