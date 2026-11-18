@@ -340,10 +340,14 @@ impl Layout {
         group: crate::FloatingGroupId,
         column: crate::NodeId,
         height: f32,
+        origin_y_offset: f32,
         metrics: &DockMetrics,
     ) -> Result<LayoutRects, ComputeRectsError> {
         if !height.is_finite() || height <= 0.0 {
             return Err(ComputeRectsError::Geometry(GeometryError::NonPositiveDimension));
+        }
+        if !origin_y_offset.is_finite() {
+            return Err(ComputeRectsError::Geometry(GeometryError::ArithmeticOverflow));
         }
 
         let floating = self
@@ -381,7 +385,10 @@ impl Layout {
             .find(|candidate| candidate.column == column)
             .ok_or(ComputeRectsError::InvalidLayoutState)?;
         let column_rect = Rect::new(
-            base_column.rect.origin,
+            Point::new(
+                base_column.rect.origin.x,
+                base_column.rect.origin.y + origin_y_offset,
+            ),
             Size::new(base_column.rect.size.width, height),
         );
         column_rect
