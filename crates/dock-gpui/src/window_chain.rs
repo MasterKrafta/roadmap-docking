@@ -49,6 +49,13 @@ mod tests {
             .collect()
     }
 
+    fn columns(count: usize) -> Vec<WindowGridMember> {
+        let mut ids = SlotMap::<NodeId, ()>::with_key();
+        (0..count)
+            .map(|_| WindowGridMember::Column(ids.insert(())))
+            .collect()
+    }
+
     #[test]
     fn header_group_and_legacy_composition_have_distinct_member_identities() {
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
@@ -113,6 +120,22 @@ mod tests {
         assert_eq!(grid.direction_between(a, b), Some(WindowGridDirection::Right));
         assert_eq!(grid.direction_between(c, d), Some(WindowGridDirection::Below));
         assert_eq!(grid.direction_between(a, c), Some(WindowGridDirection::Below));
+        assert!(grid.is_valid());
+    }
+
+    #[test]
+    fn joining_existing_column_grids_preserves_both_internal_column_links() {
+        let [a, b, c, d] = columns(4).try_into().expect("four Column members");
+        let mut grid = WindowGridRegistry::default();
+
+        assert!(grid.link_after(a, b));
+        assert!(grid.link_after(c, d));
+        assert!(grid.link_to_side(b, c, WindowGridDirection::Right));
+
+        assert_eq!(grid.members_for(a), vec![a, b, c, d]);
+        assert_eq!(grid.direction_between(a, b), Some(WindowGridDirection::Right));
+        assert_eq!(grid.direction_between(b, c), Some(WindowGridDirection::Right));
+        assert_eq!(grid.direction_between(c, d), Some(WindowGridDirection::Right));
         assert!(grid.is_valid());
     }
 
