@@ -12,6 +12,7 @@ pub(super) struct PanelWindowEntry {
     pub(super) native_min_size: Option<PhysicalSize>,
     pub(super) native_horizontal_resize_min_widths: Option<(i32, i32)>,
     pub(super) native_left_resize_enabled: Option<bool>,
+    pub(super) native_right_resize_enabled: Option<bool>,
     pub(super) native_top_resize_enabled: Option<bool>,
     pub(super) native_scale_factor: Option<f32>,
     /// The HWND may differ from Core bounds after the OS-owned resize loop.
