@@ -21,7 +21,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DockWindowPart, DragHostManager, DragSourceHost,
-    components::{FloatingHost, floating::{floating_part_local_rect, FloatingPartHost, FloatingPartKind}},
+    components::{FloatingHost, floating::{floating_column_host_rect, floating_part_local_rect, FloatingPartHost, FloatingPartKind}},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
@@ -89,7 +89,7 @@ fn floating_part_screen_bounds(
     )
 }
 
-fn floating_column_core_bounds(
+fn floating_column_host_bounds(
     layout: &dock_core::Layout,
     metrics: &dock_core::DockMetrics,
     group: FloatingGroupId,
@@ -97,15 +97,19 @@ fn floating_column_core_bounds(
     scale_factor: f32,
 ) -> Option<(Rect, Rect)> {
     let floating = layout.floating_group(group)?;
-    let column_rect = layout
-        .compute_floating_rects(group, metrics)
-        .ok()?
+    let rects = layout.compute_floating_rects(group, metrics).ok()?;
+    let column_rect = rects
         .columns
-        .into_iter()
+        .iter()
         .find(|candidate| candidate.column == column)?;
+    let host_rect = floating_column_host_rect(
+        column_rect.rect,
+        &rects.splitters,
+        metrics.splitter_thickness,
+    );
     Some((
         floating.bounds,
-        floating_part_screen_bounds(floating.bounds, column_rect.rect, scale_factor),
+        floating_part_screen_bounds(floating.bounds, host_rect, scale_factor),
     ))
 }
 
@@ -151,9 +155,14 @@ fn collect_floating_part_windows(
             let contains_transferred_panels = panels
                 .iter()
                 .any(|panel| transferred_panels.contains(panel));
+            let host_rect = floating_column_host_rect(
+                column_rect.rect,
+                &rects.splitters,
+                metrics.splitter_thickness,
+            );
             let bounds = floating_part_screen_bounds(
                 floating.bounds,
-                column_rect.rect,
+                host_rect,
                 scale_factor,
             );
             if bounds.validate_non_empty().is_err() {
@@ -169,7 +178,7 @@ fn collect_floating_part_windows(
                 main_drag_side: None,
                 bounds,
                 floating_origin: floating.bounds.origin,
-                local_origin: column_rect.rect.origin,
+                local_origin: host_rect.origin,
                 contains_transferred_panels,
             });
         }
@@ -1685,7 +1694,7 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let Some((current_group_bounds, current_column_bounds)) = self.controller.update(cx, |controller, _| {
-            floating_column_core_bounds(
+            floating_column_host_bounds(
                 controller.layout(),
                 &controller.metrics(),
                 group,
@@ -1826,7 +1835,7 @@ impl FloatingWindowManager {
                 Ok(_) => {
                     // Use Core's accepted Column rectangle, not the raw native
                     // proposal: a Core minimum may clamp a WM_SIZING sample.
-                    let accepted_column_bounds = floating_column_core_bounds(
+                    let accepted_column_bounds = floating_column_host_bounds(
                         controller.layout(),
                         &controller.metrics(),
                         group,
@@ -6532,16 +6541,26 @@ impl FloatingWindowManager {
 
         let minimum = self.controller.update(cx, |controller, _| {
             let metrics = controller.metrics();
-            let column_minimum = controller
-                .layout()
+            let layout = controller.layout();
+            let rects = layout.compute_floating_rects(group, &metrics).ok()?;
+            let column_rect = rects
+                .columns
+                .iter()
+                .find(|candidate| candidate.column == column)?;
+            let host_rect = floating_column_host_rect(
+                column_rect.rect,
+                &rects.splitters,
+                metrics.splitter_thickness,
+            );
+            let host_padding = (host_rect.size.width - column_rect.rect.size.width).max(0.0);
+            let column_minimum = layout
                 .floating_column_minimum_size(group, column, &metrics)
                 .ok()?;
-            let composition_minimum = controller
-                .layout()
+            let composition_minimum = layout
                 .floating_minimum_size(group, &metrics)
                 .ok()?;
             Some(Size::new(
-                column_minimum.width,
+                column_minimum.width + host_padding,
                 column_minimum.height.max(composition_minimum.height),
             ))
         });
