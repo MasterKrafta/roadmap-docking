@@ -12,8 +12,8 @@ use dock_core::{
 };
 use gpui::{
     App, Context, DispatchPhase, Entity, FocusHandle, HitboxBehavior, HitboxId, IntoElement,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Styled, WeakEntity,
-    Window, WindowId, canvas,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, Styled,
+    WeakEntity, Window, WindowId, canvas,
 };
 use crate::{
     dock_components::{
@@ -1350,7 +1350,7 @@ fn handle_floating_escape(
     DockInteractionCoordinator::cancel_on_escape(controller, window, pointer_capture, app);
     app.stop_propagation();
 }
-fn observe_floating_focus_loss<T: 'static>(
+fn observe_floating_focus_loss<T: 'static + Render>(
     cx: &mut Context<T>,
     focus_handle: &FocusHandle,
     window: &mut Window,
