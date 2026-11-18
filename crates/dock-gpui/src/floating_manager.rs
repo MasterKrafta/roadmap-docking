@@ -360,10 +360,8 @@ fn floating_part_boundary_member_from_rects(
                 .then_with(|| left.origin.y.total_cmp(&right.origin.y))
         }),
         WindowGridDirection::Right => candidates.iter().max_by(|(_, left), (_, right)| {
-            left.origin
-                .x
-                .add(left.size.width)
-                .total_cmp(&right.origin.x.add(right.size.width))
+            (left.origin.x + left.size.width)
+                .total_cmp(&(right.origin.x + right.size.width))
                 .then_with(|| left.origin.y.total_cmp(&right.origin.y))
         }),
         WindowGridDirection::Above => candidates.iter().min_by(|(_, left), (_, right)| {
@@ -373,10 +371,8 @@ fn floating_part_boundary_member_from_rects(
                 .then_with(|| left.origin.x.total_cmp(&right.origin.x))
         }),
         WindowGridDirection::Below => candidates.iter().max_by(|(_, left), (_, right)| {
-            left.origin
-                .y
-                .add(left.size.height)
-                .total_cmp(&right.origin.y.add(right.size.height))
+            (left.origin.y + left.size.height)
+                .total_cmp(&(right.origin.y + right.size.height))
                 .then_with(|| left.origin.x.total_cmp(&right.origin.x))
         }),
     }?;
