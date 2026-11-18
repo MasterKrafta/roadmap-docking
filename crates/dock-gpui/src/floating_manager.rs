@@ -833,7 +833,7 @@ impl FloatingWindowManager {
     ///
     /// This method deliberately does not reconcile: DragHost registers the
     /// source-ordered Core result, then the next reconcile migrates those
-    /// temporary composition links to the permanent Header/Group members.
+    /// temporary composition links to the permanent Column members.
     pub(crate) fn register_window_chain(&mut self, groups: &[FloatingGroupId]) -> bool {
         if groups.is_empty() { return false; }
         if groups.len() == 1 { return true; }
@@ -1157,8 +1157,8 @@ impl FloatingWindowManager {
                             manager.schedule_reconcile(manager_cx);
                         }
                         DockEvent::MetricsChanged { .. } => {
-                            // Updated metrics change every Header/Group client
-                            // rectangle. Queue one real member per connected WindowGrid.
+                            // Updated metrics change every Column client rectangle.
+                            // Queue one real member per connected WindowGrid.
                             let mut anchors = HashSet::new();
                             for group in manager.part_members_by_group.keys().copied() {
                                 let anchor = manager.grid_anchor_member_for_group(group);
@@ -3092,7 +3092,7 @@ impl FloatingWindowManager {
                     .or_else(|| state.source_group.map(|_| NativeMoveTarget::RejectedGroupDrop))
             })
         } else {
-            // Permanent Floating Header/Group hosts are keyed by Core member,
+            // Permanent Floating Column hosts are keyed by Core member,
             // not by the legacy PanelId composition registry.
             let typed_target = self.registry.members.iter().find_map(|(member, entry)| {
                 if entry.native_window == Some(target_window)
@@ -3588,7 +3588,7 @@ impl FloatingWindowManager {
             .collect::<HashSet<_>>();
         known_windows.extend(temporary_part_windows.iter().copied());
 
-        // The DragHost and every moving Header/Group HWND are transport surfaces,
+        // The DragHost and every moving temporary Column HWND are transport surfaces,
         // never drop targets. Exclude them one by one so hit testing reaches the
         // persistent Main/Floating window underneath the temporary composition.
         let mut excluded = Some(drag_host);
@@ -4592,7 +4592,7 @@ impl FloatingWindowManager {
         };
 
         // Discard externally closed legacy/DragHost handles. Permanent Floating
-        // Header/Group windows have already been reconciled by Core-node identity.
+        // Column windows have already been reconciled by Core-node identity.
         let unavailable_panels = self
             .registry
             .windows
@@ -5236,7 +5236,7 @@ impl FloatingWindowManager {
                 };
                 // Legacy PanelId-host path: a transferred composition stays hidden
                 // until DragHost has rendered its empty placeholder and released the
-                // cached AnyViews. Permanent typed Group hosts use reconcile_part_windows.
+                // cached AnyViews. Permanent typed Column hosts use reconcile_part_windows.
                 if entry.visibility == PanelWindowVisibility::Hidden
                     && group.panels.iter().any(|panel| transferred_panels.contains(panel))
                 {
@@ -5306,9 +5306,9 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Shows permanent Group hosts only after DragHost has stopped mounting the
-    /// transferred AnyViews. This prevents an empty destination frame while the
-    /// temporary source window still owns the content.
+    /// Shows permanent Column hosts (and any transitional Group hosts) only after
+    /// DragHost has stopped mounting the transferred AnyViews. This prevents an
+    /// empty destination frame while the temporary source window still owns content.
     pub(crate) fn show_handoff_target(
         &mut self,
         group: FloatingGroupId,
@@ -5324,10 +5324,10 @@ impl FloatingWindowManager {
 
         // LayoutChanged reconciliation is deferred to avoid entity re-entry.
         // At handoff time the DragHost has released its PanelViews, so reconcile
-        // now to ensure the destination Group HWNDs exist before showing them.
+        // now to ensure the destination Column HWNDs exist before showing them.
         self.reconcile(cx);
 
-        let group_windows = self
+        let part_windows = self
             .registry
             .members
             .iter()
@@ -5339,11 +5339,11 @@ impl FloatingWindowManager {
                 (*member, entry.host_group, entry.window, entry.native_window, entry.visibility)
             })
             .collect::<Vec<_>>();
-        let has_typed_group_windows = !group_windows.is_empty();
+        let has_typed_part_windows = !part_windows.is_empty();
         let mut ready_groups = HashSet::new();
         let mut all_windows_ready = true;
 
-        for (member, owner, window, native_window, visibility) in group_windows {
+        for (member, owner, window, native_window, visibility) in part_windows {
             let Some(native_window) = native_window else {
                 all_windows_ready = false;
                 continue;
@@ -5354,7 +5354,7 @@ impl FloatingWindowManager {
                         ?group,
                         ?member,
                         %error,
-                        "could not show a Floating Group window during DragHost handoff"
+                        "could not show a Floating Column/Group host during DragHost handoff"
                     );
                     all_windows_ready = false;
                     continue;
@@ -5380,7 +5380,7 @@ impl FloatingWindowManager {
             }
         }
 
-        if has_typed_group_windows {
+        if has_typed_part_windows {
             let all_destinations_ready = all_windows_ready
                 && expected_groups
                     .iter()
@@ -5690,9 +5690,9 @@ impl FloatingWindowManager {
         )
     }
 
-    /// Returns the transferred active panels belonging to one ready Group host.
-    /// The host calls this during render before scheduling a next-frame handoff
-    /// confirmation.
+    /// Returns the transferred active panels belonging to one ready Column host
+    /// or transitional Group host. The host calls this during render before
+    /// scheduling a next-frame handoff confirmation.
     pub(crate) fn pending_drag_host_handoff_panels(
         &self,
         group: FloatingGroupId,
@@ -5743,9 +5743,9 @@ impl FloatingWindowManager {
         drag_host.update(cx, |manager, _| manager.pending_handoff_panels(group))
     }
 
-    /// Called after one Group host has rendered the transferred active PanelViews
-    /// that belong to its Core Group. DragHostManager closes only after every
-    /// required Group host across all detached FloatingGroups has rendered.
+    /// Called after one destination host has rendered the transferred active
+    /// PanelViews belonging to its Column or Group subtree. DragHostManager closes
+    /// only after every required host across all detached FloatingGroups has rendered.
     pub(crate) fn notify_drag_host_handoff_rendered(
         &mut self,
         group: FloatingGroupId,
