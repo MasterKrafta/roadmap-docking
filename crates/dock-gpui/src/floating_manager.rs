@@ -2652,8 +2652,8 @@ impl FloatingWindowManager {
                 x: original.x.saturating_add(dx),
                 y: original.y.saturating_add(dy),
             };
-            if let Err(error) = self.native_ops.move_window(native_window, position) {
-                tracing::warn!(?member, %error, "could not move a temporary Main drag part");
+            if let Err(error) = self.native_ops.move_window_to_top(native_window, position) {
+                tracing::warn!(?member, %error, "could not move a temporary Main drag part to the foreground");
                 return false;
             }
         }
