@@ -1405,8 +1405,8 @@ impl DragHostManager {
         let Some(manager) = self.floating_manager.clone() else {
             return false;
         };
-        let adopted = manager.update(cx, |manager, _| {
-            manager.adopt_main_drag_parts(cx)
+        let adopted = manager.update(cx, |manager, manager_cx| {
+            manager.adopt_main_drag_parts(manager_cx)
         });
         if !adopted {
             return false;
