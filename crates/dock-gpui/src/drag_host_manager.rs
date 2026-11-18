@@ -13,7 +13,7 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnRect, CommandValue, DockCommand, DockSide, DragDropAction, DragHandle, DragPayload,
+    ColumnRect, CommandValue, DockSide, DragDropAction, DragHandle, DragPayload,
     DragState, DropTarget, FloatingGroupId, Node, NodeId, PanelId, Point, Rect, Size,
 };
 
