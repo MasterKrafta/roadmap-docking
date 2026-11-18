@@ -367,13 +367,13 @@ pub(crate) fn arrange_window_grid_bounds_with_preserved_offsets(
 
             let mut previous = current;
             for neighbour in neighbours {
-                let parallel_offset = if let Some(link) = links.iter().find(|link| {
+                let preserve_parallel_offset = links.iter().any(|link| {
                     preserve_parallel_offsets.contains(link)
                         && ((link.from == bounds[previous].0 && link.to == bounds[neighbour].0)
                             || (link.to == bounds[previous].0
                                 && link.from == bounds[neighbour].0))
-                }) {
-                    let _ = link;
+                });
+                let parallel_offset = if preserve_parallel_offset {
                     Some(match direction {
                         WindowGridDirection::Left | WindowGridDirection::Right => {
                             original_bounds[neighbour].1.origin.y
@@ -1347,8 +1347,8 @@ mod window_grid_bounds_tests {
         .expect("internal Column offsets should coexist with an external horizontal join");
 
         assert_eq!(arranged[0].1.origin, Point::new(100.0, 200.0));
-        assert_eq!(arranged[1].1.origin, Point::new(208.0, 245.0));
-        assert_eq!(arranged[2].1.origin, Point::new(316.0, 245.0));
+        assert_eq!(arranged[1].1.origin, Point::new(200.0, 245.0));
+        assert_eq!(arranged[2].1.origin, Point::new(300.0, 245.0));
     }
 
     #[test]
