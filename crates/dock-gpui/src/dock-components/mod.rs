@@ -9,7 +9,7 @@ mod group_presentation;
 pub(crate) use group::DockGroupView;
 pub(crate) use group_presentation::{
     active_panels_for_groups, collect_group_presentations, GroupPresentation,
-    PanelTransferPresentation,
+    PanelTransferPresentation, TabPresentation,
 };
 
 pub use composition_header::{
