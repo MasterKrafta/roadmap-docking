@@ -378,15 +378,25 @@ pub(crate) fn render_column_content(
     }
 
     div()
-        .id(format!("dock-column-{:?}", column.column))
+        .id(format!("dock-composition-column-{:?}", column.column))
         .absolute()
         .left(px(column.rect.origin.x))
         .top(px(column.rect.origin.y))
         .w(px(column.rect.size.width))
         .h(px(column.rect.size.height))
         .overflow_hidden()
-        .bg(rgb(theme.colors.dock_background))
-        .child(scroll_viewport)
+        .child(
+            div()
+                .id(format!("dock-column-{:?}", column.column))
+                .absolute()
+                .left_0()
+                .top_0()
+                .w(px(column.rect.size.width))
+                .h(px(column.rect.size.height))
+                .overflow_hidden()
+                .bg(rgb(theme.colors.dock_background))
+                .child(scroll_viewport),
+        )
 }
 
 pub(crate) fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {

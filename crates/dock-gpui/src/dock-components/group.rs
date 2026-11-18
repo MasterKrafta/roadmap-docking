@@ -205,8 +205,8 @@ impl DockGroupView {
     /// Renders a Core Group with its complete tab strip and group controls.
     ///
     /// The geometry and tab presentation are supplied by dock-core and the host.
-    /// This keeps the new DockColumn renderer on the same interactive path for
-    /// one-tab, multi-tab and multi-group Columns.
+    /// Main places this Group directly in its native window; Floating places
+    /// the same component inside the Group's own native window.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_core(
         column: Option<NodeId>,
