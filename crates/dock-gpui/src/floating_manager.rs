@@ -4276,7 +4276,7 @@ impl FloatingWindowManager {
         let member_bounds = self
             .native_bounds_for_grid_members(&members)
             .ok_or(dock_core::CommandError::InvalidTarget {
-                reason: "could not read the native bounds of every Header and Group in the joined WindowGrid",
+                reason: "could not read the native bounds of every Column in the joined WindowGrid",
             })?;
         let links = next_chains
             .links_for(anchor_member)
