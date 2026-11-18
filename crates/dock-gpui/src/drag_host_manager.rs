@@ -554,6 +554,18 @@ impl DragHostManager {
             return Err(DragHostError::Native(error));
         }
 
+        if let Some(side) = dock_area {
+            let opened = self.floating_manager.as_ref().is_some_and(|manager| {
+                manager.update(cx, |manager, manager_cx| {
+                    manager.open_main_drag_parts(side, manager_cx)
+                })
+            });
+            if !opened {
+                self.discard_unregistered_window(&window, native_window, cx);
+                return Err(DragHostError::ContentTransferUnavailable);
+            }
+        }
+
         let host_state_ready = self.controller.update(cx, |controller, controller_cx| {
             let attached = controller.drag_mut().attach_transport_host(id);
             let transferred = match (group, dock_area, panels.as_slice()) {
@@ -573,6 +585,11 @@ impl DragHostManager {
             attached && transferred
         });
         if !host_state_ready {
+            if let Some(manager) = self.floating_manager.as_ref() {
+                manager.update(cx, |manager, manager_cx| {
+                    manager.close_main_drag_parts(manager_cx);
+                });
+            }
             self.controller.update(cx, |controller, _| {
                 controller.drag_mut().clear_transport_host(id);
             });
@@ -583,7 +600,7 @@ impl DragHostManager {
             ));
         }
 
-        let visible = panels.is_empty();
+        let visible = panels.is_empty() && dock_area.is_none();
         let frame_was_removed = frame_state.is_some();
         if visible
             && let Err(error) = self.native_ops.show_no_activate(native_window)
@@ -601,6 +618,7 @@ impl DragHostManager {
             window_id,
             native_window,
             panels: panels.clone(),
+            dock_area,
             grab_offset,
             frame_state,
             frame_was_removed,
@@ -613,6 +631,16 @@ impl DragHostManager {
             source_detach_subscription: None,
             handoff: None,
         });
+
+        if dock_area.is_some() && panels.is_empty() {
+            let shown = self.floating_manager.as_ref().is_some_and(|manager| {
+                manager.update(cx, |manager, _| manager.show_main_drag_parts())
+            });
+            if !shown {
+                self.cancel_active_drag(id, cx);
+                return Err(DragHostError::ContentTransferUnavailable);
+            }
+        }
 
         if !panels.is_empty() {
             let controller = self.controller.clone();
@@ -633,11 +661,28 @@ impl DragHostManager {
                 if !source_detached {
                     return;
                 }
-                if let Err(error) = manager.show_pending_drag_host(id) {
+                let show_result = if manager.active.as_ref()
+                    .filter(|active| active.id == id)
+                    .is_some_and(|active| active.dock_area.is_some())
+                {
+                    let shown = manager.floating_manager.as_ref().is_some_and(|floating_manager| {
+                        floating_manager.update(manager_cx, |floating_manager, _| {
+                            floating_manager.show_main_drag_parts()
+                        })
+                    });
+                    if shown {
+                        Ok(())
+                    } else {
+                        Err(DragHostError::ContentTransferUnavailable)
+                    }
+                } else {
+                    manager.show_pending_drag_host(id)
+                };
+                if let Err(error) = show_result {
                     tracing::warn!(
                         ?id,
                         %error,
-                        "could not show DragHost after source placeholder was rendered"
+                        "could not show DragHost surfaces after source placeholder was rendered"
                     );
                     if let Err(close_error) = manager.close(id, manager_cx) {
                         tracing::warn!(
@@ -736,6 +781,7 @@ impl DragHostManager {
         }
         let native_drag_host = active.native_window;
         let grab_offset = active.grab_offset;
+        let dock_area = active.dock_area;
         let floating_manager = self.floating_manager.clone();
 
         // DragHost tracks the global pointer independently from GPUI focus.
@@ -815,8 +861,17 @@ impl DragHostManager {
                 }
             },
         };
-        if let Err(error) = self.move_to_cursor(id, grab_offset, cursor) {
-            tracing::warn!(?id, %error, "DragHost could not follow the cursor");
+        let moved = if dock_area.is_some() {
+            floating_manager.as_ref().is_some_and(|floating_manager| {
+                floating_manager.update(cx, |manager, _| {
+                    manager.move_main_drag_parts(cursor, grab_offset)
+                })
+            })
+        } else {
+            self.move_to_cursor(id, grab_offset, cursor).is_ok()
+        };
+        if !moved {
+            tracing::warn!(?id, "DragHost surfaces could not follow the cursor");
             self.cancel_active_drag(id, cx);
             return false;
         }
@@ -1897,6 +1952,12 @@ impl DragHostManager {
             return Err(DragHostError::NotActive(id));
         }
         drop(active.source_detach_subscription.take());
+
+        if let Some(manager) = self.floating_manager.as_ref() {
+            manager.update(cx, |manager, manager_cx| {
+                manager.close_main_drag_parts(manager_cx);
+            });
+        }
 
         if let Err(error) = self.native_ops.hide(active.native_window) {
             tracing::debug!(
