@@ -212,6 +212,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
+            None,
             Vec::new(),
             None,
             None,
@@ -242,6 +243,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
+            None,
             vec![panel],
             None,
             None,
@@ -271,6 +273,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
+            None,
             vec![panel],
             None,
             None,
@@ -288,6 +291,7 @@ impl DragHostManager {
     pub fn open_group_at_cursor(
         &mut self,
         group: NodeId,
+        source_window_id: WindowId,
         panels: Vec<PanelId>,
         grab_offset: Point,
         logical_size: Size,
@@ -306,6 +310,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
+            Some(source_window_id),
             panels,
             Some(group),
             None,
@@ -337,6 +342,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
+            None,
             panels,
             None,
             Some(side),
@@ -351,6 +357,7 @@ impl DragHostManager {
         &mut self,
         grab_offset: Point,
         logical_size: Size,
+        source_window_id: Option<WindowId>,
         panels: Vec<PanelId>,
         group: Option<NodeId>,
         dock_area: Option<DockSide>,
@@ -380,8 +387,21 @@ impl DragHostManager {
         self.next_id = next_id;
 
         let cursor = self.native_ops.cursor_position()?;
-        let owner_scale = valid_scale(self.native_ops.scale_factor(owner)?)
-            .ok_or(DragHostError::InvalidScaleFactor)?;
+        let source_scale = source_window_id.and_then(|source_window_id| {
+            self.floating_manager.as_ref().and_then(|manager| {
+                manager
+                    .update(cx, |manager, _| {
+                        manager.native_scale_factor_for_window_id(source_window_id)
+                    })
+                    .ok()
+                    .flatten()
+            })
+        });
+        let owner_scale = preferred_drag_host_scale(
+            source_scale,
+            self.native_ops.scale_factor(owner).ok(),
+        )
+        .ok_or(DragHostError::InvalidScaleFactor)?;
         let physical_grab_offset =
             DockGeometry::physical_offset_from_logical(grab_offset, owner_scale)
                 .ok_or(DragHostError::InvalidGrabOffset)?;
