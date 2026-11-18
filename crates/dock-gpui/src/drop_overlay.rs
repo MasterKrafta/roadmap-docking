@@ -50,7 +50,7 @@ impl DropOverlay {
         main_dock_bounds: Option<(&HashMap<DockSide, Rect>, &HashMap<NodeId, DockSide>)>,
         floating_bounds: Option<Rect>,
         theme: Theme,
-    ) -> impl IntoElement + 'static {
+    ) -> impl IntoElement + use<> {
         let mut layer = div().absolute().top_0().left_0().size_full();
         let Some(preview) = preview else {
             return layer;
