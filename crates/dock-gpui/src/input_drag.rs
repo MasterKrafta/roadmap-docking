@@ -330,10 +330,10 @@ pub(crate) fn begin_group_drag_host(
         let host_session = controller.drag().host_session()?;
         let source_host = host_session.source_host();
         let source_window_id = host_session.source_window_id()?;
-        // Preserve Main-origin event ordering: publish LayoutChanged only
-        // after Core has created the detached Floating state. The permanent
-        // Header/Group windows are reconciled before the temporary DragHost handoff.
-        let promote_on_float = matches!(source_host, DragSourceHost::Main);
+        // Main and Floating GroupGrip gestures share the same GroupDragWindow
+        // promotion path. FreeArea can adopt this HWND as the new Column host;
+        // drops into an existing Column fall back to the normal PanelView handoff.
+        let promote_on_float = true;
         let group_rect = match source_host {
             DragSourceHost::Main => controller
                 .geometry()
