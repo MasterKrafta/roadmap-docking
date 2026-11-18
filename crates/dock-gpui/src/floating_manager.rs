@@ -409,9 +409,9 @@ pub struct FloatingWindowManager {
     registry: PanelWindowRegistry,
     host_registry: CompositionHostRegistry,
     window_chains: WindowGridRegistry,
-    /// Ordered permanent Header/Group members belonging to each Core FloatingGroup.
+    /// Ordered permanent Column HWNDs belonging to each Core FloatingGroup.
     part_members_by_group: HashMap<FloatingGroupId, Vec<WindowGridMember>>,
-    /// Header/Group HWNDs opened from Main while a DockArea is being dragged.
+    /// Temporary Column HWNDs opened from Main during a DockArea drag.
     pending_main_drag_parts: HashMap<WindowGridMember, PanelWindowEntry>,
     /// Original Main DockArea screen origin used to move every temporary part together.
     pending_main_drag_origin: Option<PhysicalPoint>,
@@ -567,7 +567,7 @@ impl FloatingWindowManager {
     }
 
     /// Returns the connected real Column HWNDs in native front-to-back order.
-    /// A standalone Floating Column still returns its own Header and Group windows.
+    /// A standalone Floating Column returns its own single Column window.
     pub(crate) fn window_grid_members_in_native_order(
         &self,
         group: FloatingGroupId,
@@ -578,7 +578,7 @@ impl FloatingWindowManager {
         floating_grid_members_in_native_front_to_back(&members, links).unwrap_or(members)
     }
 
-    /// Inserts the moving window's complete chain immediately before the anchor.
+    /// Inserts the moving Floating Column's complete WindowGrid immediately before the anchor.
     #[allow(dead_code)] // Consumed by the whole-window docking stage.
     pub(crate) fn link_window_chain_before(
         &mut self,
@@ -719,7 +719,7 @@ impl FloatingWindowManager {
 
     /// Resolves each typed WindowGrid identity to its matching permanent native host.
     ///
-    /// Header/Group resolve directly from the Core-node registry. FloatingComposition
+    /// Column members resolve directly from the Core-node registry. FloatingComposition
     /// remains a temporary bridge and resolves to the first Group window in that composition.
     fn panel_window_for_grid_member(&self, member: WindowGridMember) -> Option<&PanelWindowEntry> {
         match member {
@@ -874,7 +874,7 @@ impl FloatingWindowManager {
         })
     }
 
-    /// Computes a complete Header/Group grid from measured native frame and client
+    /// Computes a complete Column WindowGrid from measured native frame and client
     /// geometry. The target anchor never moves during an alignment operation.
     fn arrange_window_grid_bounds(
         &self,
@@ -890,7 +890,7 @@ impl FloatingWindowManager {
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
     /// The main HWND is retained as the native owner for every Floating
-    /// Header/Group host. The first reconciliation creates hosts for all
+    /// Column host. The first reconciliation creates hosts for all
     /// Floating Columns and their Core Groups.
     pub(crate) fn attach_main_window_for_drag_routing(&mut self, window: &mut Window) {
         self.host_registry.main_window_id = Some(window.window_handle().window_id());
@@ -987,7 +987,7 @@ impl FloatingWindowManager {
         self.screen_bounds_from_floating_native_window(native_window, bounds)
     }
 
-    /// Converts bounds from an exact Header/Group host into physical screen coordinates.
+    /// Converts bounds from an exact Floating Column host into physical screen coordinates.
     pub(crate) fn screen_bounds_from_floating_part(
         &self,
         source_group: FloatingGroupId,
@@ -1136,7 +1136,7 @@ impl FloatingWindowManager {
             .unwrap_or(true)
     }
 
-    /// Closes every Core FloatingGroup represented by the connected native WindowGrid.
+    /// Closes every Core FloatingGroup represented by the connected Column WindowGrid.
     ///
     /// WindowGrid identifies physical Header/Group HWNDs; the existing ownership
     /// map resolves those members back to their Core FloatingGroup identities.
@@ -1735,7 +1735,7 @@ impl FloatingWindowManager {
         self.begin_existing_window_move_with_header(group, pointer, false, cx)
     }
 
-    /// Starts a native move for every Header/Group HWND in the connected WindowGrid.
+    /// Starts a native move for every Column HWND in the connected WindowGrid.
     ///
     /// The grabbed Header identifies the source host, but the move set comes from
     /// WindowGridRegistry so all connected native windows share one pointer delta.
@@ -2922,7 +2922,7 @@ impl FloatingWindowManager {
         })
     }
 
-    /// Returns true when the cursor is over a managed Floating Header/Group or legacy host.
+    /// Returns true when the cursor is over a managed Floating Column or legacy host.
     pub(crate) fn cursor_over_floating_window_from_main(&self) -> bool {
         let Some(main) = self.main_native_window else {
             return false;
@@ -3697,7 +3697,7 @@ impl FloatingWindowManager {
 
     /// Runs host reconciliation after the active GPUI update has unwound.
     ///
-    /// Floating Core drops can change the set of permanent Header/Group hosts.
+    /// Floating Core drops can change the set of permanent Column hosts.
     /// Updating those hosts synchronously from the controller LayoutChanged
     /// subscription can re-enter the same GPUI entity.
     fn schedule_reconcile(&mut self, cx: &mut Context<Self>) {
@@ -3745,7 +3745,7 @@ impl FloatingWindowManager {
             .unwrap_or(Point::ZERO)
     }
 
-    /// Makes the typed Header/Group window registry match the current Core Layout.
+    /// Makes the typed Column window registry match the current Core Layout.
     ///
     /// Each Floating Column owns one Header host, and each Group owns one host.
     /// Main remains in its original MainDockView and never enters this registry.
@@ -3821,7 +3821,7 @@ impl FloatingWindowManager {
             }
         }
 
-        // Permanent Floating hosts are now keyed by Header/Group Core nodes.
+        // Permanent Floating hosts are keyed by Core Column nodes.
         // The PanelId-host table remains only for transitional DragHost ownership.
         let next_hosts = HashMap::<FloatingGroupId, PanelId>::new();
         let desired_panels = HashSet::<PanelId>::new();
@@ -4001,7 +4001,7 @@ impl FloatingWindowManager {
 
         self.registry.panel_locations = panel_locations;
 
-        // No permanent FloatingComposition host is published. Typed Header/Group
+        // No permanent FloatingComposition host is published. Typed Column
         // members are the visible native representation from this stage onward.
         let mut active_hosts = HashMap::new();
         let mut monitor_corrections = Vec::new();
@@ -4117,7 +4117,7 @@ impl FloatingWindowManager {
             }
         }
 
-        // Legacy PanelId-host replacement path. The typed Header/Group registry
+        // Legacy PanelId-host replacement path. The typed Column registry
         // owns permanent Floating windows; this remains for any transitional
         // PanelId-host entry that may still be present.
         let removed_panels = self
@@ -4256,7 +4256,7 @@ impl FloatingWindowManager {
         Some(true)
     }
 
-    /// Defers initial Header/Group frame alignment until the current reconcile update ends.
+    /// Defers initial Column frame alignment until the current reconcile update ends.
     ///
     /// Reading native frame geometry and then applying the correction in a separate
     /// controller update avoids re-entering this FloatingWindowManager through its
@@ -4312,7 +4312,7 @@ impl FloatingWindowManager {
         .detach();
     }
 
-    /// Calculates seam corrections while every native Header/Group frame is available.
+    /// Calculates seam corrections while every native Column frame is available.
     ///
     /// This stage only reads the controller. The resulting positions are applied later,
     /// after this manager update has unwound.
@@ -4367,7 +4367,7 @@ impl FloatingWindowManager {
                 continue;
             };
 
-            // Internal Header/Group links are already described by Core local
+            // Internal Column links are already described by Core local
             // geometry. External links may translate a whole Core composition,
             // but all members belonging to that composition must agree on one
             // common translation; otherwise Core cannot represent the result.
@@ -4445,7 +4445,7 @@ impl FloatingWindowManager {
         pending
     }
 
-    /// Applies legacy PanelId-host Z-order. Permanent Header/Group HWNDs are
+    /// Applies legacy PanelId-host Z-order. Permanent Column HWNDs are
     /// raised by synchronize_native_part_z_order using their typed graph.
     fn synchronize_native_z_order(
         &mut self,
@@ -4712,7 +4712,7 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Notifies and invalidates every visible Floating Header/Group host.
+    /// Notifies and invalidates every visible Floating Column host.
     pub(crate) fn redraw_visible_hosts(&self, cx: &mut Context<Self>) {
         let legacy_hosts = self
             .registry
@@ -5063,7 +5063,7 @@ impl FloatingWindowManager {
             focus: false,
             show: false,
             kind: WindowKind::Floating,
-            // Header/Group windows are positioned by FloatingWindowManager.
+            // Column windows are positioned by FloatingWindowManager.
             // Their custom drag and resize behavior is connected in later stages.
             is_movable: false,
             app_owns_titlebar_drag: false,
@@ -5114,7 +5114,7 @@ impl FloatingWindowManager {
                 tracing::error!(
                     ?spec.member,
                     %error,
-                    "GPUI could not create a Floating Header/Group window"
+                    "GPUI could not create a Floating Column window"
                 );
                 return None;
             }
@@ -5498,7 +5498,7 @@ impl FloatingWindowManager {
         }
 
         // Retain legacy FloatingComposition graph endpoints for this pass so
-        // their external links can be migrated to real Header/Group boundaries.
+        // their external links can be migrated to real Column boundaries.
         // Stale typed members are still pruned first, allowing WindowGrid to
         // produce straight-through candidates before the Core topology is rebuilt.
         let mut live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
@@ -5532,7 +5532,7 @@ impl FloatingWindowManager {
 
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
-        // those identities to the current Header/Group boundary members.
+        // those identities to the current Column boundary members.
         if self.rebuild_floating_part_window_grid(&desired, &previous_part_members_by_group) {
             self.migrate_pending_window_grid_state();
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
