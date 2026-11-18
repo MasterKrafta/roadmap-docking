@@ -145,6 +145,16 @@ fn floating_column_core_resize_edge(
     }
 }
 
+fn floating_column_right_resize_enabled(
+    is_first_column: bool,
+    is_last_column: bool,
+    has_multiple_columns: bool,
+    has_right_neighbor: bool,
+) -> bool {
+    (is_first_column && has_multiple_columns)
+        || (is_last_column && !has_right_neighbor)
+}
+
 fn floating_column_resize_target_bounds(
     current_group_bounds: Rect,
     native_column_bounds: Rect,
@@ -6606,9 +6616,12 @@ impl FloatingWindowManager {
         let has_right_neighbor = self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Right);
-        let desired_right_enabled =
-            (is_first_column && has_multiple_columns)
-                || (is_last_column && !has_right_neighbor);
+        let desired_right_enabled = floating_column_right_resize_enabled(
+            is_first_column,
+            is_last_column,
+            has_multiple_columns,
+            has_right_neighbor,
+        );
         let desired_top_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Above);
@@ -7730,6 +7743,7 @@ mod floating_part_pointer_tests {
 mod floating_column_native_resize_tests {
     use super::{
         floating_column_core_resize_edge, floating_column_resize_target_bounds,
+        floating_column_right_resize_enabled,
     };
     use dock_core::{FloatingResizeEdge, Point, Rect, Size};
     use platform::NativeHorizontalResizeEdge;
@@ -7777,7 +7791,27 @@ mod floating_column_native_resize_tests {
     }
 
     #[test]
-    fn vertical_resize_updates_height_without_changing_column_width() {
+    fn last_column_right_edge_is_enabled_when_the_outer_edge_is_free() {
+        assert!(floating_column_right_resize_enabled(false, true, true, false));
+    }
+
+    #[test]
+    fn middle_column_right_edge_stays_disabled() {
+        assert!(!floating_column_right_resize_enabled(false, false, true, true));
+    }
+
+    #[test]
+    fn last_column_right_edge_is_disabled_when_an_external_window_is_linked() {
+        assert!(!floating_column_right_resize_enabled(false, true, true, true));
+    }
+
+    #[test]
+    fn first_column_keeps_its_internal_right_resize_handle() {
+        assert!(floating_column_right_resize_enabled(true, false, true, true));
+    }
+
+    #[test]
+    fn vertical_resize_does_not_change_shared_floating_bounds() {
         let current = Rect::new(
             Point::new(100.0, 200.0),
             Size::new(500.0, 400.0),
@@ -7789,7 +7823,7 @@ mod floating_column_native_resize_tests {
 
         assert_eq!(
             floating_column_resize_target_bounds(current, native, None, 0.0),
-            Rect::new(Point::new(100.0, 200.0), Size::new(500.0, 460.0)),
+            current,
         );
     }
 
@@ -7811,7 +7845,7 @@ mod floating_column_native_resize_tests {
                 Some(FloatingResizeEdge::Left),
                 -30.0,
             ),
-            Rect::new(Point::new(100.0, 200.0), Size::new(470.0, 430.0)),
+            Rect::new(Point::new(100.0, 200.0), Size::new(470.0, 400.0)),
         );
     }
 
@@ -7833,7 +7867,7 @@ mod floating_column_native_resize_tests {
                 Some(FloatingResizeEdge::Left),
                 -30.0,
             ),
-            Rect::new(Point::new(130.0, 170.0), Size::new(470.0, 430.0)),
+            Rect::new(Point::new(130.0, 200.0), Size::new(470.0, 400.0)),
         );
     }
 }
