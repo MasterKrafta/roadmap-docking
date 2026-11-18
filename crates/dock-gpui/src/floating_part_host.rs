@@ -9,6 +9,7 @@ use gpui::{
     App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, Styled,
     WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
 };
+use slotmap::Key as _;
 use ui::Theme;
 
 use crate::{
