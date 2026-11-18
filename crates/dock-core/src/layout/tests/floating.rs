@@ -3223,3 +3223,42 @@ fn floating_group_creation_uses_the_active_tabs_preferred_height() {
     assert!(rects.vertical_overflow.is_empty());
     assert!(rects.panels.iter().any(|panel| panel.panel == compact_panel));
 }
+
+
+#[test]
+fn floating_column_minimum_size_respects_the_column_width_floor() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let (_, panel) = builder.panel(
+        PanelKey::new("floating-column-minimum-width-floor").unwrap(),
+        PanelConstraints::new(
+            Size::new(80.0, 60.0),
+            Size::new(180.0, 120.0),
+            None,
+            false,
+        ),
+    );
+    let tabs = builder.tabs(vec![panel], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![tabs],
+        vec![1.0],
+    );
+    let floating = builder.floating_group(
+        column,
+        Rect::new(Point::new(40.0, 50.0), Size::new(360.0, 280.0)),
+        1,
+    );
+    let layout = builder.build();
+
+    let minimum = layout
+        .floating_column_minimum_size(floating, column, &metrics)
+        .unwrap();
+
+    assert!(minimum.width >= metrics.min_column_width);
+    assert_eq!(
+        minimum.width,
+        layout.minimum_column_width(column, &metrics).unwrap(),
+    );
+}
