@@ -1411,10 +1411,10 @@ impl DragHostManager {
             }
 
             // Tab-strip merges and any unsupported promotion retain the existing
-            // safe two-phase PanelView handoff to the surviving destination Group host.
+            // safe two-phase PanelView handoff to the destination Column host(s).
             if let Some((anchor, direction)) = chain_join {
                 // Resolve the new Core FloatingGroup before linking its WindowGrid
-                // members, then hand the transported PanelViews to their Group hosts.
+                // members, then hand the transported PanelViews to their Column hosts.
                 self.flush_controller_events(cx);
                 self.join_created_groups_to_chain(
                     id,
@@ -1780,7 +1780,7 @@ impl DragHostManager {
             }
             if by_group.is_empty() {
                 // A collapsed Group may have no active PanelRect to mount, but its
-                // Group host still needs to render once before DragHost is closed.
+                // containing Column host still needs to render before DragHost closes.
                 by_group.insert(target_group, Vec::new());
             }
             by_group
@@ -2008,7 +2008,7 @@ impl DragHostManager {
                 ?id,
                 ?primary_target_group,
                 %error,
-                "could not close DragHost after Floating Group hosts rendered transferred content"
+                "could not close DragHost after Floating Column hosts rendered transferred content"
             );
         }
 
