@@ -903,12 +903,16 @@ impl Layout {
             });
         }
 
-        self.minimum_floating_node_size_with_cache(
+        let mut minimum = self.minimum_floating_node_size_with_cache(
             column_id,
             root,
             metrics,
             &mut HashMap::new(),
-        )
+        )?;
+        minimum.width = minimum
+            .width
+            .max(self.minimum_column_width(column_id, metrics)?);
+        Ok(minimum)
     }
 
     /// Computes a floating composition's minimum client size.
