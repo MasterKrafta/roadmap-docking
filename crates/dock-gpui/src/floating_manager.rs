@@ -3137,9 +3137,11 @@ impl FloatingWindowManager {
         })?;
 
         const EDGE_EPSILON: f32 = 0.001;
-        let x_fraction = ((screen.x - native_bounds.left) as f32 / native_width)
+        let x_fraction = ((i64::from(screen.x) - i64::from(native_bounds.left)) as f32
+            / native_width)
             .clamp(0.0, 1.0 - EDGE_EPSILON);
-        let y_fraction = ((screen.y - native_bounds.top) as f32 / native_height)
+        let y_fraction = ((i64::from(screen.y) - i64::from(native_bounds.top)) as f32
+            / native_height)
             .clamp(0.0, 1.0 - EDGE_EPSILON);
 
         Some(Point::new(
