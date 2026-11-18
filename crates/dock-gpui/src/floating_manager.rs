@@ -113,13 +113,6 @@ fn floating_root_columns(
     }
 }
 
-fn floating_first_column(
-    layout: &dock_core::Layout,
-    group: FloatingGroupId,
-) -> Option<NodeId> {
-    floating_root_columns(layout, group)?.first().copied()
-}
-
 fn floating_column_for_group(
     layout: &dock_core::Layout,
     floating_group: FloatingGroupId,
