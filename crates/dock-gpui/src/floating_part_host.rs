@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use dock_core::{ColumnRect, FloatingGroupId, GroupRect, NodeId, Point, Rect};
+use dock_core::{ColumnRect, DockSide, DragPayload, FloatingGroupId, GroupRect, NodeId, Point, Rect, TabHeaderRect, TabStripRect, PanelRect};
 use gpui::{
     App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, Styled,
     WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
@@ -41,6 +41,7 @@ pub(crate) struct FloatingPartHost {
     controller: Entity<DockController>,
     floating_group: FloatingGroupId,
     part: FloatingPartKind,
+    main_drag_side: Option<DockSide>,
     theme: Theme,
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
@@ -96,6 +97,32 @@ impl FloatingPartHost {
         )
     }
 
+    pub(crate) fn new_main_drag(
+        controller: Entity<DockController>,
+        side: DockSide,
+        part: FloatingPartKind,
+        theme: Theme,
+        manager: WeakEntity<FloatingWindowManager>,
+    ) -> Self {
+        let mut host = Self::new(
+            controller,
+            FloatingGroupId::null(),
+            part,
+            theme,
+            manager,
+        );
+        host.main_drag_side = Some(side);
+        host
+    }
+
+    pub(crate) fn adopt_main_drag_part(&mut self, floating_group: FloatingGroupId) -> bool {
+        if self.main_drag_side.take().is_none() {
+            return false;
+        }
+        self.floating_group = floating_group;
+        true
+    }
+
     fn new(
         controller: Entity<DockController>,
         floating_group: FloatingGroupId,
@@ -107,6 +134,7 @@ impl FloatingPartHost {
             controller,
             floating_group,
             part,
+            main_drag_side: None,
             theme,
             manager,
             controller_observed: false,
@@ -128,6 +156,10 @@ impl Render for FloatingPartHost {
             cx.observe(&self.controller, |_, _, host_cx| host_cx.notify())
                 .detach();
             self.controller_observed = true;
+        }
+
+        if let Some(side) = self.main_drag_side {
+            return self.render_main_drag_part(window, cx, side);
         }
 
         // A preserved Group HWND can become part of a different Core FloatingGroup
@@ -301,6 +333,178 @@ impl Render for FloatingPartHost {
 }
 
 impl FloatingPartHost {
+    fn render_main_drag_part(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        side: DockSide,
+    ) -> impl IntoElement {
+        match self.part {
+            FloatingPartKind::Header { column } => {
+                let header = self.controller.update(cx, |controller, _| {
+                    let session = controller.drag().host_session()?;
+                    if !matches!(
+                        session.payload(),
+                        DragPayload::DockArea { side: active } if active == side
+                    ) || !session.all_panel_views_source_detached()
+                    {
+                        return None;
+                    }
+                    let rects = controller.geometry().ok()?;
+                    let column_rect = rects.columns.iter()
+                        .find(|rect| rect.column == column)?;
+                    Some((
+                        column_rect.rect.size.width,
+                        controller.metrics(),
+                    ))
+                });
+
+                let Some((width, metrics)) = header else {
+                    return div().id(format!("main-drag-header-waiting-{:?}", column)).size_full();
+                };
+                let local_header = ColumnRect::new(
+                    column,
+                    Rect::new(
+                        Point::ZERO,
+                        dock_core::Size::new(width, metrics.column_header_height),
+                    ),
+                );
+                div()
+                    .id(format!("main-drag-header-{:?}", column))
+                    .relative()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(rgb(self.theme.colors.panel_surface_background))
+                    .child(CompositionHeader::render(
+                        format!("main-drag-column-header-{:?}", column),
+                        Rect::new(
+                            Point::ZERO,
+                            dock_core::Size::new(width, metrics.column_header_height),
+                        ),
+                        &[local_header],
+                        metrics,
+                        self.theme,
+                        false,
+                        None,
+                    ))
+            }
+            FloatingPartKind::Group { column, group } => {
+                let snapshot = self.controller.update(cx, |controller, _| {
+                    let session = controller.drag().host_session()?;
+                    if !matches!(
+                        session.payload(),
+                        DragPayload::DockArea { side: active } if active == side
+                    ) || !session.all_panel_views_source_detached()
+                    {
+                        return None;
+                    }
+
+                    let rects = controller.geometry().ok()?.clone();
+                    let group_rect = rects.groups.iter()
+                        .find(|rect| rect.group == group).copied()?;
+                    let strip = rects.tab_strips.iter()
+                        .find(|strip| strip.group == group).copied()?;
+                    let headers = rects.tab_headers.iter()
+                        .filter(|header| header.group == group)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let overflow = rects.tab_overflows.iter()
+                        .find(|overflow| overflow.group == group)
+                        .cloned();
+                    let presentations = collect_group_presentations(
+                        controller.layout(),
+                        controller.registry(),
+                        &HashSet::from([group]),
+                        Some(&rects),
+                    );
+                    let presentation = presentations.get(&group)?.clone();
+                    let panel = presentation.active_panel?;
+                    let panel_rect = rects.panels.iter()
+                        .find(|rect| rect.panel == panel).copied()?;
+                    let panel_view = controller.panel_view_for_drag(panel)?;
+                    Some((
+                        group_rect,
+                        strip,
+                        headers,
+                        overflow,
+                        presentation,
+                        panel_rect,
+                        panel_view,
+                        controller.metrics(),
+                    ))
+                });
+
+                let Some((
+                    group_rect,
+                    strip,
+                    headers,
+                    overflow,
+                    presentation,
+                    panel_rect,
+                    panel_view,
+                    metrics,
+                )) = snapshot else {
+                    return div().id(format!("main-drag-group-waiting-{:?}", group)).size_full();
+                };
+
+                let local_group = GroupRect::new(
+                    group,
+                    Rect::new(Point::ZERO, group_rect.rect.size),
+                );
+                let local_strip = TabStripRect::new(
+                    group,
+                    floating_part_local_rect(strip.rect, group_rect.rect.origin),
+                );
+                let local_headers = headers.iter().map(|header| {
+                    TabHeaderRect::new(
+                        group,
+                        header.panel,
+                        header.index,
+                        floating_part_local_rect(header.rect, group_rect.rect.origin),
+                    )
+                }).collect::<Vec<_>>();
+                let local_overflow = overflow.map(|mut value| {
+                    value.button_rect = floating_part_local_rect(
+                        value.button_rect,
+                        group_rect.rect.origin,
+                    );
+                    value
+                });
+                let local_panel = PanelRect::new(
+                    panel_rect.panel,
+                    floating_part_local_rect(panel_rect.rect, group_rect.rect.origin),
+                );
+                let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
+
+                div()
+                    .id(format!("main-drag-group-{:?}", group))
+                    .relative()
+                    .size_full()
+                    .overflow_hidden()
+                    .bg(rgb(self.theme.colors.panel_surface_background))
+                    .child(DockGroupView::render_core(
+                        Some(column),
+                        local_group,
+                        local_strip,
+                        &local_headers,
+                        local_overflow,
+                        &presentation,
+                        Point::ZERO,
+                        metrics,
+                        0.0,
+                        self.controller.clone(),
+                        self.theme,
+                        toggle_menu,
+                    ))
+                    .child(PanelHost::render(
+                        vec![(local_panel, Some(panel_view))],
+                        Point::ZERO,
+                        self.theme,
+                    ))
+            }
+        }
+    }
+
     fn render_group(
         &mut self,
         window: &mut Window,
