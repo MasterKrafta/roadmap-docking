@@ -1280,7 +1280,7 @@ fn floating_edge_minimum_width_keeps_non_edge_columns_at_current_widths() {
 }
 
 #[test]
-fn floating_first_column_right_edge_resize_pushes_later_columns_without_resizing_them() {
+fn floating_first_column_right_edge_resize_pushes_later_columns_left_without_resizing_them() {
     let metrics = DockMetrics::default();
     let (mut layout, floating, _split, columns) = three_column_floating_layout(&metrics);
     let initial_bounds = layout.floating_group(floating).unwrap().bounds;
@@ -1296,7 +1296,7 @@ fn floating_first_column_right_edge_resize_pushes_later_columns_without_resizing
                 .unwrap()
         })
         .collect::<Vec<_>>();
-    let delta = 36.0;
+    let delta = -36.0;
 
     layout
         .apply(
