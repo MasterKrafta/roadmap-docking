@@ -230,6 +230,7 @@ impl DragHostManager {
     pub fn open_panel_at_cursor(
         &mut self,
         panel: PanelId,
+        source_window_id: WindowId,
         grab_offset: Point,
         logical_size: Size,
         cx: &mut Context<Self>,
@@ -243,7 +244,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
-            None,
+            Some(source_window_id),
             vec![panel],
             None,
             None,
@@ -259,6 +260,7 @@ impl DragHostManager {
     pub fn open_panel_tab_at_cursor(
         &mut self,
         panel: PanelId,
+        source_window_id: WindowId,
         grab_offset: Point,
         logical_size: Size,
         promote_on_float: bool,
@@ -273,7 +275,7 @@ impl DragHostManager {
         self.open_at_cursor_with_content(
             grab_offset,
             logical_size,
-            None,
+            Some(source_window_id),
             vec![panel],
             None,
             None,
