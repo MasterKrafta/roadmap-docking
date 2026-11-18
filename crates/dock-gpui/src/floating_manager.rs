@@ -75,15 +75,6 @@ use native_resize_session::NativeResizeSession;
 use panel_window_entry::PanelWindowEntry;
 use panel_window_handle::PanelWindowHandle;
 
-fn clamp_floating_part_local_point(point: Point, client_size: Size) -> Point {
-    const EDGE_EPSILON: f32 = 0.01;
-
-    Point::new(
-        point.x.clamp(0.0, (client_size.width - EDGE_EPSILON).max(0.0)),
-        point.y.clamp(0.0, (client_size.height - EDGE_EPSILON).max(0.0)),
-    )
-}
-
 fn floating_part_screen_bounds(
     floating_bounds: Rect,
     local_bounds: Rect,
@@ -3113,29 +3104,22 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) -> Option<Point> {
         let local = self.core_point_for_floating(native_window, screen)?;
-        let (origin, client_size) = self.controller.update(cx, |controller, _| {
+        let origin = self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, group).ok()?;
             match member {
-                WindowGridMember::Header(column) => {
-                    let rect = rects.columns.iter().find(|rect| rect.column == column)?;
-                    Some((
-                        rect.rect.origin,
-                        Size::new(rect.rect.size.width, controller.metrics().column_header_height),
-                    ))
-                }
+                WindowGridMember::Header(column) => rects
+                    .columns
+                    .iter()
+                    .find(|rect| rect.column == column)
+                    .map(|rect| rect.rect.origin),
                 WindowGridMember::Group(group) => rects
                     .groups
                     .iter()
                     .find(|rect| rect.group == group)
-                    .map(|rect| (rect.rect.origin, rect.rect.size)),
+                    .map(|rect| rect.rect.origin),
                 WindowGridMember::FloatingComposition(_) => None,
             }
         })?;
-
-        // Native hit-testing includes the non-client frame, while Core zones
-        // are defined in client coordinates. Project frame hits onto this
-        // specific Header/Group client edge before adding its composition offset.
-        let local = clamp_floating_part_local_point(local, client_size);
         Some(Point::new(local.x + origin.x, local.y + origin.y))
     }
 
