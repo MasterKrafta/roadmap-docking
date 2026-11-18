@@ -135,8 +135,8 @@ fn floating_drag_source(
 
 /// Installs the shared pointer/capture/drag pipeline on the legacy FloatingHost
 /// and typed Floating part hosts. point_origin is zero for the legacy host and the
-/// Core-space origin represented by the HWND client area. A Column host may extend
-/// half-way into each adjacent Axis::X splitter gap.
+/// Core-space origin represented by the HWND client area. A Column HWND may be
+/// physically shifted left to collapse preceding root Axis::X splitter gaps.
 fn render_floating_pointer_input(
     group: FloatingGroupId,
     manager: WeakEntity<FloatingWindowManager>,
