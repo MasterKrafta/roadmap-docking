@@ -6563,7 +6563,6 @@ impl FloatingWindowManager {
                 &rects.splitters,
                 metrics.splitter_thickness,
             );
-            let host_padding = (host_rect.size.width - column_rect.rect.size.width).max(0.0);
             let column_minimum = layout
                 .floating_column_minimum_size(group, column, &metrics)
                 .ok()?;
@@ -6571,7 +6570,7 @@ impl FloatingWindowManager {
                 .floating_minimum_size(group, &metrics)
                 .ok()?;
             Some(Size::new(
-                column_minimum.width + host_padding,
+                column_minimum.width,
                 column_minimum.height.max(composition_minimum.height),
             ))
         });
