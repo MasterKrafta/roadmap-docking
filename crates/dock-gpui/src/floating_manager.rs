@@ -2477,6 +2477,9 @@ impl FloatingWindowManager {
                 .filter(|column| column_ids.contains(&column.column))
                 .copied()
                 .collect::<Vec<_>>();
+            if columns.len() != column_ids.len() {
+                return None;
+            }
             let first = columns.first()?.rect;
             let mut left = first.origin.x;
             let mut top = first.origin.y;
@@ -2510,21 +2513,20 @@ impl FloatingWindowManager {
                 ));
 
                 let Some(Node::Column(column)) = controller.layout().node(column_rect.column) else {
-                    continue;
+                    return None;
                 };
                 for group in &column.groups {
-                    if let Some(group_rect) = rects.groups.iter()
+                    let group_rect = rects.groups.iter()
                         .find(|rect| rect.group == *group)
-                    {
-                        parts.push((
-                            WindowGridMember::Group(*group),
-                            FloatingPartKind::Group {
-                                column: column_rect.column,
-                                group: *group,
-                            },
-                            group_rect.rect,
-                        ));
-                    }
+                        .copied()?;
+                    parts.push((
+                        WindowGridMember::Group(*group),
+                        FloatingPartKind::Group {
+                            column: column_rect.column,
+                            group: *group,
+                        },
+                        group_rect.rect,
+                    ));
                 }
             }
 
@@ -2533,6 +2535,9 @@ impl FloatingWindowManager {
         let Some((area_bounds, parts)) = source else {
             return false;
         };
+        if parts.iter().any(|(member, _, _)| self.registry.members.contains_key(member)) {
+            return false;
+        }
         let Some(screen_area_bounds) = self.screen_bounds_from_main_local(area_bounds) else {
             return false;
         };
@@ -2685,6 +2690,20 @@ impl FloatingWindowManager {
         let desired_by_member = desired.iter()
             .map(|spec| (spec.member, *spec))
             .collect::<HashMap<_, _>>();
+        // Every Core member must already have a permanent window or a temporary
+        // window from this drag; reconciliation must never need to open a missing part.
+        if desired.iter().any(|spec| {
+            let pending = self.pending_main_drag_parts.contains_key(&spec.member);
+            let existing = self.registry.members.get(&spec.member);
+            match (pending, existing) {
+                (true, Some(_)) => true,
+                (true, None) => false,
+                (false, Some(entry)) => !entry.window.is_available(cx),
+                (false, None) => true,
+            }
+        }) {
+            return false;
+        }
 
         // Preflight every member before changing its host identity. This keeps
         // the pending set intact on failure, so the caller can close all windows.
