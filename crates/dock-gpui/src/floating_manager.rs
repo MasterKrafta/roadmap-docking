@@ -6661,9 +6661,9 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
                 ),
             }
         }
-        // Floating uses the first Column's right native edge as the only
-        // internal horizontal resize handle. Core resizes that first Column and
-        // shifts every following Column while preserving their individual widths.
+        // The first Column's right edge is the internal handle; the last
+        // Column's right edge remains the outer resize edge when unlinked.
+        // Intermediate right edges stay disabled by floating_column_right_resize_enabled.
         if entry.native_right_resize_enabled != Some(desired_right_enabled) {
             match self.native_ops.set_right_resize_enabled(native_window, desired_right_enabled) {
                 Ok(()) => entry.native_right_resize_enabled = Some(desired_right_enabled),
