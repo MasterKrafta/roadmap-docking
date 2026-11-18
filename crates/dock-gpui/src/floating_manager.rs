@@ -3063,9 +3063,7 @@ impl FloatingWindowManager {
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
-        if (state.source_header.is_some() || state.source_group.is_some())
-            && !state.threshold_crossed
-        {
+        if !state.threshold_crossed {
             self.cancel_native_move(state, cx);
             return;
         }
@@ -3083,30 +3081,32 @@ impl FloatingWindowManager {
         let moving_groups = floating_groups_in_move_order(&moving_windows);
         let foreground_at_release = self.native_ops.foreground_window().ok().flatten();
         let mut docked_chain_into_main = false;
-        let mut floating_bounds = if state.source_header.is_some() {
-            state.start_bounds
+        // A native move changes only the composition's position. The source
+        // HWND may be a Group part whose client height excludes its ColumnHeader,
+        // so reading its native size here would progressively shrink Core bounds.
+        let mut floating_bounds = state.start_bounds;
+        let move_delta = self.native_move_delta(&moving_windows).or_else(|| {
+            moving_windows
+                .iter()
+                .find(|moving| moving.native_window == state.native_window)
+                .and_then(|moving| {
+                    let rect = self.native_ops.window_rect(moving.native_window).ok()?;
+                    Some(Point::new(
+                        rect.left.saturating_sub(moving.drag_origin.x) as f32,
+                        rect.top.saturating_sub(moving.drag_origin.y) as f32,
+                    ))
+                })
+        });
+        if let Some(delta) = move_delta {
+            floating_bounds.origin = Point::new(
+                state.start_bounds.origin.x + delta.x,
+                state.start_bounds.origin.y + delta.y,
+            );
         } else {
-            self.controller.update(cx, |controller, _| {
-                controller.layout().floating_group(state.group).map(|floating| floating.bounds)
-            }).unwrap_or(state.start_bounds)
-        };
-
-        if let Some(column) = state.source_header {
-            let header_member = WindowGridMember::Header(column);
-            if let Some(header) = moving_windows.iter().find(|member| member.member == header_member)
-                && let Ok(rect) = self.native_ops.window_rect(header.native_window)
-            {
-                let dx = rect.left.saturating_sub(header.drag_origin.x);
-                let dy = rect.top.saturating_sub(header.drag_origin.y);
-                floating_bounds.origin = Point::new(
-                    state.start_bounds.origin.x + dx as f32,
-                    state.start_bounds.origin.y + dy as f32,
-                );
-            }
-        } else if let Some(native_bounds) = self.core_bounds_from_native_window(state.native_window) {
-            floating_bounds = native_bounds;
-        } else if let Ok(rect) = self.native_ops.window_rect(state.native_window) {
-            floating_bounds.origin = Point::new(rect.left as f32, rect.top as f32);
+            tracing::warn!(
+                ?state.group,
+                "could not determine the native move delta; preserving the original Floating bounds"
+            );
         }
 
         self.native_move = None;
