@@ -401,42 +401,6 @@ impl DockGroupView {
         root
     }
 
-    /// Renders a placeholder Group used by static Column previews.
-    pub(super) fn render_preview(
-        id: String,
-        metrics: DockMetrics,
-        theme: Theme,
-    ) -> impl IntoElement {
-        let header = Self::render_header(
-            format!("{id}-header"),
-            format!("{id}-tab-one"),
-            "Вкладка 1".to_owned(),
-            metrics.default_tab_width,
-            metrics,
-            theme,
-        );
-
-        div()
-            .id(id.clone())
-            .w_full()
-            .flex_1()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .border_1()
-            .border_color(rgb(theme.colors.group_frame_border))
-            .child(header)
-            .child(
-                div()
-                    .w_full()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_hidden()
-                    .child(PanelContent::render(format!("{id}-content"), theme)),
-            )
-    }
-
     fn render_header(
         id: String,
         tab_id: String,
