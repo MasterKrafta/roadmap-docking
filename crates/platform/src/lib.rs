@@ -1883,12 +1883,21 @@ mod windows_impl {
         #[test]
         fn disabling_left_resize_passes_overlapping_edges_to_the_previous_window() {
             for hit_test in [HTLEFT, HTTOPLEFT, HTBOTTOMLEFT] {
-                assert_eq!(hit_test_code_for_resize(hit_test, false, true), HTTRANSPARENT);
+                assert_eq!(
+                    hit_test_code_for_resize(hit_test, false, true, true, true),
+                    HTTRANSPARENT
+                );
             }
-            assert_eq!(hit_test_code_for_resize(HTLEFT, true, true), HTLEFT as i32);
-            assert_eq!(hit_test_code_for_resize(HTRIGHT, false, false), HTRIGHT as i32);
             assert_eq!(
-                hit_test_code_for_resize(HTBOTTOMRIGHT, false, false),
+                hit_test_code_for_resize(HTLEFT, true, true, true, true),
+                HTLEFT as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTRIGHT, false, true, true, true),
+                HTRIGHT as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTBOTTOMRIGHT, true, true, true, true),
                 HTBOTTOMRIGHT as i32
             );
         }
@@ -1897,26 +1906,44 @@ mod windows_impl {
         fn disabling_top_resize_keeps_the_header_corners_in_client_area() {
             for hit_test in [HTTOP, HTTOPLEFT, HTTOPRIGHT] {
                 assert_eq!(
-                    hit_test_code_for_resize(hit_test, true, false),
+                    hit_test_code_for_resize(hit_test, true, true, false, true),
                     HTCLIENT as i32
                 );
             }
 
-            assert_eq!(hit_test_code_for_resize(HTTOP, true, true), HTTOP as i32);
             assert_eq!(
-                hit_test_code_for_resize(HTTOPRIGHT, false, false),
+                hit_test_code_for_resize(HTTOP, true, true, true, true),
+                HTTOP as i32
+            );
+            assert_eq!(
+                hit_test_code_for_resize(HTTOPRIGHT, true, true, false, true),
                 HTCLIENT as i32
             );
             assert_eq!(
-                hit_test_code_for_resize(HTBOTTOMRIGHT, true, false),
+                hit_test_code_for_resize(HTBOTTOMRIGHT, true, true, true, true),
                 HTBOTTOMRIGHT as i32
+            );
+        }
+
+        #[test]
+        fn disabling_bottom_resize_passes_the_shared_edge_to_the_lower_window() {
+            for hit_test in [HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT] {
+                assert_eq!(
+                    hit_test_code_for_resize(hit_test, true, true, true, false),
+                    HTTRANSPARENT
+                );
+            }
+
+            assert_eq!(
+                hit_test_code_for_resize(HTBOTTOM, true, true, true, true),
+                HTBOTTOM as i32
             );
         }
 
         #[test]
         fn secondary_top_left_corner_still_passes_through_to_the_previous_window() {
             assert_eq!(
-                hit_test_code_for_resize(HTTOPLEFT, false, false),
+                hit_test_code_for_resize(HTTOPLEFT, false, true, false, true),
                 HTTRANSPARENT
             );
         }
