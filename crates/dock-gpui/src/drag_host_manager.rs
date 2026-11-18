@@ -636,6 +636,8 @@ impl DragHostManager {
             visible,
             drop_target: None,
             target_role: None,
+            tracking_diagnostic_started: false,
+            target_diagnostic_started: false,
             free_area_bounds: None,
             defer_layout_events_until_parts_ready,
             pending_release_cursor: None,
@@ -854,6 +856,25 @@ impl DragHostManager {
             return true;
         };
 
+        if dock_area.is_some() {
+            let should_log = self.active
+                .as_mut()
+                .filter(|active| active.id == id)
+                .is_some_and(|active| {
+                    if active.tracking_diagnostic_started {
+                        false
+                    } else {
+                        active.tracking_diagnostic_started = true;
+                        true
+                    }
+                });
+            if should_log {
+                eprintln!(
+                    "Main DockArea drag tracking started: id={id:?}, handle={handle:?}, source_host={source_host:?}, source_window_id={source_window_id:?}, payload={payload:?}"
+                );
+            }
+        }
+
         // If the button was released while the source still owned the AnyView,
         // finish at the captured release point rather than a later cursor point.
         let pending_release_cursor = self
@@ -1047,17 +1068,19 @@ impl DragHostManager {
         if source_host == DragSourceHost::Main
             && handle == DragHandle::DockAreaHeader
         {
-            let previous_target = self.active
-                .as_ref()
+            let should_log = self.active
+                .as_mut()
                 .filter(|active| active.id == id)
-                .map(|active| (active.drop_target, active.target_role));
-            if previous_target != Some((target, target_role)) {
-                tracing::debug!(
-                    ?cursor,
-                    ?target_window,
-                    ?target,
-                    ?target_role,
-                    "Main DockArea drag target changed"
+                .is_some_and(|active| {
+                    let changed = (active.drop_target, active.target_role)
+                        != (target, target_role);
+                    let first = !active.target_diagnostic_started;
+                    active.target_diagnostic_started = true;
+                    first || changed
+                });
+            if should_log {
+                eprintln!(
+                    "Main DockArea drag target: cursor={cursor:?}, target_window={target_window:?}, target={target:?}, target_role={target_role:?}"
                 );
             }
         }
