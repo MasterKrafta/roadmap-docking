@@ -1405,12 +1405,11 @@ impl DragHostManager {
                         id,
                         target_group,
                         column,
-                        group,
                         cx,
                     )
                 {
                     // Registration happens before publication, so reconciliation sees
-                    // the adopted HWND and creates only the missing Header windows.
+                    // the adopted Column HWND and does not create a duplicate window.
                     self.flush_controller_events(cx);
                     if let Some((anchor, direction)) = chain_join {
                         self.join_created_groups_to_chain(
@@ -1536,7 +1535,6 @@ impl DragHostManager {
         id: DragHostId,
         floating_group: FloatingGroupId,
         column: NodeId,
-        group: NodeId,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some((window, window_id, native_window, panels, frame_was_removed, frame_state)) =
@@ -1560,7 +1558,7 @@ impl DragHostManager {
 
         // FreeArea / WindowGrid releases measure the normal window frame before
         // building Core bounds. Restore the DragHost's original borderless style
-        // before reusing it as a permanent Group part.
+        // before reusing it as a permanent Column window.
         if frame_was_removed && frame_state.is_none() {
             let restored_frame = match self.native_ops.remove_window_frame(native_window) {
                 Ok(state) => state,
@@ -1594,11 +1592,10 @@ impl DragHostManager {
                 return false;
             }
             surface.promoted_part = Some(host_cx.new(|_| {
-                FloatingPartHost::new_group(
+                FloatingPartHost::new_column(
                     controller,
                     floating_group,
                     column,
-                    group,
                     theme,
                     manager_weak,
                 )
@@ -1611,8 +1608,8 @@ impl DragHostManager {
         }
 
         let adopted = manager.update(cx, |manager, manager_cx| {
-            manager.adopt_drag_host_group_window(
-                group,
+            manager.adopt_drag_host_column_window(
+                column,
                 floating_group,
                 window,
                 window_id,
@@ -1628,9 +1625,9 @@ impl DragHostManager {
             return false;
         }
 
-        // The root now renders the same Group in the same HWND. Release the
-        // transport claim only after switching the surface, then let Main render
-        // the committed Core layout without its old Group placeholder.
+        // The root now renders the complete Column in the same HWND. Release
+        // the transport claim only after switching the surface, then let Main
+        // render the committed Core layout without its old Group placeholder.
         self.controller.update(cx, |controller, controller_cx| {
             controller.drag_mut().clear_transport_host(id);
             for panel in &panels {
