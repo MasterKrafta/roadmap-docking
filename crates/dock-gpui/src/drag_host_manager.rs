@@ -634,7 +634,7 @@ impl DragHostManager {
 
         if dock_area.is_some() && panels.is_empty() {
             let shown = self.floating_manager.as_ref().is_some_and(|manager| {
-                manager.update(cx, |manager, _| manager.show_main_drag_parts())
+                manager.update(cx, |manager, manager_cx| manager.show_main_drag_parts(manager_cx))
             });
             if !shown {
                 self.cancel_active_drag(id, cx);
@@ -666,8 +666,8 @@ impl DragHostManager {
                     .is_some_and(|active| active.dock_area.is_some())
                 {
                     let shown = manager.floating_manager.as_ref().is_some_and(|floating_manager| {
-                        floating_manager.update(manager_cx, |floating_manager, _| {
-                            floating_manager.show_main_drag_parts()
+                        floating_manager.update(manager_cx, |floating_manager, floating_manager_cx| {
+                            floating_manager.show_main_drag_parts(floating_manager_cx)
                         })
                     });
                     if shown {
