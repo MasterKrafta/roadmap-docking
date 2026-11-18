@@ -1369,18 +1369,18 @@ impl DragHostManager {
         };
 
         if let Some(target_group) = floating_target {
-            // Main-origin GroupGrip and detached PanelTab gestures can reuse
-            // their DragHost HWND as the new permanent Group host. PanelTab promotion
-            // works from Main and Floating; GroupGrip still uses the direct native HWND
-            // path when its source is Floating. Resolve the resulting Group by its
+            // GroupGrip and detached PanelTab gestures can reuse their DragHost HWND
+            // as the new permanent Column host when a free Drop creates a Floating root.
+            // Resolve the resulting Group by its
             // preserved NodeId (GroupGrip) or transferred PanelId (PanelTab).
             // A PanelTab merged into an existing Group is rejected by adoption because
             // that Group already has its own HWND; the safe handoff below serves it.
             if defer_layout_events_until_parts_ready
                 && (
-                    drag_handle == Some(DragHandle::PanelTab)
-                    || (source_host == Some(DragSourceHost::Main)
-                        && drag_handle == Some(DragHandle::GroupGrip))
+                    matches!(
+                        drag_handle,
+                        Some(DragHandle::PanelTab | DragHandle::GroupGrip)
+                    )
                 )
             {
                 let destination = self.controller.update(cx, |controller, _| {
