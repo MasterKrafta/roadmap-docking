@@ -10,13 +10,13 @@ use super::{PanelLayoutLocation, PanelWindowEntry, PanelWindowHandle, PanelWindo
 
 /// Legacy native-window records keyed by a PanelId host.
 ///
-/// Permanent Floating Header/Group windows are stored separately in `members`;
+/// Permanent Floating Column windows are stored separately in `members`;
 /// this map remains only for transitional PanelId-based host paths.
 #[derive(Default)]
 pub struct PanelWindowRegistry {
     /// Transitional PanelId entries are retained only for an active DragHost adoption.
     pub(super) windows: HashMap<PanelId, PanelWindowEntry>,
-    /// Permanent Floating Header/Group windows are keyed by their Core-node identity.
+    /// Permanent Floating Column windows are keyed by their Core Column identity.
     pub(super) members: HashMap<WindowGridMember, PanelWindowEntry>,
     pub(super) panel_locations: HashMap<PanelId, PanelLayoutLocation>,
 }
