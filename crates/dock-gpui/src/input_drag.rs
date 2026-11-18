@@ -357,9 +357,9 @@ pub(crate) fn begin_group_drag_host(
             (origin.y - group_rect.rect.origin.y)
                 .clamp(0.0, group_rect.rect.size.height),
         );
-        Some((group, panels, grab_offset, group_rect.rect.size, promote_on_float))
+        Some((group, source_window_id, panels, grab_offset, group_rect.rect.size, promote_on_float))
     });
-    let Some((group, panels, grab_offset, logical_size, promote_on_float)) = candidate else {
+    let Some((group, source_window_id, panels, grab_offset, logical_size, promote_on_float)) = candidate else {
         tracing::debug!("GroupGrip drag has no valid source geometry for DragHost");
         controller.update(app, |controller, cx| {
             if let Err(error) = controller.cancel_pointer_interaction() {
@@ -373,6 +373,7 @@ pub(crate) fn begin_group_drag_host(
     match drag_host_manager.update(app, |manager, manager_cx| {
         manager.open_group_at_cursor(
             group,
+            source_window_id,
             panels,
             grab_offset,
             logical_size,
