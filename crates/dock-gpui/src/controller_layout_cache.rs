@@ -9,6 +9,20 @@ use super::{
 };
 
 impl DockController {
+    pub(crate) fn floating_column_viewport_origin_y_offset(
+        &self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+        column: NodeId,
+    ) -> Option<f32> {
+        self.floating_column_viewports
+            .get(&window_id)
+            .filter(|(owner, current_column, _, _)| {
+                *owner == group && *current_column == column
+            })
+            .map(|(_, _, _, origin_y)| *origin_y)
+    }
+
     /// Updates the native viewport used to lay out one Floating Column.
     pub(crate) fn set_floating_column_viewport(
         &mut self,
