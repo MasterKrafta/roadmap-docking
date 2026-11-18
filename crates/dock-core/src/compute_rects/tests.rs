@@ -492,12 +492,13 @@ fn floating_column_geometry_uses_its_own_height_without_resizing_siblings() {
 
     let shared = layout.compute_floating_rects(floating, &metrics).unwrap();
     let resized = layout
-        .compute_floating_column_rects(floating, right_column, 520.0, &metrics)
+        .compute_floating_column_rects(floating, right_column, 520.0, 16.0, &metrics)
         .unwrap();
 
     assert_eq!(shared.columns.len(), 2);
     assert_eq!(resized.columns.len(), 1);
     assert_eq!(resized.columns[0].column, right_column);
+    assert_eq!(resized.columns[0].rect.origin.y, 16.0);
     assert_eq!(resized.columns[0].rect.size.height, 520.0);
     assert_eq!(resized.columns[0].rect.size.width, shared.columns[1].rect.size.width);
     assert_eq!(resized.floating_groups[0].rect.size.height, 520.0);
@@ -509,7 +510,7 @@ fn floating_column_geometry_uses_its_own_height_without_resizing_siblings() {
     }));
     let lower = resized.groups.iter().find(|group| group.group == lower_group).unwrap();
     assert!(
-        ((lower.rect.origin.y + lower.rect.size.height) - 520.0).abs()
+        ((lower.rect.origin.y + lower.rect.size.height) - 536.0).abs()
             < PIXEL_TOLERANCE
     );
     assert_eq!(
