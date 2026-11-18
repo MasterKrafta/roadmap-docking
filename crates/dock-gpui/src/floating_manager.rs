@@ -26,7 +26,8 @@ use crate::{
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
-        NativeFrameGeometry, arrange_window_grid_bounds as arrange_grid_geometry_bounds,
+        NativeFrameGeometry,
+        arrange_window_grid_bounds_with_preserved_offsets as arrange_grid_geometry_bounds,
         match_moving_window_width_to_target,
         floating_grid_members_in_native_front_to_back,
         window_grid_members_in_native_z_order as grid_window_members_in_native_z_order,
@@ -1024,7 +1025,22 @@ impl FloatingWindowManager {
         _cx: &mut Context<Self>,
     ) -> Option<Vec<(WindowGridMember, Rect)>> {
         let frames = self.frame_geometries_for_bounds(&bounds)?;
-        arrange_grid_geometry_bounds(bounds, &frames, links, anchor)
+        let owners = bounds
+            .iter()
+            .map(|(member, _)| Some((*member, self.floating_group_for_member(*member)?)))
+            .collect::<Option<HashMap<_, _>>>()?;
+        let internal_links = links
+            .iter()
+            .copied()
+            .filter(|link| owners.get(&link.from) == owners.get(&link.to))
+            .collect::<HashSet<_>>();
+        arrange_grid_geometry_bounds(
+            bounds,
+            &frames,
+            links,
+            anchor,
+            &internal_links,
+        )
     }
 
     /// Connects the manager to the main GPUI window and the shared controller.
