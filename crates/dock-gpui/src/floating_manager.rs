@@ -247,6 +247,15 @@ fn floating_part_boundary_member_from_members(
     members: &[WindowGridMember],
     side: WindowGridDirection,
 ) -> Option<WindowGridMember> {
+    let first_column = members
+        .iter()
+        .find(|member| matches!(member, WindowGridMember::Column(_)))
+        .copied();
+    let last_column = members
+        .iter()
+        .rev()
+        .find(|member| matches!(member, WindowGridMember::Column(_)))
+        .copied();
     let first_header = members
         .iter()
         .find(|member| matches!(member, WindowGridMember::Header(_)))
@@ -268,10 +277,10 @@ fn floating_part_boundary_member_from_members(
 
     match side {
         WindowGridDirection::Left | WindowGridDirection::Above => {
-            first_header.or(first_group)
+            first_column.or(first_header).or(first_group)
         }
-        WindowGridDirection::Right => last_header.or(last_group),
-        WindowGridDirection::Below => last_group.or(last_header),
+        WindowGridDirection::Right => last_column.or(last_header).or(last_group),
+        WindowGridDirection::Below => last_group.or(last_column).or(last_header),
     }
 }
 
@@ -3240,7 +3249,7 @@ impl FloatingWindowManager {
                 }) => {
                     let moving_member = state
                         .source_header
-                        .map(WindowGridMember::Header)
+                        .map(WindowGridMember::Column)
                         .unwrap_or_else(|| window_grid_member(state.group));
                     self.finish_floating_window_chain_move(
                         moving_member,
