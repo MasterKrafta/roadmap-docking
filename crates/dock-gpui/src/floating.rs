@@ -258,7 +258,8 @@ fn render_floating_pointer_input(
                             {
                                 manager.update(app, |manager, manager_cx| {
                                     match source_part {
-                                        Some(DockWindowPart::Header { column }) => manager
+                                        Some(DockWindowPart::Column { column })
+                                        | Some(DockWindowPart::Header { column }) => manager
                                             .begin_existing_window_grid_move(group, column, point, manager_cx),
                                         _ => manager.begin_existing_window_move(group, point, manager_cx),
                                     }
