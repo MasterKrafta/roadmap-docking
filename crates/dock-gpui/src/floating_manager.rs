@@ -1822,7 +1822,7 @@ impl FloatingWindowManager {
             .and_then(|window| self.native_ops.scale_factor(window).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let Some((current_group_bounds, current_column_bounds)) = self.controller.update(cx, |controller, _| {
+        let Some((current_group_bounds, mut current_column_bounds)) = self.controller.update(cx, |controller, _| {
             floating_column_host_bounds(
                 controller.layout(),
                 &controller.metrics(),
@@ -1833,6 +1833,12 @@ impl FloatingWindowManager {
         }) else {
             return;
         };
+        if let Some(entry) = self.registry.members.get(&member) {
+            current_column_bounds.origin.y += entry.native_vertical_origin_offset;
+            if let Some(height) = entry.native_vertical_height {
+                current_column_bounds.size.height = height;
+            }
+        }
 
         let native_edge = native_window
             .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
@@ -6088,8 +6094,11 @@ impl FloatingWindowManager {
             if let Some(entry) = self.registry.members.get(&spec.member)
                 && let Some(height) = entry.native_vertical_height
             {
+                let stored_scale = entry.native_scale_factor.unwrap_or(1.0);
+                let target_scale = current_scale.unwrap_or(stored_scale);
+                let logical_offset = entry.native_vertical_origin_offset / stored_scale;
                 target_spec.bounds.size.height = height;
-                target_spec.floating_origin.y += entry.native_vertical_origin_offset;
+                target_spec.floating_origin.y += logical_offset * target_scale;
             }
             let target_bounds = native_window
                 .and_then(|native_window| {
@@ -7802,6 +7811,20 @@ mod floating_column_native_resize_tests {
                 Some(NativeHorizontalResizeEdge::Right),
                 true,
                 1,
+                true,
+                false,
+            ),
+            Some(FloatingResizeEdge::Right),
+        );
+    }
+
+    #[test]
+    fn last_columns_right_edge_resizes_the_last_core_column() {
+        assert_eq!(
+            floating_column_core_resize_edge(
+                Some(NativeHorizontalResizeEdge::Right),
+                false,
+                3,
                 true,
                 false,
             ),
