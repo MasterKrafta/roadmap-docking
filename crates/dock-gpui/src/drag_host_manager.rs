@@ -425,7 +425,6 @@ impl DragHostManager {
                     group,
                     dock_area,
                     render_detached_tab,
-                    drag_content_size: logical_size,
                     handoff_placeholder: false,
                     promoted_part: None,
                 })
