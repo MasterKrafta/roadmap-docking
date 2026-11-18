@@ -121,9 +121,9 @@ fn floating_window_chain_target(
         // Group/Column docking, not a separate WindowGrid connection.
         return None;
     }
-    // Side drops that detach a native composition may join its HWNDs through
-    // WindowGrid after Core creates their FloatingGroups. Main GroupGrip and
-    // supported DockAreaHeader drops keep their original Core DropTarget.
+    // A detached PanelTab may create a separate FloatingGroup, then connect
+    // its new Column host to the target's physical WindowGrid. GroupGrip never
+    // takes this path; it always keeps the Core-resolved logical drop target.
     floating_window_chain_direction(target).map(|direction| (group, direction))
 }
 
