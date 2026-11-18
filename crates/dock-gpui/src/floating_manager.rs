@@ -157,11 +157,13 @@ fn floating_column_resize_target_bounds(
     };
     let horizontal_delta = if edge.is_some() { width_delta } else { 0.0 };
 
+    // Horizontal edges update the shared Core composition width. Vertical
+    // size and origin belong to the individual Column HWND, not FloatingGroup.
     Rect::new(
-        Point::new(origin_x, native_column_bounds.origin.y),
+        Point::new(origin_x, current_group_bounds.origin.y),
         Size::new(
             current_group_bounds.size.width + horizontal_delta,
-            native_column_bounds.size.height,
+            current_group_bounds.size.height,
         ),
     )
 }
@@ -1468,6 +1470,8 @@ impl FloatingWindowManager {
                 native_top_resize_enabled: None,
                 native_scale_factor: Some(scale),
                 native_bounds_dirty: false,
+                native_vertical_origin_offset: 0.0,
+                native_vertical_height: None,
                 resize_enabled,
                 host_group: Some(floating_group),
                 visibility: PanelWindowVisibility::Visible,
@@ -1827,6 +1831,25 @@ impl FloatingWindowManager {
         // Column HWND bounds use physical desktop origins and logical client sizes.
         // Keep the untouched horizontal edge anchored, while also applying the
         // native Y/height so diagonal corner resizing updates both axes.
+        let vertical_bounds_changed =
+            (native_column_bounds.origin.y - current_column_bounds.origin.y).abs() > 0.5
+                || (native_column_bounds.size.height - current_column_bounds.size.height).abs()
+                    > 0.5;
+        if vertical_bounds_changed {
+            if let Some(entry) = self.registry.members.get_mut(&member) {
+                entry.native_vertical_origin_offset =
+                    native_column_bounds.origin.y - current_column_bounds.origin.y;
+                entry.native_vertical_height = Some(native_column_bounds.size.height);
+                entry.native_bounds_dirty = true;
+            }
+        }
+
+        // A vertical-only drag is local to this Column HWND. Its layout is
+        // recomputed from the native viewport; it must not resize sibling Columns.
+        if edge.is_none() {
+            return;
+        }
+
         let target_group_bounds = floating_column_resize_target_bounds(
             current_group_bounds,
             native_column_bounds,
@@ -1890,17 +1913,11 @@ impl FloatingWindowManager {
             _ => None,
         };
 
-        let command = match edge {
-            Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
-                group,
-                bounds: target_group_bounds,
-                edge,
-                scale_factor,
-            },
-            None => DockCommand::ResizeFloatingBounds {
-                group,
-                bounds: target_group_bounds,
-            },
+        let command = DockCommand::ResizeFloatingBoundsFromEdge {
+            group,
+            bounds: target_group_bounds,
+            edge: edge.expect("horizontal Column resize must resolve a Core edge"),
+            scale_factor,
         };
 
         self.controller.update(cx, |controller, controller_cx| {
@@ -1916,7 +1933,12 @@ impl FloatingWindowManager {
                         column,
                         scale_factor,
                     )
-                    .map(|(_, bounds)| bounds);
+                    .map(|(_, bounds)| {
+                        Rect::new(
+                            Point::new(bounds.origin.x, native_column_bounds.origin.y),
+                            Size::new(bounds.size.width, native_column_bounds.size.height),
+                        )
+                    });
 
                     if let (Some(accepted_column_bounds), Some((grid_bounds, grid_frames, owners))) =
                         (accepted_column_bounds, grid_geometry.as_ref())
@@ -5815,6 +5837,8 @@ impl FloatingWindowManager {
             native_top_resize_enabled: None,
             native_scale_factor: scale,
             native_bounds_dirty: false,
+            native_vertical_origin_offset: 0.0,
+            native_vertical_height: None,
             resize_enabled: false,
             host_group: if spec.main_drag_side.is_some() {
                 None
@@ -6031,17 +6055,24 @@ impl FloatingWindowManager {
                 .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .or(previous_scale);
+            let mut target_spec = spec;
+            if let Some(entry) = self.registry.members.get(&spec.member)
+                && let Some(height) = entry.native_vertical_height
+            {
+                target_spec.bounds.size.height = height;
+                target_spec.floating_origin.y += entry.native_vertical_origin_offset;
+            }
             let target_bounds = native_window
                 .and_then(|native_window| {
                     self.part_outer_bounds_for_target(
-                        spec,
+                        target_spec,
                         native_window,
                         current_scale,
                         reference_group,
                     )
                 })
                 .unwrap_or_else(|| {
-                    if native_window.is_some() { current_bounds } else { spec.bounds }
+                    if native_window.is_some() { current_bounds } else { target_spec.bounds }
                 });
             let scale_changed = current_scale.is_some_and(|scale| {
                 previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
@@ -6435,6 +6466,8 @@ impl FloatingWindowManager {
             native_top_resize_enabled: None,
             native_scale_factor: None,
             native_bounds_dirty: false,
+            native_vertical_origin_offset: 0.0,
+            native_vertical_height: None,
             resize_enabled: false,
             host_group: None,
             visibility: PanelWindowVisibility::Hidden,
@@ -6553,14 +6586,20 @@ impl FloatingWindowManager {
         }
 
         let member = WindowGridMember::Column(column);
-        let (is_first_column, has_multiple_columns) = self.controller.update(cx, |controller, _| {
-            let root_columns = floating_root_columns(controller.layout(), group);
-            let is_first = root_columns
-                .as_ref()
-                .and_then(|columns| columns.first())
-                .is_some_and(|first| *first == column);
-            (is_first, root_columns.is_some_and(|columns| columns.len() > 1))
-        });
+        let (is_first_column, is_last_column, has_multiple_columns) =
+            self.controller.update(cx, |controller, _| {
+                let root_columns = floating_root_columns(controller.layout(), group);
+                let is_first = root_columns
+                    .as_ref()
+                    .and_then(|columns| columns.first())
+                    .is_some_and(|first| *first == column);
+                let is_last = root_columns
+                    .as_ref()
+                    .and_then(|columns| columns.last())
+                    .is_some_and(|last| *last == column);
+                let has_multiple = root_columns.is_some_and(|columns| columns.len() > 1);
+                (is_first, is_last, has_multiple)
+            });
         let desired_left_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Left);
@@ -6568,7 +6607,8 @@ impl FloatingWindowManager {
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Right);
         let desired_right_enabled =
-            is_first_column && (has_multiple_columns || !has_right_neighbor);
+            (is_first_column && has_multiple_columns)
+                || (is_last_column && !has_right_neighbor);
         let desired_top_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Above);
@@ -6626,22 +6666,10 @@ impl FloatingWindowManager {
 
         let minimum = self.controller.update(cx, |controller, _| {
             let metrics = controller.metrics();
-            let layout = controller.layout();
-            let rects = layout.compute_floating_rects(group, &metrics).ok()?;
-            let column_rect = rects
-                .columns
-                .iter()
-                .find(|candidate| candidate.column == column)?;
-            let column_minimum = layout
+            controller
+                .layout()
                 .floating_column_minimum_size(group, column, &metrics)
-                .ok()?;
-            let composition_minimum = layout
-                .floating_minimum_size(group, &metrics)
-                .ok()?;
-            Some(Size::new(
-                column_minimum.width,
-                column_minimum.height.max(composition_minimum.height),
-            ))
+                .ok()
         });
         let scale = self
             .native_ops
