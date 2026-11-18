@@ -2627,7 +2627,7 @@ impl FloatingWindowManager {
                 local_origin: local_bounds.origin,
                 contains_transferred_panels: false,
             };
-            let Some(mut entry) = self.create_part_window(spec, cx) else {
+            let Some(mut entry) = self.create_part_window(spec, None, cx) else {
                 for entry in created.into_values() {
                     if let Some(native) = entry.native_window {
                         let _ = self.native_ops.hide(native);
