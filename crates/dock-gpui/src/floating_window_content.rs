@@ -12,8 +12,9 @@ use gpui::{
 use ui::Theme;
 
 use crate::{
+    components::main_dock::render_column_content,
     dock_components::{
-        active_panels_for_groups, DockCompositionView, DockGroupView, GroupPresentation,
+        active_panels_for_groups, CompositionHeader, DockGroupView, GroupPresentation,
     },
     DockController, FloatingWindowManager,
 };
@@ -23,10 +24,11 @@ use super::super::{
     splitter::SplitterView,
 };
 
-/// Content view for one native floating window.
+/// Content view for one legacy whole-composition Floating window.
 ///
-/// The root already owns the native window bounds and local coordinate origin.
-/// The view renders only the Core subtree supplied for its FloatingGroupId.
+/// Permanent Floating Headers and Groups use FloatingPartHost. This renderer
+/// remains for the transitional whole-window host but shares the same
+/// independent Header and Group components as Main.
 pub(super) struct FloatingWindowContent;
 
 impl FloatingWindowContent {
@@ -49,13 +51,13 @@ impl FloatingWindowContent {
         vertical_overflow: &[VerticalOverflow],
         scroll_handles: &HashMap<NodeId, gpui::ScrollHandle>,
         active_flyout: Option<FlyoutState>,
-        drag_preview: Option<DragPreview>,
-        drag_zones: &[DropZoneRect],
+        _drag_preview: Option<DragPreview>,
+        _drag_zones: &[DropZoneRect],
         metrics: DockMetrics,
         hide_header: bool,
         menu_group: Option<NodeId>,
         context_menu: GroupMenuToggle,
-        middle_click_closes_tabs: bool,
+        _middle_click_closes_tabs: bool,
         controller: Entity<DockController>,
         manager: WeakEntity<FloatingWindowManager>,
         theme: Theme,
@@ -89,9 +91,6 @@ impl FloatingWindowContent {
             .overflow_hidden()
             .bg(rgb(theme.colors.panel_surface_background));
 
-        // MainDockView and FloatingWindowContent use the same composition
-        // renderer. Only the host-local coordinates, floating identity and
-        // shared CompositionHeader visibility differ between the two windows.
         for column in columns {
             let group_ids = column_groups
                 .get(&column.column)
@@ -101,31 +100,32 @@ impl FloatingWindowContent {
                 .get(&column.column)
                 .copied()
                 .unwrap_or(ColumnMode::Expanded);
+            let overflow = vertical_overflow
+                .iter()
+                .find(|overflow| overflow.owner == column.column)
+                .copied();
 
-            root = root.child(DockCompositionView::render_column(
+            root = root.child(render_column_content(
                 *column,
+                group_ids,
                 groups,
                 &panels,
+                mode,
                 tab_strips,
                 tab_headers,
                 tab_overflows,
                 group_presentations,
-                group_ids,
-                mode,
                 rail_display_orders
                     .get(&column.column)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]),
                 active_flyout,
-                drag_preview,
-                drag_zones,
                 metrics,
                 menu_group,
                 context_menu.clone(),
-                middle_click_closes_tabs,
                 splitters,
                 active_splitter,
-                vertical_overflow,
+                overflow,
                 scroll_handles.get(&column.column).cloned(),
                 controller.clone(),
                 theme,
@@ -135,7 +135,7 @@ impl FloatingWindowContent {
             ));
         }
 
-        // Tabs nodes that are not owned by a Column still use DockGroupView.
+        // Standalone Tabs nodes outside Columns still use the same Group component.
         for group in groups
             .iter()
             .filter(|group| !column_group_ids.contains(&group.group))
@@ -186,8 +186,7 @@ impl FloatingWindowContent {
         }
 
         // X splits and splitters outside Columns are painted once above the
-        // child surfaces. Column-owned Y splitters were already rendered by
-        // DockColumnView, where their scroll offset is available.
+        // child surfaces. Column-owned Y splitters are rendered with their Groups.
         for splitter in splitters.iter().filter(|splitter| {
             !(splitter.axis == dock_core::Axis::Y && column_groups.contains_key(&splitter.owner))
         }) {
@@ -231,7 +230,7 @@ impl FloatingWindowContent {
                     });
                 }
             });
-            root = root.child(DockCompositionView::render_header(
+            root = root.child(CompositionHeader::render(
                 format!("floating-composition-{:?}", floating.group),
                 floating.rect,
                 columns,
