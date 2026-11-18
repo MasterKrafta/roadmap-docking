@@ -221,7 +221,12 @@ pub(crate) fn begin_panel_drag_host(
                         })?,
                     _ => return None,
                 };
-                (source_rect, None)
+                let source_group_size = if handle == DragHandle::PanelTab {
+                    Some(panel_tab_source_group_rect(rects, panel)?.size)
+                } else {
+                    None
+                };
+                (source_rect, source_group_size)
             }
             DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
                 let rects = controller.floating_geometry(source_window_id, group).ok()?;
@@ -1091,14 +1096,18 @@ fn floating_bounds_for_request_in_host(
     let (source_rect, source_group_size) = match source_host {
         DragSourceHost::Main => {
             let rects = controller.geometry().ok()?;
-            (
-                source_rect_for_request(
-                    request,
-                    rects,
-                    dock_area_column_ids.as_deref(),
-                )?,
-                None,
-            )
+            let source_rect = source_rect_for_request(
+                request,
+                rects,
+                dock_area_column_ids.as_deref(),
+            )?;
+            let source_group_size = match (request.handle, request.payload) {
+                (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+                    Some(panel_tab_source_group_rect(rects, panel)?.size)
+                }
+                _ => None,
+            };
+            (source_rect, source_group_size)
         }
         DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
             let window_id = source_window_id?;
