@@ -1509,8 +1509,7 @@ impl FloatingWindowManager {
             member: WindowGridMember::FloatingComposition(group),
             window_id,
             start_bounds,
-            start_column_bounds: None,
-            transaction_started: false,
+                        transaction_started: false,
         });
         // The OS may have changed the HWND before the first Core resize sample.
         // Force one canonical Core -> HWND reconciliation when the modal loop ends,
@@ -1557,7 +1556,6 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
-        let start_column_bounds = entry.bounds;
 
         // Protect metric updates from the moment Windows enters its modal sizing
         // loop, even before the first size delta opens the Core history transaction.
@@ -1572,7 +1570,6 @@ impl FloatingWindowManager {
             member,
             window_id,
             start_bounds,
-            start_column_bounds: Some(start_column_bounds),
             transaction_started: false,
         });
         if let Some(entry) = self.registry.members.get_mut(&member) {
