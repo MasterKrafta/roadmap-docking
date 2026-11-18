@@ -9,6 +9,8 @@ use dock_core::{FloatingGroupId, NodeId};
 #[allow(dead_code)] // Header and Group variants are consumed by the dedicated-window stage.
 pub(crate) enum WindowGridMember {
     FloatingComposition(FloatingGroupId),
+    /// Complete native window for one Core Column.
+    Column(NodeId),
     Header(NodeId),
     Group(NodeId),
 }
@@ -23,7 +25,7 @@ impl WindowGridMember {
     pub(crate) const fn floating_group(self) -> Option<FloatingGroupId> {
         match self {
             Self::FloatingComposition(group) => Some(group),
-            Self::Header(_) | Self::Group(_) => None,
+            Self::Column(_) | Self::Header(_) | Self::Group(_) => None,
         }
     }
 }
