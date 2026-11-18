@@ -1797,11 +1797,11 @@ mod floating_dock_area_header_hit_tests {
                 Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 500.0)),
                 &[
                     ColumnRect::new(
-                        NodeId::null(),
+                        first_splitter,
                         Rect::new(Point::new(10.0, 20.0), Size::new(236.0, 500.0)),
                     ),
                     ColumnRect::new(
-                        NodeId::null(),
+                        second_splitter,
                         Rect::new(Point::new(250.0, 20.0), Size::new(260.0, 500.0)),
                     ),
                 ],
@@ -1850,9 +1850,13 @@ mod floating_part_host_geometry_tests {
 mod floating_column_host_geometry_tests {
     use super::floating_column_host_rect;
     use dock_core::{NodeId, Point, Rect, Size, SplitterRect};
+    use slotmap::SlotMap;
 
     #[test]
     fn native_column_hosts_collapse_all_core_splitter_gaps() {
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let first_splitter = node_ids.insert(());
+        let second_splitter = node_ids.insert(());
         let splitters = [
             SplitterRect::new(
                 NodeId::null(),
