@@ -59,7 +59,12 @@ impl PanelWindowHandle {
                     }
                 })
                 .map_err(|error| error.to_string()),
-            Self::Floating(_) | Self::DragHost(_) => Ok(()),
+            Self::DragHost(window) => window
+                .update(cx, |surface, _, surface_cx| {
+                    surface.set_promoted_column_close_button(show, surface_cx);
+                })
+                .map_err(|error| error.to_string()),
+            Self::Floating(_) => Ok(()),
         }
     }
 
