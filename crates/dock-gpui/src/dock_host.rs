@@ -496,8 +496,8 @@ impl Render for DockHost {
         transfer_presentation.apply_to_group_presentations(&mut group_presentations);
         let source_window_id = window.window_handle().window_id();
 
-        // Main-column panels are mounted by DockColumnView. Floating panels are mounted
-        // only by their matching FloatingHost native window.
+        // Main-column panels are mounted with their individual Group components.
+        // Floating panels are mounted only by their matching FloatingPartHost window.
         let main_active_panels = main_column_groups
             .values()
             .flat_map(|groups| groups.iter())

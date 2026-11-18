@@ -13,8 +13,7 @@ use ui::Theme;
 
 use crate::{
     dock_components::{
-        active_panels_for_groups, DockCompositionView, DockGroupView,
-        PanelTransferPresentation,
+        active_panels_for_groups, CompositionHeader, DockGroupView, PanelTransferPresentation,
     },
     dock_host::{build_context_menu_entries, context_menu_target_exists},
     DockController, DockWindowPart, FloatingWindowManager,
@@ -260,7 +259,7 @@ impl Render for FloatingPartHost {
                 });
                 let mut root = root
                     .child(pointer_input)
-                    .child(DockCompositionView::render_header(
+                    .child(CompositionHeader::render(
                         format!("floating-column-header-{:?}", column),
                         header_rect,
                         &[local_column],
