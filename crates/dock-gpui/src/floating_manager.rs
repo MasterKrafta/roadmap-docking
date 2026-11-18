@@ -75,6 +75,15 @@ use native_resize_session::NativeResizeSession;
 use panel_window_entry::PanelWindowEntry;
 use panel_window_handle::PanelWindowHandle;
 
+fn clamp_floating_part_local_point(point: Point, client_size: Size) -> Point {
+    const EDGE_EPSILON: f32 = 0.01;
+
+    Point::new(
+        point.x.clamp(0.0, (client_size.width - EDGE_EPSILON).max(0.0)),
+        point.y.clamp(0.0, (client_size.height - EDGE_EPSILON).max(0.0)),
+    )
+}
+
 fn floating_part_screen_bounds(
     floating_bounds: Rect,
     local_bounds: Rect,
@@ -3104,22 +3113,29 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) -> Option<Point> {
         let local = self.core_point_for_floating(native_window, screen)?;
-        let origin = self.controller.update(cx, |controller, _| {
+        let (origin, client_size) = self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, group).ok()?;
             match member {
-                WindowGridMember::Header(column) => rects
-                    .columns
-                    .iter()
-                    .find(|rect| rect.column == column)
-                    .map(|rect| rect.rect.origin),
+                WindowGridMember::Header(column) => {
+                    let rect = rects.columns.iter().find(|rect| rect.column == column)?;
+                    Some((
+                        rect.rect.origin,
+                        Size::new(rect.rect.size.width, controller.metrics().column_header_height),
+                    ))
+                }
                 WindowGridMember::Group(group) => rects
                     .groups
                     .iter()
                     .find(|rect| rect.group == group)
-                    .map(|rect| rect.rect.origin),
+                    .map(|rect| (rect.rect.origin, rect.rect.size)),
                 WindowGridMember::FloatingComposition(_) => None,
             }
         })?;
+
+        // Native hit-testing includes the non-client frame, while Core zones
+        // are defined in client coordinates. Project frame hits onto this
+        // specific Header/Group client edge before adding its composition offset.
+        let local = clamp_floating_part_local_point(local, client_size);
         Some(Point::new(local.x + origin.x, local.y + origin.y))
     }
 
@@ -7022,6 +7038,35 @@ mod floating_part_topology_tests {
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Below),
             Some(bottom_group),
+        );
+    }
+}
+#[cfg(test)]
+mod floating_part_pointer_tests {
+    use super::clamp_floating_part_local_point;
+    use dock_core::{Point, Size};
+
+    #[test]
+    fn native_frame_points_are_projected_to_the_part_client_edges() {
+        let size = Size::new(280.0, 320.0);
+
+        assert_eq!(
+            clamp_floating_part_local_point(Point::new(-8.0, 40.0), size),
+            Point::new(0.0, 40.0),
+        );
+        assert_eq!(
+            clamp_floating_part_local_point(Point::new(288.0, 328.0), size),
+            Point::new(279.99, 319.99),
+        );
+    }
+
+    #[test]
+    fn points_inside_a_part_client_area_are_unchanged() {
+        let point = Point::new(120.0, 180.0);
+
+        assert_eq!(
+            clamp_floating_part_local_point(point, Size::new(280.0, 320.0)),
+            point,
         );
     }
 }
