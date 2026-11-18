@@ -5,8 +5,9 @@ use std::{
 };
 
 use dock_core::{
-    ColumnRect, DockSide, DragPayload, DragPreview, DropZoneRect, FloatingGroupId,
-    GroupRect, NodeId, Point, Rect, TabHeaderRect, TabStripRect, PanelRect,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockSide, DragPayload, DragPreview,
+    DropZoneRect, FloatingGroupId, GroupRect, Node, NodeId, PanelRect, Point, Rect,
+    TabHeaderRect, TabStripRect,
 };
 use gpui::{
     App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, ScrollHandle,
@@ -15,7 +16,7 @@ use gpui::{
 use ui::Theme;
 
 use crate::{
-    components::DropOverlay,
+    components::{main_dock::render_column_content, DropOverlay},
     dock_components::{
         active_panels_for_groups, collect_group_presentations, CompositionHeader, DockGroupView,
         PanelTransferPresentation,
@@ -467,10 +468,9 @@ impl FloatingPartHost {
         side: DockSide,
     ) -> gpui::AnyElement {
         match self.part {
-            FloatingPartKind::Column { column } => div()
-                .id(format!("main-drag-column-waiting-{:?}", column))
-                .size_full()
-                .into_any_element(),
+            FloatingPartKind::Column { column } => {
+                self.render_main_drag_column(cx, side, column).into_any_element()
+            }
             FloatingPartKind::Header { column } => {
                 let header = self.controller.update(cx, |controller, _| {
                     let session = controller.drag().host_session()?;
@@ -636,6 +636,192 @@ impl FloatingPartHost {
                     .into_any_element()
             }
         }
+    }
+
+    fn render_main_drag_column(
+        &mut self,
+        cx: &mut Context<Self>,
+        side: DockSide,
+        column_id: NodeId,
+    ) -> impl IntoElement {
+        let snapshot = self.controller.update(cx, |controller, _| {
+            let session = controller.drag().host_session()?;
+            if !matches!(
+                session.payload(),
+                DragPayload::DockArea { side: active } if active == side
+            ) || !session.all_panel_views_source_detached()
+            {
+                return None;
+            }
+
+            let rects = controller.geometry().ok()?.clone();
+            let column_rect = rects
+                .columns
+                .iter()
+                .find(|rect| rect.column == column_id)
+                .copied()?;
+            let Node::Column(column) = controller.layout().node(column_id)? else {
+                return None;
+            };
+            let group_ids = column.groups.clone();
+            let group_id_set = group_ids.iter().copied().collect::<HashSet<_>>();
+            let group_presentations = collect_group_presentations(
+                controller.layout(),
+                controller.registry(),
+                &group_id_set,
+                Some(&rects),
+            );
+            let active_panels =
+                active_panels_for_groups(group_ids.iter().copied(), &group_presentations, None);
+            let panels = rects
+                .panels
+                .iter()
+                .filter(|panel| active_panels.contains(&panel.panel))
+                .filter_map(|panel| {
+                    controller
+                        .panel_view_for_drag(panel.panel)
+                        .map(|view| (*panel, Some(view)))
+                })
+                .collect::<Vec<_>>();
+            let groups = rects
+                .groups
+                .iter()
+                .filter(|group| group_id_set.contains(&group.group))
+                .copied()
+                .collect::<Vec<_>>();
+            let tab_strips = rects
+                .tab_strips
+                .iter()
+                .filter(|strip| group_id_set.contains(&strip.group))
+                .copied()
+                .collect::<Vec<_>>();
+            let tab_headers = rects
+                .tab_headers
+                .iter()
+                .filter(|header| group_id_set.contains(&header.group))
+                .copied()
+                .collect::<Vec<_>>();
+            let tab_overflows = rects
+                .tab_overflows
+                .iter()
+                .filter(|overflow| group_id_set.contains(&overflow.group))
+                .cloned()
+                .collect::<Vec<_>>();
+            let rail_display_order = if column.mode.is_rail() {
+                controller.layout().column_display_order(column_id).ok()
+            } else {
+                None
+            };
+            let overflow = rects
+                .vertical_overflow
+                .iter()
+                .find(|overflow| overflow.owner == column_id)
+                .copied();
+
+            Some((
+                column_rect,
+                groups,
+                panels,
+                tab_strips,
+                tab_headers,
+                tab_overflows,
+                group_presentations,
+                group_ids,
+                column.mode,
+                rail_display_order.unwrap_or_default(),
+                rects.splitters,
+                rects.vertical_overflow,
+                controller.metrics(),
+            ))
+        });
+
+        let Some((
+            column_rect,
+            groups,
+            panels,
+            tab_strips,
+            tab_headers,
+            tab_overflows,
+            group_presentations,
+            group_ids,
+            column_mode,
+            rail_display_order,
+            splitters,
+            vertical_overflow,
+            metrics,
+        )) = snapshot
+        else {
+            return div()
+                .id(format!("main-drag-column-waiting-{:?}", column_id))
+                .size_full();
+        };
+
+        let local_column = ColumnRect::new(
+            column_id,
+            Rect::new(Point::ZERO, column_rect.rect.size),
+        );
+        let has_vertical_overflow = vertical_overflow
+            .iter()
+            .any(|overflow| overflow.owner == column_id);
+        self.column_scroll_handles
+            .retain(|column, _| *column == column_id && has_vertical_overflow);
+        if has_vertical_overflow {
+            self.column_scroll_handles.entry(column_id).or_default();
+        }
+        let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
+        let content = render_column_content(
+            column_rect,
+            &group_ids,
+            &groups,
+            &panels,
+            column_mode,
+            &tab_strips,
+            &tab_headers,
+            &tab_overflows,
+            &group_presentations,
+            &rail_display_order,
+            None,
+            metrics,
+            None,
+            toggle_menu,
+            &splitters,
+            None,
+            vertical_overflow
+                .iter()
+                .find(|overflow| overflow.owner == column_id)
+                .copied(),
+            self.column_scroll_handles.get(&column_id).cloned(),
+            self.controller.clone(),
+            self.theme,
+            None,
+            true,
+            None,
+        );
+        let header = CompositionHeader::render(
+            format!("main-drag-column-header-{:?}", column_id),
+            Rect::new(Point::ZERO, column_rect.rect.size),
+            std::slice::from_ref(&local_column),
+            metrics,
+            self.theme,
+            false,
+            None,
+        );
+
+        div()
+            .id(format!("main-drag-column-{:?}", column_id))
+            .relative()
+            .size_full()
+            .overflow_hidden()
+            .bg(rgb(self.theme.colors.panel_surface_background))
+            .child(
+                div()
+                    .absolute()
+                    .left(gpui::px(-column_rect.rect.origin.x))
+                    .top(gpui::px(-column_rect.rect.origin.y))
+                    .size_full()
+                    .child(content),
+            )
+            .child(header)
     }
 
     fn floating_group(&self) -> FloatingGroupId {
