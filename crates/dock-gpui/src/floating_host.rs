@@ -15,7 +15,7 @@ use crate::{
     dock_host::{build_context_menu_entries, context_menu_target_exists, render_resize_preview},
     dock_components::PanelTransferPresentation,
     input::interaction::DockInteractionCoordinator,
-    DockController, FloatingWindowManager,
+    DockController, FloatingWindowManager, PanelHost,
 };
 
 use super::{
@@ -350,27 +350,13 @@ impl Render for FloatingHost {
         let pending_transfers = self.controller.update(cx, |controller, _| {
             controller.pending_panel_view_transfers_from(window_id)
         });
-        if !pending_transfers.is_empty()
-            && pending_transfers.iter().all(|panel| {
-                panel_views
-                    .iter()
-                    .all(|(rect, view)| rect.panel != *panel || view.is_none())
-            })
-        {
-            let controller = self.controller.clone();
-            window.on_next_frame(move |_, app| {
-                controller.update(app, |controller, controller_cx| {
-                    let mut confirmed = false;
-                    for panel in pending_transfers {
-                        confirmed |= controller
-                            .confirm_panel_view_source_detached(panel, window_id);
-                    }
-                    if confirmed {
-                        controller_cx.notify();
-                    }
-                });
-            });
-        }
+        PanelHost::confirm_source_detached_after_render(
+            &self.controller,
+            window,
+            window_id,
+            pending_transfers,
+            &panel_views,
+        );
 
         // Query and confirm handoff only after this render/update has unwound.
         // The manager can notify this legacy host while reconciling a Drop.
