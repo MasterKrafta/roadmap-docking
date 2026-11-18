@@ -6807,7 +6807,7 @@ mod floating_part_topology_tests {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
         let floating_a = floating_ids.insert(());
-        let floating_b = floating_ids.insert();
+        let floating_b = floating_ids.insert(());
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
         let column_c = node_ids.insert(());
