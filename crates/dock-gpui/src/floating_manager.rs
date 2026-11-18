@@ -75,20 +75,6 @@ use native_resize_session::NativeResizeSession;
 use panel_window_entry::PanelWindowEntry;
 use panel_window_handle::PanelWindowHandle;
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 fn floating_part_screen_bounds(
     floating_bounds: Rect,
     local_bounds: Rect,
@@ -283,8 +269,6 @@ fn floating_part_boundary_member(
         .collect::<Vec<_>>();
     floating_part_boundary_member_from_members(&members, side)
 }
-
-
 
 fn previous_window_grid_link_is_external(
     link: WindowGridLink,
@@ -1022,7 +1006,6 @@ impl FloatingWindowManager {
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
     }
 
-
     /// Checks the cursor against the exact part HWND that initiated a Floating drag.
     /// The fallback path keeps compatibility with the legacy full-composition host.
     pub(crate) fn cursor_over_other_docking_window_from_source(
@@ -1156,8 +1139,6 @@ impl FloatingWindowManager {
             .is_some_and(|state| state.group == group && state.hide_header)
     }
 
-
-
     /// Returns whether an HWND belongs to the persistent Main/Floating hosts.
     ///
     /// DragHost is checked separately because it is a temporary window owned by
@@ -1225,7 +1206,6 @@ impl FloatingWindowManager {
 
         self.is_managed_native_window(foreground) || drag_host_is_foreground
     }
-
 
     /// Ensures the OS sizing loop is tracked after the first GPUI redraw.
     pub(crate) fn observe_native_resize(
@@ -5668,7 +5648,6 @@ impl FloatingWindowManager {
     }
 }
 
-
 fn chain_drop_allows_main_activation(
     foreground: Option<NativeWindowId>,
     main_window: NativeWindowId,
@@ -6114,7 +6093,6 @@ mod coordinate_tests {
         );
     }
 }
-
 
 #[cfg(test)]
 mod floating_window_chain_drop_destination_tests {

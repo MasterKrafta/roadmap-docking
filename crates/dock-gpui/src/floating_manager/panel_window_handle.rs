@@ -12,7 +12,7 @@ use super::FloatingWindowManager;
 pub(super) enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
     Part(WindowHandle<FloatingPartHost>),
-    DragHost(WindowHandle<crate::drag_host_manager::DragHostSurface>),
+    DragHost(WindowHandle<DragHostSurface>),
 }
 
 impl PanelWindowHandle {
@@ -94,5 +94,4 @@ impl PanelWindowHandle {
             }
         }
     }
-
 }
