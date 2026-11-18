@@ -6594,12 +6594,6 @@ impl FloatingWindowManager {
                 .columns
                 .iter()
                 .find(|candidate| candidate.column == column)?;
-            let root_splitters = floating_root_x_splitters(layout, group, &rects.splitters)?;
-            let host_rect = floating_column_host_rect(
-                column_rect.rect,
-                &root_splitters,
-                metrics.splitter_thickness,
-            );
             let column_minimum = layout
                 .floating_column_minimum_size(group, column, &metrics)
                 .ok()?;
