@@ -42,11 +42,11 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Updates the cached close-button ownership for a permanent Header host.
+    /// Updates the cached close-button ownership for a permanent Column host.
     ///
     /// Rendering a FloatingPartHost must not update FloatingWindowManager: a
     /// reconciliation can notify that host while this manager is already updating.
-    pub(super) fn set_header_close_button(
+    pub(super) fn set_column_close_button(
         &self,
         show: bool,
         cx: &mut Context<FloatingWindowManager>,
