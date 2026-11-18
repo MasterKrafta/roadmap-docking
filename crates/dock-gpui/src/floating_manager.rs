@@ -580,10 +580,10 @@ fn floating_groups_in_move_order(
 }
 
 fn native_move_source_member(
-    source_column_header: Option<NodeId>,
+    source_column_host: Option<NodeId>,
     source_group: Option<NodeId>,
 ) -> Option<WindowGridMember> {
-    source_column_header
+    source_column_host
         .map(WindowGridMember::Column)
         .or_else(|| source_group.map(WindowGridMember::Group))
 }
@@ -2581,7 +2581,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
-            source_header: Some(column),
+            source_column_host: Some(column),
             source_group: None,
             source_column: None,
             source_column_is_single_group: false,
@@ -2739,7 +2739,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
-            source_header: None,
+            source_column_host: None,
             source_group: Some(group),
             source_column: Some(column),
             source_column_is_single_group: is_single_group,
@@ -2861,7 +2861,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
-            source_header: None,
+            source_column_host: None,
             source_group: None,
             source_column: None,
             source_column_is_single_group: false,
@@ -2893,7 +2893,7 @@ impl FloatingWindowManager {
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
         let source_is_current = if let Some(member) =
-            native_move_source_member(state.source_header, state.source_group)
+            native_move_source_member(state.source_column_host, state.source_group)
         {
             self.registry.members.get(&member).is_some_and(|entry| {
                 entry.window_id == window_id
@@ -2928,7 +2928,7 @@ impl FloatingWindowManager {
             let distance = ((dx as f64).powi(2) + (dy as f64).powi(2)).sqrt();
             if distance < state.drag_threshold as f64 {
                 if !self.native_ops.left_button_down().unwrap_or(false) {
-                    if state.source_header.is_some() || state.source_group.is_some() {
+                    if state.source_column_host.is_some() || state.source_group.is_some() {
                         self.cancel_native_move(state, cx);
                     } else {
                         self.finish_native_move(state, cx);
@@ -3919,7 +3919,7 @@ impl FloatingWindowManager {
                     direction,
                 }) => {
                     let moving_member = state
-                        .source_header
+                        .source_column_host
                         .map(WindowGridMember::Column)
                         .unwrap_or_else(|| window_grid_member(state.group));
                     self.finish_floating_window_chain_move(
