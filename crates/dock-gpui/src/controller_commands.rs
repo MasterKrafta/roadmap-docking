@@ -828,6 +828,7 @@ impl DockController {
         self.resize_frame.latest = None;
         self.rects_key = None;
         self.floating_rects.clear();
+        self.floating_column_viewports.clear();
         self.last_error = None;
         self.pending_events.push_back(DockEvent::LayoutChanged {
             version: self.layout.version(),
