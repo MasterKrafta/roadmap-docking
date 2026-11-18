@@ -1,8 +1,8 @@
-//! Runtime owner of native windows for Floating Columns and Groups.
+//! Runtime owner of native windows for Floating Columns.
 //!
-//! Main-dock panels do not allocate native surfaces. A Floating Column owns one
-//! Header host and each Core Group owns one content host. The shared DockController
-//! remains the sole owner of Layout and panel views.
+//! Main-dock panels do not allocate native surfaces. Each Floating Column owns
+//! one HWND containing its Header and complete vertical Group stack. The shared
+//! DockController remains the sole owner of Layout and panel views.
 
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
@@ -909,9 +909,8 @@ impl FloatingWindowManager {
 
     /// Connects the manager to the main GPUI window and the shared controller.
     ///
-    /// The main HWND is retained as the native owner for every Floating
-    /// Column host. The first reconciliation creates hosts for all
-    /// Floating Columns and their Core Groups.
+    /// The main HWND is retained for native drag routing. Reconciliation
+    /// creates exactly one persistent host for every Floating Core Column.
     pub(crate) fn attach_main_window_for_drag_routing(&mut self, window: &mut Window) {
         self.host_registry.main_window_id = Some(window.window_handle().window_id());
 
