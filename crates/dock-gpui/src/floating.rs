@@ -2,6 +2,7 @@ use std::{
     cell::Cell,
     collections::{HashMap, HashSet},
     rc::Rc,
+    time::Duration,
 };
 
 use dock_core::{
@@ -1371,23 +1372,34 @@ fn observe_floating_focus_loss<T: 'static>(
         // Focus can change while FloatingWindowManager is hiding or
         // reconciling native windows. Defer its state query until the
         // current window/manager update has unwound.
-        window.on_next_frame(move |window, app| {
-            let preserve_interaction = manager.upgrade().is_some_and(|manager| {
-                manager.update(app, |manager, manager_cx| {
-                    manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
-                })
-            });
-            if preserve_interaction {
-                return;
-            }
-            DockInteractionCoordinator::cancel_on_focus_loss(
-                &controller,
-                window,
-                &pointer_capture,
-                app,
-            );
-            tab_press.set(None);
-            group_press.set(None);
+        let window_handle = window.window_handle();
+        window.on_next_frame(move |_, app| {
+            app.spawn(async move |app| {
+                // A next-frame callback can still run while a native-window
+                // reconciliation is unwinding. Do not re-enter FloatingWindowManager.
+                app.background_executor()
+                    .timer(Duration::from_millis(1))
+                    .await;
+                let preserve_interaction = manager.upgrade().is_some_and(|manager| {
+                    manager.update(app, |manager, manager_cx| {
+                        manager.should_preserve_pointer_interaction_on_focus_out(manager_cx)
+                    })
+                });
+                if preserve_interaction {
+                    return;
+                }
+                let _ = window_handle.update(app, |_, window, app| {
+                    DockInteractionCoordinator::cancel_on_focus_loss(
+                        &controller,
+                        window,
+                        &pointer_capture,
+                        app,
+                    );
+                });
+                tab_press.set(None);
+                group_press.set(None);
+            })
+            .detach();
         });
     })
     .detach();
