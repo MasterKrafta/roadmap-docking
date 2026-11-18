@@ -7804,6 +7804,35 @@ mod floating_part_window_grid_rebuild_tests {
         ]);
         assert!(previous_window_grid_link_is_external(link, &previous, &current));
     }
+    
+    #[test]
+    fn links_that_become_internal_after_composition_merge_are_rebuilt_from_core() {
+        let mut nodes = SlotMap::<NodeId, ()>::with_key();
+        let mut groups = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating_a = groups.insert(());
+        let floating_b = groups.insert(());
+        let merged = groups.insert(());
+        let first = nodes.insert(());
+        let second = nodes.insert(());
+        let link = WindowGridLink {
+            from: WindowGridMember::Column(first),
+            to: WindowGridMember::Column(second),
+            direction: WindowGridDirection::Right,
+        };
+        let previous = HashMap::from([
+            (WindowGridMember::Column(first), floating_a),
+            (WindowGridMember::Column(second), floating_b),
+        ]);
+        let current = HashMap::from([
+            (WindowGridMember::Column(first), merged),
+            (WindowGridMember::Column(second), merged),
+        ]);
+
+        assert!(
+            !previous_window_grid_link_is_external(link, &previous, &current),
+            "a link that becomes internal to one Core FloatingGroup must be regenerated from its current Column topology"
+        );
+    }
 }
 
 #[cfg(test)]
