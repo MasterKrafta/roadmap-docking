@@ -11,8 +11,6 @@ use gpui::{
 };
 use ui::Theme;
 
-use super::floating_column_host_rect;
-
 use crate::{
     components::main_dock::render_column_content,
     dock_components::{
@@ -131,7 +129,6 @@ impl FloatingWindowContent {
                 !hide_header,
                 show_close_button,
                 close_action,
-                false,
                 menu_group,
                 context_menu.clone(),
                 controller.clone(),
@@ -254,7 +251,6 @@ impl FloatingWindowContent {
         show_header: bool,
         show_close_button: bool,
         close_action: Option<Box<dyn Fn(&mut App) + 'static>>,
-        render_x_splitters: bool,
         menu_group: Option<NodeId>,
         context_menu: GroupMenuToggle,
         controller: Entity<DockController>,
@@ -322,39 +318,6 @@ impl FloatingWindowContent {
                 show_close_button,
                 close_action,
             ));
-        }
-
-        if render_x_splitters {
-            let host_rect = floating_column_host_rect(
-                column.rect,
-                splitters,
-                metrics.splitter_thickness,
-            );
-            let host_right = host_rect.origin.x + host_rect.size.width;
-            let host_bottom = host_rect.origin.y + host_rect.size.height;
-
-            for splitter in splitters.iter().filter(|splitter| {
-                if splitter.axis != dock_core::Axis::X {
-                    return false;
-                }
-                let splitter_right = splitter.rect.origin.x + splitter.rect.size.width;
-                let splitter_bottom = splitter.rect.origin.y + splitter.rect.size.height;
-                splitter.rect.origin.x < host_right
-                    && splitter_right > host_rect.origin.x
-                    && splitter.rect.origin.y < host_bottom
-                    && splitter_bottom > host_rect.origin.y
-            }) {
-                root = root.child(SplitterView::render(
-                    *splitter,
-                    Point::ZERO,
-                    controller.clone(),
-                    metrics,
-                    theme,
-                    Some(floating.group),
-                    active_splitter
-                        == Some((splitter.owner, splitter.boundary_index, splitter.axis)),
-                ));
-            }
         }
 
         root
