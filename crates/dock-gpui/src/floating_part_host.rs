@@ -784,6 +784,36 @@ impl FloatingPartHost {
             column_rect.rect.origin,
         );
 
+        let rendered_panels = panels
+            .iter()
+            .filter_map(|(panel, view)| view.as_ref().map(|_| panel.panel))
+            .collect::<HashSet<_>>();
+        let manager_for_handoff = self.manager.clone();
+        let floating_group = snapshot.floating.group;
+        window.on_next_frame(move |_, app| {
+            let Some(manager) = manager_for_handoff.upgrade() else {
+                return;
+            };
+            let Some(required_panels) = manager.update(app, |manager, manager_cx| {
+                manager.pending_drag_host_handoff_panels(floating_group, window_id, manager_cx)
+            }) else {
+                return;
+            };
+            if required_panels
+                .iter()
+                .all(|panel| rendered_panels.contains(panel))
+            {
+                let _ = manager.update(app, |manager, manager_cx| {
+                    manager.notify_drag_host_handoff_rendered(
+                        floating_group,
+                        window_id,
+                        &required_panels,
+                        manager_cx,
+                    );
+                });
+            }
+        });
+
         let toggle_host = cx.entity().downgrade();
         let toggle_context_menu: GroupMenuToggle = Rc::new(move |target, anchor, app| {
             if let Some(host) = toggle_host.upgrade() {
