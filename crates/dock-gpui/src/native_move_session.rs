@@ -15,8 +15,8 @@ pub(super) struct NativeMoveSession {
     pub(super) threshold_crossed: bool,
     pub(super) high_resolution_timer: bool,
     pub(super) drop_target: Option<NativeMoveTarget>,
-    /// Header HWND that initiated a whole-WindowGrid move.
-    pub(super) source_header: Option<NodeId>,
+    /// Column HWND whose Header initiated a whole-WindowGrid move.
+    pub(super) source_column_host: Option<NodeId>,
     /// Group HWND that initiated a single-Group move.
     pub(super) source_group: Option<NodeId>,
     /// Original Column for a GroupGrip move.
