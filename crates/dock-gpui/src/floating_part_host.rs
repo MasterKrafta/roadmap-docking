@@ -335,7 +335,7 @@ impl Render for FloatingPartHost {
 impl FloatingPartHost {
     fn render_main_drag_part(
         &mut self,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
         side: DockSide,
     ) -> impl IntoElement {
