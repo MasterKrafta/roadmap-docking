@@ -197,12 +197,12 @@ pub(crate) fn begin_panel_drag_host(
         // permanent Group, regardless of whether its source is Main or Floating.
         // Keep LayoutChanged deferred until that destination host is registered.
         let promote_on_float = handle == DragHandle::PanelTab;
-        let preferred_size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
+        let panel_preferred_size = controller.layout().panel_instance(panel)?.constraints.preferred_size;
 
-        let source_rect = match source_host {
+        let (source_rect, source_group_size) = match source_host {
             DragSourceHost::Main => {
                 let rects = controller.geometry().ok()?;
-                match handle {
+                let source_rect = match handle {
                     DragHandle::PanelTab => rects
                         .tab_headers
                         .iter()
@@ -220,11 +220,12 @@ pub(crate) fn begin_panel_drag_host(
                                 .map(|panel_rect| panel_rect.rect)
                         })?,
                     _ => return None,
-                }
+                };
+                (source_rect, None)
             }
             DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
                 let rects = controller.floating_geometry(source_window_id, group).ok()?;
-                match handle {
+                let source_rect = match handle {
                     DragHandle::PanelTab => rects
                         .tab_headers
                         .iter()
@@ -242,21 +243,30 @@ pub(crate) fn begin_panel_drag_host(
                                 .map(|panel_rect| panel_rect.rect)
                         })?,
                     _ => return None,
-                }
+                };
+                let source_group_size = if handle == DragHandle::PanelTab {
+                    Some(panel_tab_source_group_rect(rects, panel)?.size)
+                } else {
+                    None
+                };
+                (source_rect, source_group_size)
             }
         };
+        // Tearing a tab out of Floating should keep the actual Group viewport,
+        // including a size the user may have chosen by resizing the window.
+        let drag_size = source_group_size.unwrap_or(panel_preferred_size);
         let grab_offset = Point::new(
             (origin.x - source_rect.origin.x)
                 .clamp(0.0, source_rect.size.width)
-                .min(preferred_size.width),
+                .min(drag_size.width),
             (origin.y - source_rect.origin.y)
                 .clamp(0.0, source_rect.size.height)
-                .min(preferred_size.height),
+                .min(drag_size.height),
         );
         Some((
             panel,
             grab_offset,
-            preferred_size,
+            drag_size,
             promote_on_float,
             handle == DragHandle::PanelTab,
         ))
@@ -277,12 +287,12 @@ pub(crate) fn begin_panel_drag_host(
             manager.open_panel_tab_at_cursor(
                 panel,
                 grab_offset,
-                preferred_size,
+                drag_size,
                 promote_on_float,
                 manager_cx,
             )
         } else {
-            manager.open_panel_at_cursor(panel, grab_offset, preferred_size, manager_cx)
+            manager.open_panel_at_cursor(panel, grab_offset, drag_size, manager_cx)
         }
     }) {
         Ok(_) => true,
@@ -1078,33 +1088,45 @@ fn floating_bounds_for_request_in_host(
 
     // Geometry is borrowed only long enough to extract the dragged item's
     // source rectangle. The full LayoutRects snapshot is never cloned.
-    let source_rect = match source_host {
+    let (source_rect, source_group_size) = match source_host {
         DragSourceHost::Main => {
             let rects = controller.geometry().ok()?;
-            source_rect_for_request(
-                request,
-                rects,
-                dock_area_column_ids.as_deref(),
-            )?
+            (
+                source_rect_for_request(
+                    request,
+                    rects,
+                    dock_area_column_ids.as_deref(),
+                )?,
+                None,
+            )
         }
         DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
             let window_id = source_window_id?;
             let rects = controller.floating_geometry(window_id, group).ok()?;
-            source_rect_for_request(
+            let source_rect = source_rect_for_request(
                 request,
                 rects,
                 dock_area_column_ids.as_deref(),
-            )?
+            )?;
+            let source_group_size = match (request.handle, request.payload) {
+                (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+                    Some(panel_tab_source_group_rect(rects, panel)?.size)
+                }
+                _ => None,
+            };
+            (source_rect, source_group_size)
         }
     };
 
     let preferred_size = match request.payload {
         DragPayload::Panel { panel } => {
-            controller
-                .layout()
-                .panel_instance(panel)?
-                .constraints
-                .preferred_size
+            source_group_size.unwrap_or(
+                controller
+                    .layout()
+                    .panel_instance(panel)?
+                    .constraints
+                    .preferred_size,
+            )
         }
         DragPayload::Group { .. }
         | DragPayload::DockArea { .. } => source_rect.size,
@@ -1130,6 +1152,19 @@ fn floating_bounds_for_request_in_host(
 
     bounds.validate_non_empty().ok()?;
     Some(bounds)
+}
+
+fn panel_tab_source_group_rect(rects: &LayoutRects, panel: PanelId) -> Option<Rect> {
+    let group = rects
+        .tab_headers
+        .iter()
+        .find(|header| header.panel == panel)?
+        .group;
+    rects
+        .groups
+        .iter()
+        .find(|group_rect| group_rect.group == group)
+        .map(|group_rect| group_rect.rect)
 }
 
 fn source_rect_for_request(
