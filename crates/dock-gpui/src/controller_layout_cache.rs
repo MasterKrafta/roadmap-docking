@@ -16,24 +16,26 @@ impl DockController {
         group: FloatingGroupId,
         column: NodeId,
         height: f32,
+        origin_y_offset: f32,
     ) -> bool {
-        if !height.is_finite() || height <= 0.0 {
+        if !height.is_finite() || height <= 0.0 || !origin_y_offset.is_finite() {
             return false;
         }
         let unchanged = self
             .floating_column_viewports
             .get(&window_id)
-            .is_some_and(|(current_group, current_column, current_height)| {
+            .is_some_and(|(current_group, current_column, current_height, current_origin_y)| {
                 *current_group == group
                     && *current_column == column
                     && (*current_height - height).abs() <= 0.5
+                    && (*current_origin_y - origin_y_offset).abs() <= 0.5
             });
         if unchanged {
             return false;
         }
 
         self.floating_column_viewports
-            .insert(window_id, (group, column, height));
+            .insert(window_id, (group, column, height, origin_y_offset));
         self.floating_rects.remove(&window_id);
         self.drag.clear_resolver();
         true
@@ -271,12 +273,13 @@ impl DockController {
             .floating_column_viewports
             .get(&window_id)
             .copied()
-            .filter(|(owner, _, _)| *owner == group);
+            .filter(|(owner, _, _, _)| *owner == group);
         FloatingRectCacheKey {
             window_id,
             group,
-            column: column_viewport.map(|(_, column, _)| column),
-            column_height: column_viewport.map(|(_, _, height)| height),
+            column: column_viewport.map(|(_, column, _, _)| column),
+            column_height: column_viewport.map(|(_, _, height, _)| height),
+            column_origin_y_offset: column_viewport.map(|(_, _, _, origin_y)| origin_y),
             layout_version: self.layout.version(),
             metrics_revision: self.metrics_revision,
             chrome: self.layout.chrome(),
@@ -301,11 +304,11 @@ impl DockController {
             .floating_column_viewports
             .get(&window_id)
             .copied()
-            .filter(|(owner, _, _)| *owner == group);
+            .filter(|(owner, _, _, _)| *owner == group);
         let rects = match column_viewport {
-            Some((_, column, height)) => self
+            Some((_, column, height, origin_y)) => self
                 .layout
-                .compute_floating_column_rects(group, column, height, &self.metrics),
+                .compute_floating_column_rects(group, column, height, origin_y, &self.metrics),
             None => self.layout.compute_floating_rects(group, &self.metrics),
         };
         let rects = match rects {
