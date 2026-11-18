@@ -3103,24 +3103,49 @@ impl FloatingWindowManager {
         screen: PhysicalPoint,
         cx: &mut Context<Self>,
     ) -> Option<Point> {
-        let local = self.core_point_for_floating(native_window, screen)?;
-        let origin = self.controller.update(cx, |controller, _| {
+        // window_from_point() selects this HWND using GetWindowRect, which includes
+        // its non-client frame. Map that same physical rectangle onto the Core part
+        // bounds so a pointer on the visible/native frame still reaches the outer
+        // Core drop zones instead of producing coordinates beyond the part.
+        let native_bounds = self.native_ops.window_rect(native_window).ok()?;
+        let native_width = (i64::from(native_bounds.right) - i64::from(native_bounds.left)) as f32;
+        let native_height = (i64::from(native_bounds.bottom) - i64::from(native_bounds.top)) as f32;
+        if native_width <= 0.0 || native_height <= 0.0 {
+            return None;
+        }
+
+        let core_bounds = self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, group).ok()?;
             match member {
-                WindowGridMember::Header(column) => rects
-                    .columns
-                    .iter()
-                    .find(|rect| rect.column == column)
-                    .map(|rect| rect.rect.origin),
+                WindowGridMember::Header(column) => {
+                    let column = rects.columns.iter().find(|rect| rect.column == column)?;
+                    Some(Rect::new(
+                        column.rect.origin,
+                        Size::new(
+                            column.rect.size.width,
+                            controller.metrics().column_header_height,
+                        ),
+                    ))
+                }
                 WindowGridMember::Group(group) => rects
                     .groups
                     .iter()
                     .find(|rect| rect.group == group)
-                    .map(|rect| rect.rect.origin),
+                    .map(|rect| rect.rect),
                 WindowGridMember::FloatingComposition(_) => None,
             }
         })?;
-        Some(Point::new(local.x + origin.x, local.y + origin.y))
+
+        const EDGE_EPSILON: f32 = 0.001;
+        let x_fraction = ((screen.x - native_bounds.left) as f32 / native_width)
+            .clamp(0.0, 1.0 - EDGE_EPSILON);
+        let y_fraction = ((screen.y - native_bounds.top) as f32 / native_height)
+            .clamp(0.0, 1.0 - EDGE_EPSILON);
+
+        Some(Point::new(
+            core_bounds.origin.x + core_bounds.size.width * x_fraction,
+            core_bounds.origin.y + core_bounds.size.height * y_fraction,
+        ))
     }
 
     fn finish_native_move(&mut self, state: NativeMoveSession, cx: &mut Context<Self>) {
