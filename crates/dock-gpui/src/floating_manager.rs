@@ -4661,7 +4661,7 @@ impl FloatingWindowManager {
             .members
             .iter()
             .filter(|(member, entry)| {
-                matches!(member, WindowGridMember::Group(_))
+                matches!(member, WindowGridMember::Column(_) | WindowGridMember::Group(_))
                     && entry.host_group.is_some_and(|owner| expected_groups.contains(&owner))
             })
             .map(|(member, entry)| {
@@ -4670,9 +4670,11 @@ impl FloatingWindowManager {
             .collect::<Vec<_>>();
         let has_typed_group_windows = !group_windows.is_empty();
         let mut ready_groups = HashSet::new();
+        let mut all_windows_ready = true;
 
         for (member, owner, window, native_window, visibility) in group_windows {
             let Some(native_window) = native_window else {
+                all_windows_ready = false;
                 continue;
             };
             if visibility == PanelWindowVisibility::Hidden {
@@ -4683,6 +4685,7 @@ impl FloatingWindowManager {
                         %error,
                         "could not show a Floating Group window during DragHost handoff"
                     );
+                    all_windows_ready = false;
                     continue;
                 }
                 if let Some(entry) = self.registry.members.get_mut(&member) {
@@ -4696,8 +4699,9 @@ impl FloatingWindowManager {
                     ?group,
                     ?member,
                     %error,
-                    "could not notify a Floating Group window after DragHost handoff"
+                    "could not notify a Floating Column/Group window after DragHost handoff"
                 );
+                all_windows_ready = false;
                 continue;
             }
             if let Some(owner) = owner {
@@ -4706,9 +4710,10 @@ impl FloatingWindowManager {
         }
 
         if has_typed_group_windows {
-            let all_destinations_ready = expected_groups
-                .iter()
-                .all(|expected| ready_groups.contains(expected));
+            let all_destinations_ready = all_windows_ready
+                && expected_groups
+                    .iter()
+                    .all(|expected| ready_groups.contains(expected));
             if all_destinations_ready {
                 cx.notify();
                 return true;
@@ -4947,7 +4952,9 @@ impl FloatingWindowManager {
             .get(&group)
             .into_iter()
             .flatten()
-            .filter(|member| matches!(member, WindowGridMember::Group(_)))
+            .filter(|member| {
+                matches!(member, WindowGridMember::Column(_) | WindowGridMember::Group(_))
+            })
             .find_map(|member| {
                 self.registry.members.get(member).and_then(|entry| {
                     (entry.host_group == Some(group)
