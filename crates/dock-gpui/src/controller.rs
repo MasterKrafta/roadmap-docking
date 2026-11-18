@@ -70,6 +70,8 @@ pub struct DockController {
     rects_key: Option<RectCacheKey>,
     main_window_id: Option<WindowId>,
     floating_rects: HashMap<WindowId, FloatingGeometryCache>,
+    /// Current native viewport for each permanent Floating Column HWND.
+    floating_column_viewports: HashMap<WindowId, (FloatingGroupId, NodeId, f32)>,
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
@@ -119,6 +121,7 @@ impl DockController {
             rects_key: None,
             main_window_id: None,
             floating_rects: HashMap::new(),
+            floating_column_viewports: HashMap::new(),
             interaction: None,
             resize_frame: ResizeFrameThrottle::default(),
             native_window_move_transaction_active: false,
@@ -200,6 +203,7 @@ impl DockController {
         self.rects = None;
         self.rects_key = None;
         self.floating_rects.clear();
+        self.floating_column_viewports.clear();
         self.pending_events
             .push_back(DockEvent::MetricsChanged { revision });
 
