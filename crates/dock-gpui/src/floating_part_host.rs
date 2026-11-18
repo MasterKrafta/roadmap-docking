@@ -13,7 +13,8 @@ use ui::Theme;
 
 use crate::{
     dock_components::{
-        active_panels_for_groups, CompositionHeader, DockGroupView, PanelTransferPresentation,
+        active_panels_for_groups, collect_group_presentations, CompositionHeader, DockGroupView,
+        PanelTransferPresentation,
     },
     dock_host::{build_context_menu_entries, context_menu_target_exists},
     DockController, DockWindowPart, FloatingWindowManager,
@@ -212,14 +213,14 @@ impl Render for FloatingPartHost {
         });
         let snapshot = match snapshot {
             Ok(Some(snapshot)) => snapshot,
-            Ok(None) => return div().id("empty-floating-part").size_full(),
+            Ok(None) => return div().id("empty-floating-part").size_full().into_any_element(),
             Err(error) => {
                 tracing::warn!(
                     ?self.part,
                     %error,
                     "floating part host could not obtain Core geometry"
                 );
-                return div().id("invalid-floating-part").size_full();
+                return div().id("invalid-floating-part").size_full().into_any_element();
             }
         };
 
@@ -238,7 +239,7 @@ impl Render for FloatingPartHost {
                     .iter()
                     .find(|candidate| candidate.column == column)
                 else {
-                    return root;
+                    return root.into_any_element();
                 };
                 let header_rect = Rect::new(
                     Point::ZERO,
@@ -318,7 +319,7 @@ impl Render for FloatingPartHost {
                         app,
                     );
                 });
-                root
+                root.into_any_element()
             }
             FloatingPartKind::Group { column, group } => div()
                 .id(format!("floating-group-part-window-root-{:?}", group))
@@ -327,7 +328,8 @@ impl Render for FloatingPartHost {
                 .size_full()
                 .overflow_hidden()
                 .bg(rgb(self.theme.colors.panel_surface_background))
-                .child(self.render_group(window, cx, &snapshot, column, group)),
+                .child(self.render_group(window, cx, &snapshot, column, group))
+                .into_any_element(),
         }
     }
 }
@@ -338,7 +340,7 @@ impl FloatingPartHost {
         _window: &mut Window,
         cx: &mut Context<Self>,
         side: DockSide,
-    ) -> impl IntoElement {
+    ) -> gpui::AnyElement {
         match self.part {
             FloatingPartKind::Header { column } => {
                 let header = self.controller.update(cx, |controller, _| {
@@ -360,7 +362,7 @@ impl FloatingPartHost {
                 });
 
                 let Some((width, metrics)) = header else {
-                    return div().id(format!("main-drag-header-waiting-{:?}", column)).size_full();
+                    return div().id(format!("main-drag-header-waiting-{:?}", column)).size_full().into_any_element();
                 };
                 let local_header = ColumnRect::new(
                     column,
@@ -387,6 +389,7 @@ impl FloatingPartHost {
                         false,
                         None,
                     ))
+                    .into_any_element()
             }
             FloatingPartKind::Group { column, group } => {
                 let snapshot = self.controller.update(cx, |controller, _| {
@@ -444,7 +447,7 @@ impl FloatingPartHost {
                     panel_view,
                     metrics,
                 )) = snapshot else {
-                    return div().id(format!("main-drag-group-waiting-{:?}", group)).size_full();
+                    return div().id(format!("main-drag-group-waiting-{:?}", group)).size_full().into_any_element();
                 };
 
                 let local_group = GroupRect::new(
@@ -501,6 +504,7 @@ impl FloatingPartHost {
                         Point::ZERO,
                         self.theme,
                     ))
+                    .into_any_element()
             }
         }
     }
