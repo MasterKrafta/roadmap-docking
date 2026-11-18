@@ -5,7 +5,7 @@ use std::{
 };
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockSide, DragPayload, DragPreview,
+    ColumnRect, DockSide, DragPayload, DragPreview,
     DropZoneRect, FloatingGroupId, GroupRect, Node, NodeId, PanelRect, Point, Rect,
     TabHeaderRect, TabStripRect,
 };
@@ -39,10 +39,10 @@ use super::super::{
     panel_host::PanelHost,
 };
 
-/// Root view for one detached Header or Group window.
+/// Root view for one complete Floating Column window.
 ///
-/// The existing FloatingHost remains the legacy full-composition renderer;
-/// permanent Floating windows are created by FloatingWindowManager as parts.
+/// Legacy Header/Group render paths remain temporarily available for drag migration;
+/// permanent Floating windows are reconciled by Column identity.
 pub(crate) struct FloatingPartHost {
     controller: Entity<DockController>,
     floating_group: Option<FloatingGroupId>,
@@ -712,12 +712,6 @@ impl FloatingPartHost {
             } else {
                 None
             };
-            let overflow = rects
-                .vertical_overflow
-                .iter()
-                .find(|overflow| overflow.owner == column_id)
-                .copied();
-
             Some((
                 column_rect,
                 groups,
