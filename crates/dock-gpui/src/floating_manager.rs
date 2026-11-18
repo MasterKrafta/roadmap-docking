@@ -7804,7 +7804,7 @@ mod floating_part_window_grid_rebuild_tests {
         ]);
         assert!(previous_window_grid_link_is_external(link, &previous, &current));
     }
-    
+
     #[test]
     fn links_that_become_internal_after_composition_merge_are_rebuilt_from_core() {
         let mut nodes = SlotMap::<NodeId, ()>::with_key();
