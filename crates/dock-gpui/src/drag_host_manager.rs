@@ -1093,21 +1093,27 @@ impl DragHostManager {
         // Its HWND stays at the creation point while the temporary Header/Group
         // windows follow the cursor, so its native bounds are stale at release.
         // Use the cursor-tracked free_area_bounds for DockArea drags instead.
-        let restored_free_area_bounds = if dock_area.is_none()
+        // Drop tracking already computes Group bounds from the original
+        // source geometry and final cursor position. Prefer those bounds:
+        // measuring the restored HWND frame mixes its outer origin with client
+        // dimensions and can offset or resize the new Floating composition.
+        // Read native bounds only when tracking could not produce a result.
+        let restored_free_area_bounds = if free_area_bounds.is_none()
+            && dock_area.is_none()
             && defer_layout_events_until_parts_ready
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some())
         {
             match self.restore_active_window_frame(id, cx) {
                 Ok(bounds) => Some(bounds),
                 Err(error) => {
-                    tracing::warn!(?id, %error, "could not restore DragHost frame before Floating promotion");
+                    tracing::warn!(?id, %error, "could not restore DragHost frame as a fallback for Floating bounds");
                     None
                 }
             }
         } else {
             None
         };
-        let free_area_bounds = restored_free_area_bounds.or(free_area_bounds);
+        let free_area_bounds = free_area_bounds.or(restored_free_area_bounds);
         let needs_column_header = (target == Some(DropTarget::FreeArea) || chain_join.is_some())
             && matches!(
                 drag_handle,
