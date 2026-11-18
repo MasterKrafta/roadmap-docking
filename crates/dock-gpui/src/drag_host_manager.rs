@@ -2352,6 +2352,10 @@ mod floating_window_chain_target_tests {
             Some(DockWindowRole::Floating { group: anchor }),
             Some(DockWindowRole::FloatingPart {
                 group: anchor,
+                part: crate::DockWindowPart::Column { column: group },
+            }),
+            Some(DockWindowRole::FloatingPart {
+                group: anchor,
                 part: crate::DockWindowPart::Header { column: group },
             }),
             Some(DockWindowRole::FloatingPart {
@@ -2633,33 +2637,51 @@ mod floating_window_chain_target_tests {
     }
 
     #[test]
-    fn drops_into_a_different_floating_composition_still_join_window_grid() {
+    fn floating_panel_tab_side_drops_from_column_hosts_join_the_target_window_grid() {
         use slotmap::SlotMap;
 
         let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        let moving_group = floating_ids.insert(());
-        let target_group = floating_ids.insert(());
-        let group = NodeId::null();
-        let left = Some(DropTarget::GroupEdge {
-            group,
-            zone: DropZone::Left,
-        });
+        let moving_floating = floating_ids.insert(());
+        let target_floating = floating_ids.insert(());
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let source_column = node_ids.insert(());
+        let target_column = node_ids.insert(());
+        let target_group = node_ids.insert(());
 
-        assert_eq!(
-            floating_window_chain_target(
-                DragSourceHost::FloatingPart {
-                    group: moving_group,
-                    part: DockWindowPart::Header { column: group },
-                },
-                Some(DragHandle::PanelTab),
-                left,
-                Some(DockWindowRole::FloatingPart {
-                    group: target_group,
-                    part: DockWindowPart::Group { group },
-                }),
-            ),
-            Some((target_group, WindowGridDirection::Left)),
-        );
+        let zones = [
+            (DropZone::Left, WindowGridDirection::Left),
+            (DropZone::Right, WindowGridDirection::Right),
+            (DropZone::Top, WindowGridDirection::Above),
+            (DropZone::Bottom, WindowGridDirection::Below),
+            (DropZone::FloatingTop, WindowGridDirection::Above),
+            (DropZone::FloatingBottom, WindowGridDirection::Below),
+        ];
+
+        for (zone, direction) in zones {
+            assert_eq!(
+                floating_window_chain_target(
+                    DragSourceHost::FloatingPart {
+                        group: moving_floating,
+                        part: DockWindowPart::Column {
+                            column: source_column,
+                        },
+                    },
+                    Some(DragHandle::PanelTab),
+                    Some(DropTarget::GroupEdge {
+                        group: target_group,
+                        zone,
+                    }),
+                    Some(DockWindowRole::FloatingPart {
+                        group: target_floating,
+                        part: DockWindowPart::Column {
+                            column: target_column,
+                        },
+                    }),
+                ),
+                Some((target_floating, direction)),
+                "Floating Column → Floating Column PanelTab {zone:?} must keep its WindowGrid direction",
+            );
+        }
     }
 
     #[test]
