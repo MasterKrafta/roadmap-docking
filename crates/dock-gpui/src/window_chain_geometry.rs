@@ -1557,7 +1557,7 @@ mod native_resize_grid_geometry_tests {
         shift_window_grid_after_resize,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember};
-    use dock_core::{FloatingGroupId, Point, Rect, Size};
+    use dock_core::{FloatingGroupId, NodeId, Point, Rect, Size};
     use slotmap::SlotMap;
 
     fn groups(count: usize) -> (SlotMap<FloatingGroupId, ()>, Vec<WindowGridMember>) {
@@ -1566,6 +1566,14 @@ mod native_resize_grid_geometry_tests {
             .map(|_| WindowGridMember::FloatingComposition(ids.insert(())))
             .collect();
         (ids, groups)
+    }
+
+    fn columns(count: usize) -> (SlotMap<NodeId, ()>, Vec<WindowGridMember>) {
+        let mut ids = SlotMap::<NodeId, ()>::with_key();
+        let columns = (0..count)
+            .map(|_| WindowGridMember::Column(ids.insert(())))
+            .collect();
+        (ids, columns)
     }
 
     fn rect(x: f32, y: f32, width: f32, height: f32) -> Rect {
@@ -1608,6 +1616,42 @@ mod native_resize_grid_geometry_tests {
         direction: WindowGridDirection,
     ) -> WindowGridLink {
         WindowGridLink { from, to, direction }
+    }
+
+    #[test]
+    fn column_window_grid_members_reflow_eastern_and_southern_branches() {
+        let (_ids, members) = columns(3);
+        let [resized, east, south] = members.as_slice() else {
+            panic!("three Column window members");
+        };
+        let bounds = vec![
+            (*resized, rect(0.0, 0.0, 124.0, 80.0)),
+            (*east, rect(124.0, 0.0, 50.0, 40.0)),
+            (*south, rect(0.0, 80.0, 100.0, 40.0)),
+        ];
+        let frames = vec![
+            frame(124.0, 80.0, 1.0),
+            frame(50.0, 40.0, 1.0),
+            frame(100.0, 40.0, 1.0),
+        ];
+        let links = vec![
+            link(*resized, *east, WindowGridDirection::Right),
+            link(*resized, *south, WindowGridDirection::Below),
+        ];
+
+        let shifted = shift_window_grid_after_resize(
+            bounds,
+            &frames,
+            &links,
+            *resized,
+            24.0,
+            12.0,
+        )
+        .expect("valid Column WindowGrid");
+
+        assert_eq!(shifted[0].1.origin, Point::new(0.0, 0.0));
+        assert_eq!(shifted[1].1.origin, Point::new(148.0, 0.0));
+        assert_eq!(shifted[2].1.origin, Point::new(0.0, 92.0));
     }
 
     #[test]
