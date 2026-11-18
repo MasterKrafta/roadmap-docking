@@ -1219,7 +1219,6 @@ impl DragHostManager {
             && dock_area.is_some()
             && source_host == Some(DragSourceHost::Main)
             && drag_handle == Some(DragHandle::DockAreaHeader)
-            && !created_groups.is_empty()
         {
             if self.promote_main_dock_area_parts(id, cx) {
                 if let Some((anchor, direction)) = chain_join {
