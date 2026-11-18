@@ -4,7 +4,9 @@ mod header;
 mod group;
 #[path = "tab.rs"]
 mod tab;
+#[path = "dock_column_view.rs"]
 mod dock_column_view;
+#[path = "dock_composition_view.rs"]
 mod dock_composition_view;
 
 use dock_core::{DockMetrics, GroupRect, Point};

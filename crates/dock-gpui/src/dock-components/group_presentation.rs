@@ -1,5 +1,8 @@
+#[path = "group_presentation_state.rs"]
 mod group_presentation;
+#[path = "panel_transfer_presentation.rs"]
 mod panel_transfer_presentation;
+#[path = "tab_presentation.rs"]
 mod tab_presentation;
 
 pub(crate) use group_presentation::GroupPresentation;
