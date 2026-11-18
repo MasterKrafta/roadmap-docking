@@ -22,7 +22,7 @@ use crate::{
     DragHostManager, DragSourceHost, FloatingWindowManager,
     components::{
         CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, ContextMenuTarget,
-        ContextMenuToggle, DropOverlay, FlyoutView, MainDockView,
+        ContextMenuToggle, DropOverlay, FlyoutView, MainDockView, PanelHost,
     },
     dock_components::{
         collect_group_presentations, GroupPresentation, PanelTransferPresentation,
@@ -596,27 +596,13 @@ impl Render for DockHost {
                 )
             })
             .unwrap_or_default();
-        if !pending_transfers.is_empty()
-            && pending_transfers.iter().all(|panel| {
-                panel_views
-                    .iter()
-                    .all(|(rect, view)| rect.panel != *panel || view.is_none())
-            })
-        {
-            let controller = self.controller.clone();
-            window.on_next_frame(move |_, app| {
-                controller.update(app, |controller, controller_cx| {
-                    let mut confirmed = false;
-                    for panel in pending_transfers {
-                        confirmed |= controller
-                            .confirm_panel_view_source_detached(panel, source_window_id);
-                    }
-                    if confirmed {
-                        controller_cx.notify();
-                    }
-                });
-            });
-        }
+        PanelHost::confirm_source_detached_after_render(
+            &self.controller,
+            window,
+            source_window_id,
+            pending_transfers,
+            &panel_views,
+        );
 
         // A PanelId can be mounted in one host only during this render pass.
         // This also protects against stale/overlapping geometry snapshots.
