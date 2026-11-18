@@ -1009,6 +1009,16 @@ impl FloatingPartHost {
                 (panel, view)
             })
             .collect::<Vec<_>>();
+        let pending_transfers = self.controller.update(cx, |controller, _| {
+            controller.pending_panel_view_transfers_from(window_id)
+        });
+        PanelHost::confirm_source_detached_after_render(
+            &self.controller,
+            window,
+            window_id,
+            pending_transfers,
+            &panels,
+        );
 
         let has_vertical_overflow = snapshot
             .rects
