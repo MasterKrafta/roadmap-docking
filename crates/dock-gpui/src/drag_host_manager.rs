@@ -1399,7 +1399,7 @@ impl DragHostManager {
                         _ => None,
                     }
                 });
-                if let Some((owner, column, group)) = destination
+                if let Some((owner, column, _group)) = destination
                     && owner == target_group
                     && self.promote_drag_host_content_to_floating(
                         id,
