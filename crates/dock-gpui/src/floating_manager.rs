@@ -2675,18 +2675,30 @@ impl FloatingWindowManager {
         let desired_by_member = desired.iter()
             .map(|spec| (spec.member, *spec))
             .collect::<HashMap<_, _>>();
-        if !self.pending_main_drag_parts.keys()
-            .all(|member| desired_by_member.contains_key(member))
-        {
-            return false;
-        }
 
-        let pending = std::mem::take(&mut self.pending_main_drag_parts);
-        for (member, mut entry) in pending {
-            let Some(spec) = desired_by_member.get(&member).copied() else {
-                return false;
-            };
-            let Some(native_window) = entry.native_window else {
+        // Preflight every member before changing its host identity. This keeps
+        // the pending set intact on failure, so the caller can close all windows.
+        let pending_members = self.pending_main_drag_parts.iter()
+            .map(|(member, entry)| {
+                let spec = desired_by_member.get(member).copied()?;
+                let native_window = entry.native_window?;
+                let available = match entry.window {
+                    PanelWindowHandle::Part(window) => {
+                        window.update(cx, |_, _, _| ()).is_ok()
+                    }
+                    _ => false,
+                };
+                available.then_some((*member, spec, native_window))
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(pending_members) = pending_members else {
+            return false;
+        };
+
+        // Switch all existing GPUI entities from Main-source geometry to their
+        // new Core FloatingGroup before moving the entries into the permanent map.
+        for (_, spec, _) in &pending_members {
+            let Some(entry) = self.pending_main_drag_parts.get(&spec.member) else {
                 return false;
             };
             let adopted = match entry.window {
@@ -2702,7 +2714,13 @@ impl FloatingWindowManager {
             if !adopted {
                 return false;
             }
+        }
 
+        let mut pending = std::mem::take(&mut self.pending_main_drag_parts);
+        for (member, spec, native_window) in pending_members {
+            let Some(mut entry) = pending.remove(&member) else {
+                continue;
+            };
             let current_scale = self.native_ops.scale_factor(native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .or(entry.native_scale_factor);
@@ -2720,6 +2738,15 @@ impl FloatingWindowManager {
             self.registry.members.insert(member, entry);
         }
 
+        // There should be no leftovers because every pending member was preflighted.
+        // Keep cleanup safe if a future change adds a member between the two passes.
+        for (member, entry) in pending {
+            if let Some(native_window) = entry.native_window {
+                let _ = self.native_ops.hide(native_window);
+            }
+            entry.window.remove_window(cx);
+            tracing::warn!(?member, "discarded an unadopted Main drag part");
+        }
         self.pending_main_drag_origin = None;
         true
     }
