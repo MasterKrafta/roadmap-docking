@@ -119,6 +119,21 @@ fn floating_first_column(
     floating_root_columns(layout, group)?.first().copied()
 }
 
+fn floating_column_for_group(
+    layout: &dock_core::Layout,
+    floating_group: FloatingGroupId,
+    group: NodeId,
+) -> Option<NodeId> {
+    floating_root_columns(layout, floating_group)?
+        .into_iter()
+        .find(|column_id| {
+            matches!(
+                layout.node(*column_id),
+                Some(Node::Column(column)) if column.groups.contains(&group)
+            )
+        })
+}
+
 fn floating_column_core_resize_edge(
     native_edge: Option<NativeHorizontalResizeEdge>,
     is_first_column: bool,
@@ -507,18 +522,17 @@ fn floating_window_drop_destination(
     target: DropTarget,
     point: Point,
     moving_chain: bool,
-) -> NativeMoveTarget {
+    target_column: Option<NodeId>,
+) -> Option<NativeMoveTarget> {
     match (moving_chain, floating_window_chain_direction(target), target) {
-        (
-            true,
-            Some(direction),
-            DropTarget::GroupEdge { group, .. },
-        ) => NativeMoveTarget::FloatingChain {
-            anchor,
-            anchor_member: WindowGridMember::Group(group),
-            direction,
-        },
-        _ => NativeMoveTarget::FloatingDock { target, point },
+        (true, Some(direction), DropTarget::GroupEdge { .. }) => {
+            Some(NativeMoveTarget::FloatingChain {
+                anchor,
+                anchor_member: WindowGridMember::Column(target_column?),
+                direction,
+            })
+        }
+        _ => Some(NativeMoveTarget::FloatingDock { target, point }),
     }
 }
 
@@ -3092,8 +3106,27 @@ impl FloatingWindowManager {
             });
 
             resolved_target
-                .map(|target| {
-                    floating_window_drop_destination(target_group, target, point, moving_chain)
+                .and_then(|target| {
+                    let target_column = match target {
+                        DropTarget::GroupEdge {
+                            group: target_dock_group,
+                            ..
+                        } if moving_chain => self.controller.update(cx, |controller, _| {
+                            floating_column_for_group(
+                                controller.layout(),
+                                target_group,
+                                target_dock_group,
+                            )
+                        }),
+                        _ => None,
+                    };
+                    floating_window_drop_destination(
+                        target_group,
+                        target,
+                        point,
+                        moving_chain,
+                        target_column,
+                    )
                 })
                 .or_else(|| state.source_group.map(|_| NativeMoveTarget::RejectedGroupDrop))
         };
@@ -7502,26 +7535,56 @@ mod floating_window_chain_drop_destination_tests {
             assert_eq!(floating_window_chain_direction(target), Some(direction));
             assert!(floating_chain_drop_target_is_supported(target, false));
             assert!(!floating_chain_drop_target_is_supported(target, true));
+            let column = NodeId::null();
             assert!(matches!(
-                floating_window_drop_destination(FloatingGroupId::null(), target, Point::ZERO, true),
-                NativeMoveTarget::FloatingChain {
+                floating_window_drop_destination(
+                    FloatingGroupId::null(),
+                    target,
+                    Point::ZERO,
+                    true,
+                    Some(column),
+                ),
+                Some(NativeMoveTarget::FloatingChain {
                     anchor_member: actual_member,
                     direction: actual,
                     ..
-                } if actual == direction && actual_member == WindowGridMember::Group(group)
+                }) if actual == direction
+                    && actual_member == WindowGridMember::Column(column)
             ));
         }
 
         assert_eq!(floating_window_chain_direction(center), None);
         assert!(!floating_chain_drop_target_is_supported(center, false));
         assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), center, Point::ZERO, true),
-            NativeMoveTarget::FloatingDock { target, .. } if target == center
+            floating_window_drop_destination(
+                FloatingGroupId::null(),
+                center,
+                Point::ZERO,
+                true,
+                None,
+            ),
+            Some(NativeMoveTarget::FloatingDock { target, .. }) if target == center
         ));
         assert!(matches!(
-            floating_window_drop_destination(FloatingGroupId::null(), right, Point::ZERO, false),
-            NativeMoveTarget::FloatingDock { target, .. } if target == right
+            floating_window_drop_destination(
+                FloatingGroupId::null(),
+                right,
+                Point::ZERO,
+                false,
+                None,
+            ),
+            Some(NativeMoveTarget::FloatingDock { target, .. }) if target == right
         ));
+        assert!(
+            floating_window_drop_destination(
+                FloatingGroupId::null(),
+                right,
+                Point::ZERO,
+                true,
+                None,
+            )
+            .is_none()
+        );
     }
 }
 #[cfg(test)]
