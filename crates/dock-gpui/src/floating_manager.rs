@@ -347,44 +347,92 @@ fn floating_part_internal_links(
     links
 }
 
+fn floating_part_boundary_member_from_rects(
+    candidates: impl IntoIterator<Item = (WindowGridMember, Rect)>,
+    side: WindowGridDirection,
+) -> Option<WindowGridMember> {
+    let candidates = candidates.into_iter().collect::<Vec<_>>();
+    let selected = match side {
+        WindowGridDirection::Left => candidates.iter().min_by(|(_, left), (_, right)| {
+            left.origin
+                .x
+                .total_cmp(&right.origin.x)
+                .then_with(|| left.origin.y.total_cmp(&right.origin.y))
+        }),
+        WindowGridDirection::Right => candidates.iter().max_by(|(_, left), (_, right)| {
+            left.origin
+                .x
+                .add(left.size.width)
+                .total_cmp(&right.origin.x.add(right.size.width))
+                .then_with(|| left.origin.y.total_cmp(&right.origin.y))
+        }),
+        WindowGridDirection::Above => candidates.iter().min_by(|(_, left), (_, right)| {
+            left.origin
+                .y
+                .total_cmp(&right.origin.y)
+                .then_with(|| left.origin.x.total_cmp(&right.origin.x))
+        }),
+        WindowGridDirection::Below => candidates.iter().max_by(|(_, left), (_, right)| {
+            left.origin
+                .y
+                .add(left.size.height)
+                .total_cmp(&right.origin.y.add(right.size.height))
+                .then_with(|| left.origin.x.total_cmp(&right.origin.x))
+        }),
+    }?;
+
+    Some(selected.0)
+}
+
 fn floating_part_boundary_member(
     specs: &[FloatingPartWindowSnapshot],
     floating_group: FloatingGroupId,
     side: WindowGridDirection,
 ) -> Option<WindowGridMember> {
-    let columns = specs
+    let candidates = specs
         .iter()
         .filter(|spec| {
             spec.floating_group() == floating_group
                 && matches!(spec.kind, FloatingPartKind::Column { .. })
+        })
+        .map(|spec| {
+            (
+                spec.member,
+                Rect::new(spec.local_origin, spec.bounds.size),
+            )
         });
+    floating_part_boundary_member_from_rects(candidates, side)
+}
 
-    let selected = match side {
-        WindowGridDirection::Left => columns.min_by(|left, right| {
-            left.local_origin
-                .x
-                .total_cmp(&right.local_origin.x)
-                .then_with(|| left.local_origin.y.total_cmp(&right.local_origin.y))
-        }),
-        WindowGridDirection::Right => columns.max_by(|left, right| {
-            (left.local_origin.x + left.bounds.size.width)
-                .total_cmp(&(right.local_origin.x + right.bounds.size.width))
-                .then_with(|| left.local_origin.y.total_cmp(&right.local_origin.y))
-        }),
-        WindowGridDirection::Above => columns.min_by(|left, right| {
-            left.local_origin
-                .y
-                .total_cmp(&right.local_origin.y)
-                .then_with(|| left.local_origin.x.total_cmp(&right.local_origin.x))
-        }),
-        WindowGridDirection::Below => columns.max_by(|left, right| {
-            (left.local_origin.y + left.bounds.size.height)
-                .total_cmp(&(right.local_origin.y + right.bounds.size.height))
-                .then_with(|| left.local_origin.x.total_cmp(&right.local_origin.x))
-        }),
-    }?;
+fn floating_part_boundary_member_from_members(
+    members: &[WindowGridMember],
+    side: WindowGridDirection,
+) -> Option<WindowGridMember> {
+    let columns = members
+        .iter()
+        .filter(|member| matches!(member, WindowGridMember::Column(_))
+            )
+        .copied()
+        .collect::<Vec<_>>();
+    let headers = members
+        .iter()
+        .filter(|member| matches!(member, WindowGridMember::Header(_)))
+        .copied()
+        .collect::<Vec<_>>();
+    let groups = members
+        .iter()
+        .filter(|member| matches!(member, WindowGridMember::Group(_)))
+        .copied()
+        .collect::<Vec<_>>();
 
-    Some(selected.member)
+    match side {
+        WindowGridDirection::Left | WindowGridDirection::Above => {
+            columns.first().or(headers.first()).or(groups.first()).copied()
+        }
+        WindowGridDirection::Right | WindowGridDirection::Below => {
+            columns.last().or(headers.last()).or(groups.last()).copied()
+        }
+    }
 }
 
 fn previous_window_grid_link_is_external(
@@ -613,10 +661,31 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         side: WindowGridDirection,
     ) -> Option<WindowGridMember> {
-        floating_part_boundary_member_from_members(
-            self.part_members_by_group.get(&group)?,
-            side,
-        )
+        let members = self.part_members_by_group.get(&group)?;
+        let candidates = members
+            .iter()
+            .filter(|member| matches!(member, WindowGridMember::Column(_)))
+            .filter_map(|member| {
+                let entry = self.registry.members.get(member)?;
+                let scale = entry
+                    .native_scale_factor
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+                    .unwrap_or(1.0);
+                Some((
+                    *member,
+                    Rect::new(
+                        entry.bounds.origin,
+                        Size::new(
+                            entry.bounds.size.width * scale,
+                            entry.bounds.size.height * scale,
+                        ),
+                    ),
+                ))
+            })
+            .collect::<Vec<_>>();
+        floating_part_boundary_member_from_rects(candidates, side).or_else(|| {
+            floating_part_boundary_member_from_members(members, side)
+        })
     }
 
     fn migrate_window_grid_link(
