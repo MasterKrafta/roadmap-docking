@@ -461,6 +461,65 @@ fn floating_horizontal_column_split_places_each_column_from_the_window_top() {
 }
 
 #[test]
+fn floating_column_geometry_uses_its_own_height_without_resizing_siblings() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) = builder.panel(key("independent-height-left"), constraints());
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let left_column = builder.column(
+        300.0,
+        ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+
+    let (_, upper_panel) = builder.panel(key("independent-height-upper"), constraints());
+    let upper_group = builder.tabs(vec![upper_panel], 0, false);
+    let (_, lower_panel) = builder.panel(key("independent-height-lower"), constraints());
+    let lower_group = builder.tabs(vec![lower_panel], 0, false);
+    let right_column = builder.column(
+        300.0,
+        ColumnMode::Expanded,
+        vec![upper_group, lower_group],
+        vec![0.5, 0.5],
+    );
+
+    let root = builder.split(Axis::X, vec![left_column, right_column], vec![0.5, 0.5]);
+    let floating_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(604.0, 400.0));
+    let floating = builder.floating_group(root, floating_bounds, 1);
+    let layout = builder.build();
+
+    let shared = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let resized = layout
+        .compute_floating_column_rects(floating, right_column, 520.0, &metrics)
+        .unwrap();
+
+    assert_eq!(shared.columns.len(), 2);
+    assert_eq!(resized.columns.len(), 1);
+    assert_eq!(resized.columns[0].column, right_column);
+    assert_eq!(resized.columns[0].rect.size.height, 520.0);
+    assert_eq!(resized.columns[0].rect.size.width, shared.columns[1].rect.size.width);
+    assert_eq!(resized.floating_groups[0].rect.size.height, 520.0);
+    assert_eq!(resized.floating_groups[0].rect.size.width, floating_bounds.size.width);
+
+    assert_eq!(resized.groups.len(), 2);
+    assert!(resized.groups.iter().all(|group| {
+        group.group == upper_group || group.group == lower_group
+    }));
+    let lower = resized.groups.iter().find(|group| group.group == lower_group).unwrap();
+    assert!(
+        ((lower.rect.origin.y + lower.rect.size.height) - 520.0).abs()
+            < PIXEL_TOLERANCE
+    );
+    assert_eq!(
+        layout.floating_group(floating).unwrap().bounds,
+        floating_bounds,
+        "resizing one native Column must not mutate shared FloatingGroup bounds",
+    );
+}
+
+#[test]
 fn floating_horizontal_column_split_minimum_includes_column_headers_only() {
     let metrics = DockMetrics::default();
     let mut builder = LayoutBuilder::new(Profile::Generic);
