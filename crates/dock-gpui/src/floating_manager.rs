@@ -122,6 +122,7 @@ fn collect_floating_part_windows(
                     kind: FloatingPartKind::Header {
                         column: column_rect.column,
                     },
+                    main_drag_side: None,
                     bounds: header_bounds,
                     floating_origin: floating.bounds.origin,
                     local_origin: header_local.origin,
@@ -156,6 +157,7 @@ fn collect_floating_part_windows(
                         column: column_rect.column,
                         group: *group_id,
                     },
+                    main_drag_side: None,
                     bounds,
                     floating_origin: floating.bounds.origin,
                     local_origin: group_rect.rect.origin,
@@ -434,6 +436,10 @@ pub struct FloatingWindowManager {
     window_chains: WindowGridRegistry,
     /// Ordered permanent Header/Group members belonging to each Core FloatingGroup.
     part_members_by_group: HashMap<FloatingGroupId, Vec<WindowGridMember>>,
+    /// Header/Group HWNDs opened from Main while a DockArea is being dragged.
+    pending_main_drag_parts: HashMap<WindowGridMember, PanelWindowEntry>,
+    /// Original Main DockArea screen origin used to move every temporary part together.
+    pending_main_drag_origin: Option<PhysicalPoint>,
     pending_window_chain_alignment: HashSet<WindowGridMember>,
     pending_window_grid_reconnections: Vec<WindowGridLink>,
     window_chain_alignment_scheduled: bool,
@@ -458,6 +464,8 @@ impl FloatingWindowManager {
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowGridRegistry::default(),
             part_members_by_group: HashMap::new(),
+            pending_main_drag_parts: HashMap::new(),
+            pending_main_drag_origin: None,
             pending_window_chain_alignment: HashSet::new(),
             pending_window_grid_reconnections: Vec::new(),
             window_chain_alignment_scheduled: false,
@@ -2439,6 +2447,298 @@ impl FloatingWindowManager {
             let _ = controller.drag_mut().session_mut().set_drop_target(None);
             controller_cx.notify();
         });
+    }
+
+    /// Creates one temporary native Header/Group window for every member of a Main DockArea.
+    /// The Core tree remains in Main until the drag is released.
+    pub(crate) fn open_main_drag_parts(
+        &mut self,
+        side: DockSide,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.pending_main_drag_parts.is_empty() || self.pending_main_drag_origin.is_some() {
+            return false;
+        }
+
+        let source = self.controller.update(cx, |controller, _| {
+            let area = controller.layout().main_area(side)?;
+            let mut node_ids = HashSet::new();
+            let mut column_ids = HashSet::new();
+            let mut column_groups = HashMap::new();
+            crate::dock_host::collect_subtree_nodes(
+                controller.layout(),
+                area.root,
+                &mut node_ids,
+                &mut column_ids,
+                &mut column_groups,
+            );
+            let rects = controller.geometry().ok()?.clone();
+            let columns = rects.columns.iter()
+                .filter(|column| column_ids.contains(&column.column))
+                .copied()
+                .collect::<Vec<_>>();
+            let first = columns.first()?.rect;
+            let mut left = first.origin.x;
+            let mut top = first.origin.y;
+            let mut right = first.origin.x + first.size.width;
+            let mut bottom = first.origin.y + first.size.height;
+            for column in columns.iter().skip(1) {
+                left = left.min(column.rect.origin.x);
+                top = top.min(column.rect.origin.y);
+                right = right.max(column.rect.origin.x + column.rect.size.width);
+                bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
+            }
+            let area_bounds = Rect::new(
+                Point::new(left, top),
+                Size::new(right - left, bottom - top),
+            );
+
+            let metrics = controller.metrics();
+            let mut parts = Vec::new();
+            for column_rect in &columns {
+                let header_rect = Rect::new(
+                    column_rect.rect.origin,
+                    Size::new(
+                        column_rect.rect.size.width,
+                        metrics.column_header_height,
+                    ),
+                );
+                parts.push((
+                    WindowGridMember::Header(column_rect.column),
+                    FloatingPartKind::Header { column: column_rect.column },
+                    header_rect,
+                ));
+
+                let Some(Node::Column(column)) = controller.layout().node(column_rect.column) else {
+                    continue;
+                };
+                for group in &column.groups {
+                    if let Some(group_rect) = rects.groups.iter()
+                        .find(|rect| rect.group == *group)
+                    {
+                        parts.push((
+                            WindowGridMember::Group(*group),
+                            FloatingPartKind::Group {
+                                column: column_rect.column,
+                                group: *group,
+                            },
+                            group_rect.rect,
+                        ));
+                    }
+                }
+            }
+
+            Some((area_bounds, parts))
+        });
+        let Some((area_bounds, parts)) = source else {
+            return false;
+        };
+        let Some(screen_area_bounds) = self.screen_bounds_from_main_local(area_bounds) else {
+            return false;
+        };
+        let area_origin = PhysicalPoint {
+            x: screen_area_bounds.origin.x.round() as i32,
+            y: screen_area_bounds.origin.y.round() as i32,
+        };
+
+        let mut created = HashMap::new();
+        for (member, kind, local_bounds) in parts {
+            let Some(bounds) = self.screen_bounds_from_main_local(local_bounds) else {
+                for entry in created.into_values() {
+                    if let Some(native) = entry.native_window {
+                        let _ = self.native_ops.hide(native);
+                    }
+                    entry.window.remove_window(cx);
+                }
+                return false;
+            };
+            let spec = FloatingPartWindowSnapshot {
+                member,
+                floating_group: FloatingGroupId::null(),
+                kind,
+                main_drag_side: Some(side),
+                bounds,
+                floating_origin: Point::ZERO,
+                local_origin: local_bounds.origin,
+                contains_transferred_panels: false,
+            };
+            let Some(mut entry) = self.create_part_window(spec, cx) else {
+                for entry in created.into_values() {
+                    if let Some(native) = entry.native_window {
+                        let _ = self.native_ops.hide(native);
+                    }
+                    entry.window.remove_window(cx);
+                }
+                return false;
+            };
+            entry.host_group = None;
+            created.insert(member, entry);
+        }
+
+        if created.is_empty() {
+            return false;
+        }
+        self.pending_main_drag_parts = created;
+        self.pending_main_drag_origin = Some(area_origin);
+        true
+    }
+
+    /// Shows the temporary Main-origin Header/Group windows after Main has detached
+    /// every transferred PanelView.
+    pub(crate) fn show_main_drag_parts(&mut self) -> bool {
+        if self.pending_main_drag_parts.is_empty() {
+            return false;
+        }
+        for (member, entry) in &mut self.pending_main_drag_parts {
+            let Some(native_window) = entry.native_window else {
+                tracing::warn!(?member, "temporary Main drag part has no native HWND");
+                return false;
+            };
+            if let Err(error) = self.native_ops.show_no_activate(native_window) {
+                tracing::warn!(?member, %error, "could not show a temporary Main drag part");
+                return false;
+            }
+            entry.visibility = PanelWindowVisibility::Visible;
+        }
+        true
+    }
+
+    /// Moves the whole temporary DockArea by one cursor delta while preserving
+    /// every Header/Group window's original offset inside the composition.
+    pub(crate) fn move_main_drag_parts(
+        &self,
+        cursor: PhysicalPoint,
+        grab_offset: Point,
+    ) -> bool {
+        let Some(start_origin) = self.pending_main_drag_origin else {
+            return false;
+        };
+        let Some(main_window) = self.main_native_window else {
+            return false;
+        };
+        let Ok(scale) = self.native_ops.scale_factor(main_window) else {
+            return false;
+        };
+        let Some(physical_grab_offset) =
+            DockGeometry::physical_offset_from_logical(grab_offset, scale)
+        else {
+            return false;
+        };
+        let target_origin =
+            DockGeometry::physical_position_for_grab(cursor, physical_grab_offset);
+        let dx = target_origin.x.saturating_sub(start_origin.x);
+        let dy = target_origin.y.saturating_sub(start_origin.y);
+
+        for (member, entry) in &self.pending_main_drag_parts {
+            let Some(native_window) = entry.native_window else {
+                return false;
+            };
+            let original = PhysicalPoint {
+                x: entry.bounds.origin.x.round() as i32,
+                y: entry.bounds.origin.y.round() as i32,
+            };
+            let position = PhysicalPoint {
+                x: original.x.saturating_add(dx),
+                y: original.y.saturating_add(dy),
+            };
+            if let Err(error) = self.native_ops.move_window(native_window, position) {
+                tracing::warn!(?member, %error, "could not move a temporary Main drag part");
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Converts temporary Main-origin part windows into permanent Floating members.
+    /// The HWNDs and GPUI entities are retained; reconciliation only updates their bounds.
+    pub(crate) fn adopt_main_drag_parts(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.pending_main_drag_parts.is_empty() {
+            return false;
+        }
+
+        let scale = self.main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let desired = self.controller.update(cx, |controller, _| {
+            collect_floating_part_windows(
+                controller.layout(),
+                &controller.metrics(),
+                scale,
+                &HashSet::new(),
+            )
+        });
+        let desired_by_member = desired.iter()
+            .map(|spec| (spec.member, *spec))
+            .collect::<HashMap<_, _>>();
+        if !self.pending_main_drag_parts.keys()
+            .all(|member| desired_by_member.contains_key(member))
+        {
+            return false;
+        }
+
+        let pending = std::mem::take(&mut self.pending_main_drag_parts);
+        for (member, mut entry) in pending {
+            let Some(spec) = desired_by_member.get(&member).copied() else {
+                return false;
+            };
+            let Some(native_window) = entry.native_window else {
+                return false;
+            };
+            let adopted = match entry.window {
+                PanelWindowHandle::Part(window) => window.update(cx, |host, _, host_cx| {
+                    let adopted = host.adopt_main_drag_part(spec.floating_group);
+                    if adopted {
+                        host_cx.notify();
+                    }
+                    adopted
+                }).unwrap_or(false),
+                _ => false,
+            };
+            if !adopted {
+                return false;
+            }
+
+            let current_scale = self.native_ops.scale_factor(native_window).ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .or(entry.native_scale_factor);
+            let target_bounds = self.part_outer_bounds_for_target(
+                spec,
+                native_window,
+                current_scale,
+            ).unwrap_or(spec.bounds);
+            self.sync_part_window_bounds(native_window, target_bounds);
+            entry.bounds = target_bounds;
+            entry.native_scale_factor = current_scale;
+            entry.native_bounds_dirty = false;
+            entry.host_group = Some(spec.floating_group);
+            entry.visibility = PanelWindowVisibility::Visible;
+            self.registry.members.insert(member, entry);
+        }
+
+        self.pending_main_drag_origin = None;
+        true
+    }
+
+    /// Destroys temporary part windows when a Main DockArea drag is cancelled
+    /// or released onto a non-Floating target.
+    pub(crate) fn close_main_drag_parts(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = std::mem::take(&mut self.pending_main_drag_parts);
+        self.pending_main_drag_origin = None;
+        for (member, entry) in pending {
+            if let Some(native_window) = entry.native_window
+                && let Err(error) = self.native_ops.hide(native_window)
+            {
+                tracing::debug!(?member, %error, "could not hide a temporary Main drag part");
+            }
+            entry.window.remove_window(cx);
+        }
     }
 
     /// Finds the topmost managed target and converts the screen point into that target's
@@ -6255,6 +6555,7 @@ mod floating_part_topology_tests {
             member,
             floating_group,
             kind,
+            main_drag_side: None,
             bounds: Rect::new(Point::new(x, y), Size::new(240.0, 180.0)),
             floating_origin: Point::new(100.0, 200.0),
             local_origin: Point::new(x, y),
