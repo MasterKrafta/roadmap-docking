@@ -1123,7 +1123,6 @@ impl FloatingPartHost {
                 true,
                 show_close_button,
                 close_action,
-                true,
                 None,
                 toggle_context_menu,
                 self.controller.clone(),
