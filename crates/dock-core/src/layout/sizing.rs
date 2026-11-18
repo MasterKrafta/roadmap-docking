@@ -866,6 +866,51 @@ impl Layout {
         Ok(size)
     }
 
+    /// Computes the minimum client size of one Column in a Floating composition.
+    ///
+    /// The width belongs to this Column, while the height is calculated with
+    /// the same Floating-root rules used by the containing composition.
+    pub fn floating_column_minimum_size(
+        &self,
+        group_id: crate::FloatingGroupId,
+        column_id: NodeId,
+        metrics: &DockMetrics,
+    ) -> Result<Size, CommandError> {
+        let floating = self
+            .floating_groups
+            .get(group_id)
+            .copied()
+            .ok_or(CommandError::MissingFloatingGroup { group: group_id })?;
+        let root = self
+            .dock_areas
+            .get(floating.area)
+            .map(|area| area.root)
+            .ok_or(CommandError::InvalidTarget {
+                reason: "floating group references a missing dock area",
+            })?;
+        let is_root_column = root == column_id
+            && matches!(self.nodes.get(root), Some(Node::Column(_)));
+        let is_split_column = matches!(
+            self.nodes.get(root),
+            Some(Node::Split(split))
+                if split.axis == Axis::X
+                    && split.children.iter().any(|child| *child == column_id)
+                    && matches!(self.nodes.get(column_id), Some(Node::Column(_)))
+        );
+        if !is_root_column && !is_split_column {
+            return Err(CommandError::InvalidTarget {
+                reason: "target Column does not belong to the Floating composition root",
+            });
+        }
+
+        self.minimum_floating_node_size_with_cache(
+            column_id,
+            root,
+            metrics,
+            &mut HashMap::new(),
+        )
+    }
+
     /// Computes a floating composition's minimum client size.
     ///
     /// Floating windows have no generic title row. A root Column includes its
