@@ -32,8 +32,8 @@ pub(crate) struct DragHostSurface {
     pub(super) dock_area: Option<DockSide>,
     pub(super) render_detached_tab: bool,
     pub(super) handoff_placeholder: bool,
-    /// When a Main-origin GroupGrip or detached PanelTab succeeds, this same
-    /// HWND becomes the permanent Floating Column host instead of being replaced.
+    /// When a GroupGrip or detached PanelTab creates a new Floating Column,
+    /// this same HWND becomes its permanent host instead of being replaced.
     pub(super) promoted_part: Option<Entity<FloatingPartHost>>,
 }
 
