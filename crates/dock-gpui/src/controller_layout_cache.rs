@@ -1,6 +1,6 @@
 use dock_core::{
-    ComputeRectsError, DropSource, FloatingGroupId, GeometryError, HitResult, LayoutRects, Point,
-    Rect,
+    ComputeRectsError, DropSource, FloatingGroupId, GeometryError, HitResult, LayoutRects, NodeId,
+    Point, Rect,
 };
 use gpui::WindowId;
 
@@ -9,6 +9,36 @@ use super::{
 };
 
 impl DockController {
+    /// Updates the native viewport used to lay out one Floating Column.
+    pub(crate) fn set_floating_column_viewport(
+        &mut self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+        column: NodeId,
+        height: f32,
+    ) -> bool {
+        if !height.is_finite() || height <= 0.0 {
+            return false;
+        }
+        let unchanged = self
+            .floating_column_viewports
+            .get(&window_id)
+            .is_some_and(|(current_group, current_column, current_height)| {
+                *current_group == group
+                    && *current_column == column
+                    && (*current_height - height).abs() <= 0.5
+            });
+        if unchanged {
+            return false;
+        }
+
+        self.floating_column_viewports
+            .insert(window_id, (group, column, height));
+        self.floating_rects.remove(&window_id);
+        self.drag.clear_resolver();
+        true
+    }
+
     /// Returns the cached geometry snapshot, computing it only when its key
     /// differs from the key of the current snapshot.
     pub fn geometry(&mut self) -> Result<&LayoutRects, ComputeRectsError> {
@@ -194,13 +224,7 @@ impl DockController {
         window_id: WindowId,
         group: FloatingGroupId,
     ) -> Option<&dock_core::DropZoneResolver> {
-        let expected = FloatingRectCacheKey {
-            window_id,
-            group,
-            layout_version: self.layout.version(),
-            metrics_revision: self.metrics_revision,
-            chrome: self.layout.chrome(),
-        };
+        let expected = self.floating_geometry_cache_key(window_id, group);
         let cache_is_current = self
             .floating_rects
             .get(&window_id)
@@ -238,18 +262,33 @@ impl DockController {
         Ok(true)
     }
 
+    fn floating_geometry_cache_key(
+        &self,
+        window_id: WindowId,
+        group: FloatingGroupId,
+    ) -> FloatingRectCacheKey {
+        let column_viewport = self
+            .floating_column_viewports
+            .get(&window_id)
+            .copied()
+            .filter(|(owner, _, _)| *owner == group);
+        FloatingRectCacheKey {
+            window_id,
+            group,
+            column: column_viewport.map(|(_, column, _)| column),
+            column_height: column_viewport.map(|(_, _, height)| height),
+            layout_version: self.layout.version(),
+            metrics_revision: self.metrics_revision,
+            chrome: self.layout.chrome(),
+        }
+    }
+
     fn ensure_floating_geometry(
         &mut self,
         window_id: WindowId,
         group: FloatingGroupId,
     ) -> Result<(), ComputeRectsError> {
-        let key = FloatingRectCacheKey {
-            window_id,
-            group,
-            layout_version: self.layout.version(),
-            metrics_revision: self.metrics_revision,
-            chrome: self.layout.chrome(),
-        };
+        let key = self.floating_geometry_cache_key(window_id, group);
         if self
             .floating_rects
             .get(&window_id)
@@ -258,7 +297,18 @@ impl DockController {
             return Ok(());
         }
 
-        let rects = match self.layout.compute_floating_rects(group, &self.metrics) {
+        let column_viewport = self
+            .floating_column_viewports
+            .get(&window_id)
+            .copied()
+            .filter(|(owner, _, _)| *owner == group);
+        let rects = match column_viewport {
+            Some((_, column, height)) => self
+                .layout
+                .compute_floating_column_rects(group, column, height, &self.metrics),
+            None => self.layout.compute_floating_rects(group, &self.metrics),
+        };
+        let rects = match rects {
             Ok(rects) => rects,
             Err(error) => {
                 self.floating_rects.remove(&window_id);
