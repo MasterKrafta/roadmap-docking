@@ -5,7 +5,7 @@ use dock_core::{
     Size, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div, rgb};
+use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div};
 
 use crate::{
     components::{
@@ -50,8 +50,7 @@ impl Render for DragHostSurface {
         let mut root = div()
             .relative()
             .size_full()
-            .overflow_hidden()
-            .bg(rgb(self.theme.colors.window_background));
+            .overflow_hidden();
 
         if let Some(promoted_part) = self.promoted_part.clone() {
             return root.child(promoted_part);
