@@ -597,7 +597,7 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
-remove manager getter    pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
+pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
             WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
