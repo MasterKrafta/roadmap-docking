@@ -83,6 +83,8 @@ fn floating_member_drag_point(
     core_bounds: Rect,
     scale: f32,
 ) -> Option<Point> {
+    // Source drags must extrapolate beyond the client rectangle: the cursor
+    // routinely leaves its original HWND before the drag is released.
     let local = DockGeometry::host_local_point_from_screen(
         screen,
         client_origin,
