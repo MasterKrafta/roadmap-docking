@@ -1803,7 +1803,7 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
             .and_then(|window| self.native_ops.scale_factor(window).ok())
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
-        let Some((current_group_bounds, mut current_column_bounds)) = self.controller.update(cx, |controller, _| {
+        let Some((current_group_bounds, base_column_bounds)) = self.controller.update(cx, |controller, _| {
             floating_column_host_bounds(
                 controller.layout(),
                 &controller.metrics(),
@@ -1814,6 +1814,7 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
         }) else {
             return;
         };
+        let mut current_column_bounds = base_column_bounds;
         if let Some(entry) = self.registry.members.get(&member) {
             current_column_bounds.origin.y += entry.native_vertical_origin_offset;
             if let Some(height) = entry.native_vertical_height {
@@ -1853,7 +1854,7 @@ remove manager getter    pub(crate) fn floating_group_for_member(&self, member: 
                     > 0.5;
         if vertical_bounds_changed {
             let origin_y_offset =
-                native_column_bounds.origin.y - current_column_bounds.origin.y;
+                native_column_bounds.origin.y - base_column_bounds.origin.y;
             if let Some(entry) = self.registry.members.get_mut(&member) {
                 entry.native_vertical_origin_offset = origin_y_offset;
                 entry.native_vertical_height = Some(native_column_bounds.size.height);
