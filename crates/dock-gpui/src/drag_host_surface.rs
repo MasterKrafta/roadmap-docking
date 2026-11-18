@@ -37,6 +37,22 @@ pub(crate) struct DragHostSurface {
     pub(super) promoted_part: Option<Entity<FloatingPartHost>>,
 }
 
+impl DragHostSurface {
+    pub(super) fn set_promoted_column_close_button(
+        &mut self,
+        show: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(host) = self.promoted_part.as_ref() {
+            let _ = host.update(cx, |host, _, host_cx| {
+                if host.set_show_close_button(show) {
+                    host_cx.notify();
+                }
+            });
+        }
+    }
+}
+
 impl Render for DragHostSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.controller_observed {
