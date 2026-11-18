@@ -2392,7 +2392,9 @@ impl FloatingWindowManager {
                 };
 
             let point = match target_member {
-                WindowGridMember::Header(_) | WindowGridMember::Group(_) => {
+                WindowGridMember::Column(_)
+                | WindowGridMember::Header(_)
+                | WindowGridMember::Group(_) => {
                     self.core_point_for_floating_member(
                         target_member,
                         target_group,
