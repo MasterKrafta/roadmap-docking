@@ -2478,7 +2478,7 @@ impl FloatingWindowManager {
         });
     }
 
-    /// Creates one temporary native Header/Group window for every member of a Main DockArea.
+    /// Creates one temporary native Column window for every Column in a Main DockArea.
     /// The Core tree remains in Main until the drag is released.
     pub(crate) fn open_main_drag_parts(
         &mut self,
@@ -2525,38 +2525,15 @@ impl FloatingWindowManager {
                 Size::new(right - left, bottom - top),
             );
 
-            let metrics = controller.metrics();
-            let mut parts = Vec::new();
+            let mut parts = Vec::with_capacity(columns.len());
             for column_rect in &columns {
-                let header_rect = Rect::new(
-                    column_rect.rect.origin,
-                    Size::new(
-                        column_rect.rect.size.width,
-                        metrics.column_header_height,
-                    ),
-                );
                 parts.push((
-                    WindowGridMember::Header(column_rect.column),
-                    FloatingPartKind::Header { column: column_rect.column },
-                    header_rect,
+                    WindowGridMember::Column(column_rect.column),
+                    FloatingPartKind::Column {
+                        column: column_rect.column,
+                    },
+                    column_rect.rect,
                 ));
-
-                let Some(Node::Column(column)) = controller.layout().node(column_rect.column) else {
-                    return None;
-                };
-                for group in &column.groups {
-                    let group_rect = rects.groups.iter()
-                        .find(|rect| rect.group == *group)
-                        .copied()?;
-                    parts.push((
-                        WindowGridMember::Group(*group),
-                        FloatingPartKind::Group {
-                            column: column_rect.column,
-                            group: *group,
-                        },
-                        group_rect.rect,
-                    ));
-                }
             }
 
             Some((area_bounds, parts))
@@ -2617,7 +2594,7 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Shows the temporary Main-origin Header/Group windows after Main has detached
+    /// Shows the temporary Main-origin Column windows after Main has detached
     /// every transferred PanelView.
     pub(crate) fn show_main_drag_parts(&mut self, cx: &mut Context<Self>) -> bool {
         if self.pending_main_drag_parts.is_empty() {
@@ -2641,7 +2618,7 @@ impl FloatingWindowManager {
     }
 
     /// Moves the whole temporary DockArea by one cursor delta while preserving
-    /// every Header/Group window's original offset inside the composition.
+    /// every Column window's original offset inside the composition.
     pub(crate) fn move_main_drag_parts(
         &self,
         cursor: PhysicalPoint,
@@ -2694,7 +2671,7 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Converts temporary Main-origin part windows into permanent Floating members.
+    /// Converts temporary Main-origin Column windows into permanent Floating members.
     /// The HWNDs and GPUI entities are retained; reconciliation only updates their bounds.
     pub(crate) fn adopt_main_drag_parts(
         &mut self,
