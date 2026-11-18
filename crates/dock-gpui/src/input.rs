@@ -11,7 +11,6 @@ pub mod scroll;
 #[path = "input_interaction.rs"]
 pub(crate) mod interaction;
 
-pub(crate) use drag::floating_bounds;
 pub(crate) use pointer::{PointerEventState, PointerPress, register_pointer_events};
 pub(crate) use resize::{ResizePreview, ResizePreviewKind, resize_preview_for_interaction};
 pub(crate) use scroll::{map_hit_test_point, scroll_adjusted_hit_test_point};
