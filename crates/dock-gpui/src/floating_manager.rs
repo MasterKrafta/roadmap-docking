@@ -1367,7 +1367,7 @@ impl FloatingWindowManager {
 
     /// Closes every Core FloatingGroup represented by the connected Column WindowGrid.
     ///
-    /// WindowGrid identifies physical Header/Group HWNDs; the existing ownership
+    /// WindowGrid identifies physical Column HWNDs; the existing ownership
     /// map resolves those members back to their Core FloatingGroup identities.
     /// Commands are filtered against the live Layout so a repeated click is harmless.
     pub(crate) fn close_window_grid(
@@ -2470,7 +2470,7 @@ impl FloatingWindowManager {
 
     /// Starts a native move for every Column HWND in the connected WindowGrid.
     ///
-    /// The grabbed Header identifies the source host, but the move set comes from
+    /// The grabbed Column Header identifies its Column host, but the move set comes from
     /// WindowGridRegistry so all connected native windows share one pointer delta.
     pub(crate) fn begin_existing_window_grid_move(
         &mut self,
@@ -4497,7 +4497,7 @@ impl FloatingWindowManager {
 
     /// Makes the typed Column window registry match the current Core Layout.
     ///
-    /// Each Floating Column owns one Header host, and each Group owns one host.
+    /// Each Floating Column owns one typed native host containing its Header and Group stack.
     /// Main remains in its original MainDockView and never enters this registry.
     pub fn reconcile(&mut self, cx: &mut Context<Self>) {
         if self.reconciling {
