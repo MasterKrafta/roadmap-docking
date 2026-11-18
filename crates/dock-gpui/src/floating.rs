@@ -1616,7 +1616,7 @@ fn floating_part_owner_and_column(
     }
 
     let part_node = match part {
-        FloatingPartKind::Header { column } => column,
+        FloatingPartKind::Column { column } | FloatingPartKind::Header { column } => column,
         FloatingPartKind::Group { group, .. } => group,
     };
 
@@ -1627,7 +1627,7 @@ fn floating_part_owner_and_column(
         }
 
         let column = match part {
-            FloatingPartKind::Header { column } => column,
+            FloatingPartKind::Column { column } | FloatingPartKind::Header { column } => column,
             FloatingPartKind::Group { group, .. } => layout.nodes().find_map(|(column_id, node)| {
                 matches!(node, Node::Column(column) if column.groups.contains(&group))
                     .then_some(column_id)
