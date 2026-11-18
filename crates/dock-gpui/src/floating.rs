@@ -93,6 +93,50 @@ fn floating_local_point_to_core(
     Ok(point)
 }
 
+/// Extends a Floating Column client area to the center of each adjacent Axis::X splitter.
+///
+/// The Core Column rectangle remains unchanged. This only gives neighbouring HWNDs
+/// exactly half of the native gap so their client surfaces meet at the splitter center.
+pub(crate) fn floating_column_host_rect(
+    column: Rect,
+    splitters: &[SplitterRect],
+    splitter_thickness: f32,
+) -> Rect {
+    if !splitter_thickness.is_finite() || splitter_thickness <= 0.0 {
+        return column;
+    }
+
+    let half_thickness = splitter_thickness * 0.5;
+    let column_left = column.origin.x;
+    let column_right = column_left + column.size.width;
+    let mut left_padding = 0.0_f32;
+    let mut right_padding = 0.0_f32;
+
+    for splitter in splitters
+        .iter()
+        .filter(|splitter| splitter.axis == dock_core::Axis::X)
+    {
+        let center = splitter.rect.origin.x + splitter.rect.size.width * 0.5;
+        let left_edge = center - half_thickness;
+        let right_edge = center + half_thickness;
+
+        if (column_right - left_edge).abs() <= 0.5 {
+            right_padding = right_padding.max(half_thickness);
+        }
+        if (column_left - right_edge).abs() <= 0.5 {
+            left_padding = left_padding.max(half_thickness);
+        }
+    }
+
+    Rect::new(
+        Point::new(column_left - left_padding, column.origin.y),
+        dock_core::Size::new(
+            column.size.width + left_padding + right_padding,
+            column.size.height,
+        ),
+    )
+}
+
 fn floating_drag_source(
     group: FloatingGroupId,
     part: Option<DockWindowPart>,
@@ -1811,5 +1855,52 @@ mod floating_part_host_geometry_tests {
             local,
             Rect::new(Point::ZERO, Size::new(420.0, 260.0)),
         );
+    }
+}
+
+
+#[cfg(test)]
+mod floating_column_host_geometry_tests {
+    use super::floating_column_host_rect;
+    use dock_core::{NodeId, Point, Rect, Size, SplitterRect};
+
+    #[test]
+    fn adjacent_column_hosts_meet_at_the_splitter_center() {
+        let splitter = SplitterRect::new(
+            NodeId::null(),
+            0,
+            dock_core::Axis::X,
+            Rect::new(Point::new(241.0, 0.0), Size::new(6.0, 400.0)),
+        );
+        let splitters = [splitter];
+
+        let left = floating_column_host_rect(
+            Rect::new(Point::ZERO, Size::new(240.0, 400.0)),
+            &splitters,
+            8.0,
+        );
+        let right = floating_column_host_rect(
+            Rect::new(Point::new(248.0, 0.0), Size::new(260.0, 400.0)),
+            &splitters,
+            8.0,
+        );
+
+        assert_eq!(left, Rect::new(Point::ZERO, Size::new(244.0, 400.0)));
+        assert_eq!(
+            right,
+            Rect::new(Point::new(244.0, 0.0), Size::new(264.0, 400.0)),
+        );
+        assert_eq!(
+            left.origin.x + left.size.width,
+            right.origin.x,
+            "neighbouring native client areas must meet without a gap or overlap",
+        );
+    }
+
+    #[test]
+    fn a_column_without_an_adjacent_x_splitter_keeps_its_core_bounds() {
+        let column = Rect::new(Point::new(32.0, 16.0), Size::new(240.0, 400.0));
+
+        assert_eq!(floating_column_host_rect(column, &[], 8.0), column);
     }
 }
