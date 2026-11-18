@@ -71,7 +71,7 @@ pub struct DockController {
     main_window_id: Option<WindowId>,
     floating_rects: HashMap<WindowId, FloatingGeometryCache>,
     /// Current native viewport for each permanent Floating Column HWND.
-    floating_column_viewports: HashMap<WindowId, (FloatingGroupId, NodeId, f32)>,
+    floating_column_viewports: HashMap<WindowId, (FloatingGroupId, NodeId, f32, f32)>,
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
