@@ -909,11 +909,6 @@ impl FloatingPartHost {
         else {
             return div().id("missing-floating-column").size_full();
         };
-        let host_rect = floating_column_host_rect(
-            column_rect.rect,
-            &snapshot.rects.splitters,
-            snapshot.metrics.splitter_thickness,
-        );
         let group_ids = snapshot
             .column_groups
             .get(&column_id)
@@ -1038,7 +1033,7 @@ impl FloatingPartHost {
             self.group_press.clone(),
             self.pointer_capture.clone(),
             Some(DockWindowPart::Column { column: column_id }),
-            host_rect.origin,
+            column_rect.rect.origin,
         );
 
         let rendered_panels = panels
@@ -1103,7 +1098,7 @@ impl FloatingPartHost {
             .child(FloatingWindowContent::render_column(
                 snapshot.floating,
                 column_rect,
-                host_rect.origin,
+                column_rect.rect.origin,
                 &groups,
                 &panels,
                 dragged_group,
@@ -1132,7 +1127,7 @@ impl FloatingPartHost {
         if snapshot.drag_preview.is_some() {
             root = root.child(render_floating_drop_overlay(
                 snapshot,
-                host_rect.origin,
+                column_rect.rect.origin,
                 self.theme,
             ));
         }
