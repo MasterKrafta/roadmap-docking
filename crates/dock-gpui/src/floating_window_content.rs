@@ -227,9 +227,9 @@ impl FloatingWindowContent {
 
     /// Renders one complete Column presentation inside the caller's viewport.
     ///
-    /// Core rectangles remain in composition-local coordinates. parent_origin
-    /// translates that shared geometry into the local coordinate space of the
-    /// native Column window without duplicating or mutating the geometry snapshot.
+    /// Core rectangles remain in composition-local coordinates. parent_origin is
+    /// the Core-space origin represented by the native client area; a permanent
+    /// Column host may begin half-way through an adjacent Axis::X splitter gap.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn render_column(
         floating: FloatingGroupRect,
