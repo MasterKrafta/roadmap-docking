@@ -1797,11 +1797,11 @@ mod floating_dock_area_header_hit_tests {
                 Rect::new(Point::new(10.0, 20.0), Size::new(500.0, 500.0)),
                 &[
                     ColumnRect::new(
-                        first_splitter,
+                        NodeId::null(),
                         Rect::new(Point::new(10.0, 20.0), Size::new(236.0, 500.0)),
                     ),
                     ColumnRect::new(
-                        second_splitter,
+                        NodeId::null(),
                         Rect::new(Point::new(250.0, 20.0), Size::new(260.0, 500.0)),
                     ),
                 ],
@@ -1859,13 +1859,13 @@ mod floating_column_host_geometry_tests {
         let second_splitter = node_ids.insert(());
         let splitters = [
             SplitterRect::new(
-                NodeId::null(),
+                first_splitter,
                 0,
                 dock_core::Axis::X,
                 Rect::new(Point::new(237.0, 0.0), Size::new(14.0, 400.0)),
             ),
             SplitterRect::new(
-                NodeId::null(),
+                second_splitter,
                 1,
                 dock_core::Axis::X,
                 Rect::new(Point::new(505.0, 0.0), Size::new(14.0, 400.0)),
