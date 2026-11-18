@@ -203,11 +203,9 @@ pub(crate) fn begin_panel_drag_host(
             DragSourceHost::Main => {
                 let rects = controller.geometry().ok()?;
                 let source_rect = match handle {
-                    DragHandle::PanelTab => rects
-                        .tab_headers
-                        .iter()
-                        .find(|header| header.panel == panel)
-                        .map(|header| header.rect)?,
+                    // The DragHost represents the full Group, so its grab
+                    // offset must be measured from the Group origin, not the tab.
+                    DragHandle::PanelTab => panel_tab_source_group_rect(rects, panel)?,
                     DragHandle::FlyoutPanel => rects
                         .flyout
                         .filter(|flyout| flyout.panel == panel)
@@ -231,11 +229,8 @@ pub(crate) fn begin_panel_drag_host(
             DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
                 let rects = controller.floating_geometry(source_window_id, group).ok()?;
                 let source_rect = match handle {
-                    DragHandle::PanelTab => rects
-                        .tab_headers
-                        .iter()
-                        .find(|header| header.panel == panel)
-                        .map(|header| header.rect)?,
+                    // Match GroupGrip: anchor the full DragHost at the Group origin.
+                    DragHandle::PanelTab => panel_tab_source_group_rect(rects, panel)?,
                     DragHandle::FlyoutPanel => rects
                         .flyout
                         .filter(|flyout| flyout.panel == panel)
@@ -1181,11 +1176,9 @@ fn source_rect_for_request(
     dock_area_column_ids: Option<&[NodeId]>,
 ) -> Option<Rect> {
     match (request.handle, request.payload) {
-        (DragHandle::PanelTab, DragPayload::Panel { panel }) => rects
-            .tab_headers
-            .iter()
-            .find(|header| header.panel == panel)
-            .map(|header| header.rect),
+        (DragHandle::PanelTab, DragPayload::Panel { panel }) => {
+            panel_tab_source_group_rect(rects, panel)
+        }
         (DragHandle::FlyoutPanel, DragPayload::Panel { panel }) => rects
             .flyout
             .filter(|flyout| flyout.panel == panel)
