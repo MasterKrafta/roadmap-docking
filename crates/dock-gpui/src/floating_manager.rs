@@ -14,6 +14,7 @@ use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
+use slotmap::Key as _;
 use platform::{
     hide_from_taskbar, NativeKey, NativeWindowAtPoint, NativeWindowId,
     NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
