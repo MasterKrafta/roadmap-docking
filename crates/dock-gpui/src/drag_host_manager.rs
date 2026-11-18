@@ -95,24 +95,10 @@ fn floating_window_chain_target(
     target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
 ) -> Option<(FloatingGroupId, WindowGridDirection)> {
-    // Main content gestures that already have Core docking semantics must keep
-    // their resolved target. WindowGrid joins are reserved for detached native
-    // compositions that Core represents as separate FloatingGroups.
-    if source_host == DragSourceHost::Main
-        && matches!(
-            handle,
-            Some(DragHandle::GroupGrip | DragHandle::DockAreaHeader)
-        )
-    {
-        return None;
-    }
-
-    if !matches!(
-        handle,
-        Some(DragHandle::PanelTab)
-            | Some(DragHandle::GroupGrip)
-            | Some(DragHandle::DockAreaHeader)
-    ) {
+    // GroupGrip moves a logical Core Group, so every source uses the same
+    // Core DropTarget and destination handoff. Only a detached PanelTab may
+    // create a separate FloatingGroup and join a physical WindowGrid.
+    if handle != Some(DragHandle::PanelTab) {
         return None;
     }
 
