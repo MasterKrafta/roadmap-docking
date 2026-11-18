@@ -6478,13 +6478,23 @@ impl FloatingWindowManager {
         }
 
         let member = WindowGridMember::Column(column);
-        let is_first_column = self.controller.update(cx, |controller, _| {
-            floating_first_column(controller.layout(), &controller.metrics(), group) == Some(column)
+        let (is_first_column, has_multiple_columns) = self.controller.update(cx, |controller, _| {
+            let metrics = controller.metrics();
+            let rects = controller
+                .layout()
+                .compute_floating_rects(group, &metrics)
+                .ok();
+            let is_first = floating_first_column(controller.layout(), &metrics, group) == Some(column);
+            (is_first, rects.is_some_and(|rects| rects.columns.len() > 1))
         });
         let desired_left_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Left);
-        let desired_right_enabled = is_first_column;
+        let has_right_neighbor = self
+            .window_chains
+            .has_neighbor_on_side(member, WindowGridDirection::Right);
+        let desired_right_enabled =
+            is_first_column && (has_multiple_columns || !has_right_neighbor);
         let desired_top_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Above);
