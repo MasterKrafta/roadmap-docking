@@ -95,6 +95,12 @@ fn floating_window_chain_target(
     target: Option<DropTarget>,
     target_role: Option<DockWindowRole>,
 ) -> Option<(FloatingGroupId, WindowGridDirection)> {
+    // A Main GroupGrip moves one logical Group. Keep its resolved Core target;
+    // unlike a detached native composition, it must not become a WindowGrid join.
+    if source_host == DragSourceHost::Main && handle == Some(DragHandle::GroupGrip) {
+        return None;
+    }
+
     if !matches!(
         handle,
         Some(DragHandle::PanelTab)
@@ -123,9 +129,9 @@ fn floating_window_chain_target(
         // separate WindowGrid targets. Their edge drops stay in Core's resolver.
         return None;
     }
-    // A content drop on any side of another Floating window creates a separate
-    // FloatingGroup and joins its native HWND to WindowGrid. Plain Top/Bottom
-    // drops in Main still use the regular Core Group split path.
+    // Side drops that detach a native composition may join its HWNDs through
+    // WindowGrid after Core creates their FloatingGroups. Main GroupGrip is kept
+    // on the logical Core route above, with its original DropTarget intact.
     floating_window_chain_direction(target).map(|direction| (group, direction))
 }
 
@@ -2218,7 +2224,7 @@ mod floating_window_chain_target_tests {
     use slotmap::Key;
 
     #[test]
-    fn tab_group_and_composition_side_drops_keep_all_four_directions() {
+    fn tab_and_composition_side_drops_keep_all_four_directions() {
         let anchor = FloatingGroupId::null();
         let group = NodeId::null();
         let floating_roles = [
@@ -2242,11 +2248,7 @@ mod floating_window_chain_target_tests {
         ];
 
         for floating in floating_roles {
-            for handle in [
-                DragHandle::PanelTab,
-                DragHandle::GroupGrip,
-                DragHandle::DockAreaHeader,
-            ] {
+            for handle in [DragHandle::PanelTab, DragHandle::DockAreaHeader] {
                 for (zone, direction) in zones {
                     let target = Some(DropTarget::GroupEdge { group, zone });
                     assert_eq!(
@@ -2258,6 +2260,47 @@ mod floating_window_chain_target_tests {
             }
         }
 
+    }
+
+    #[test]
+    fn main_group_grip_side_drops_keep_the_core_target() {
+        let anchor = FloatingGroupId::null();
+        let group = NodeId::null();
+        let floating_roles = [
+            Some(DockWindowRole::Floating { group: anchor }),
+            Some(DockWindowRole::FloatingPart {
+                group: anchor,
+                part: crate::DockWindowPart::Header { column: group },
+            }),
+            Some(DockWindowRole::FloatingPart {
+                group: anchor,
+                part: crate::DockWindowPart::Group { group },
+            }),
+        ];
+        let zones = [
+            DropZone::Left,
+            DropZone::Right,
+            DropZone::Top,
+            DropZone::Bottom,
+            DropZone::FloatingTop,
+            DropZone::FloatingBottom,
+        ];
+
+        for floating in floating_roles {
+            for zone in zones {
+                let target = Some(DropTarget::GroupEdge { group, zone });
+                assert_eq!(
+                    floating_window_chain_target(
+                        DragSourceHost::Main,
+                        Some(DragHandle::GroupGrip),
+                        target,
+                        floating,
+                    ),
+                    None,
+                    "Main → Floating GroupGrip {zone:?} must preserve its Core DropTarget",
+                );
+            }
+        }
     }
 
     #[test]
