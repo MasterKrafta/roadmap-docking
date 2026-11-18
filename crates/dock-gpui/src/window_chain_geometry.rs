@@ -267,7 +267,8 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
 /// frame edges. Vertical neighbors align their client left edges and touch at
 /// their client top/bottom edges without overlap. Repeated links on one side
 /// are laid out as a deterministic outward lane in member order.
-pub(crate) fn arrange_window_grid_bounds(
+#[cfg(test)]
+fn arrange_window_grid_bounds(
     bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
     links: &[WindowGridLink],
