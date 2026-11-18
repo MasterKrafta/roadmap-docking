@@ -2757,7 +2757,10 @@ impl FloatingWindowManager {
             return Some(DockingWindowAtPoint::ForeignWindow);
         };
         let mut known_windows = Vec::with_capacity(
-            self.registry.windows.len() + self.registry.members.len() + 1,
+            self.registry.windows.len()
+                + self.registry.members.len()
+                + self.pending_main_drag_parts.len()
+                + 1,
         );
 
         if excluded_source_window != Some(main_window_id) {
@@ -2769,18 +2772,36 @@ impl FloatingWindowManager {
                 .then_some(entry.native_window)
                 .flatten()
         }));
+        let mut temporary_part_windows = self.pending_main_drag_parts.values()
+            .filter(|entry| entry.visibility == PanelWindowVisibility::Visible)
+            .filter_map(|entry| entry.native_window)
+            .collect::<HashSet<_>>();
+        known_windows.extend(temporary_part_windows.iter().copied());
 
-        // The temporary DragHost is never an input target. The native resolver
-        // skips it and continues through the desktop Z-order to a registered host.
-        let target_native = match self
-            .native_ops
-            .window_from_point(screen, &known_windows, Some(drag_host))
-        {
-            Ok(NativeWindowAtPoint::Known(window)) => window,
-            Ok(NativeWindowAtPoint::Foreign) | Err(_) => {
-                return Some(DockingWindowAtPoint::ForeignWindow);
+        // The DragHost and every moving Header/Group HWND are transport surfaces,
+        // never drop targets. Exclude them one by one so hit testing reaches the
+        // persistent Main/Floating window underneath the temporary composition.
+        let mut excluded = Some(drag_host);
+        let mut resolved_target = None;
+        for _ in 0..=temporary_part_windows.len() {
+            match self.native_ops.window_from_point(screen, &known_windows, excluded) {
+                Ok(NativeWindowAtPoint::Known(window))
+                    if temporary_part_windows.remove(&window) =>
+                {
+                    excluded = Some(window);
+                }
+                Ok(NativeWindowAtPoint::Known(window)) => {
+                    resolved_target = Some(window);
+                    break;
+                }
+                Ok(NativeWindowAtPoint::Foreign) | Err(_) => {
+                    return Some(DockingWindowAtPoint::ForeignWindow);
+                }
+                Ok(NativeWindowAtPoint::Empty) => return None,
             }
-            Ok(NativeWindowAtPoint::Empty) => return None,
+        }
+        let Some(target_native) = resolved_target else {
+            return Some(DockingWindowAtPoint::ForeignWindow);
         };
 
         if target_native == main_native_window {
