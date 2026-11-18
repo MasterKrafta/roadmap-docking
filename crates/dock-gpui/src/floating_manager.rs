@@ -2600,6 +2600,9 @@ impl FloatingWindowManager {
                 return false;
             }
             entry.visibility = PanelWindowVisibility::Visible;
+            if let Err(error) = entry.window.notify_host(cx) {
+                tracing::debug!(?member, %error, "could not request the first frame for a temporary Main drag part");
+            }
         }
         true
     }
@@ -2614,10 +2617,18 @@ impl FloatingWindowManager {
         let Some(start_origin) = self.pending_main_drag_origin else {
             return false;
         };
-        let Some(main_window) = self.main_native_window else {
-            return false;
-        };
-        let Ok(scale) = self.native_ops.scale_factor(main_window) else {
+        let scale = self.pending_main_drag_parts.values()
+            .filter_map(|entry| entry.native_window)
+            .find_map(|native_window| {
+                self.native_ops.scale_factor(native_window).ok()
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+            })
+            .or_else(|| {
+                self.main_native_window
+                    .and_then(|main| self.native_ops.scale_factor(main).ok())
+                    .filter(|scale| scale.is_finite() && *scale > 0.0)
+            });
+        let Some(scale) = scale else {
             return false;
         };
         let Some(physical_grab_offset) =
