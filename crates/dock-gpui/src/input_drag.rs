@@ -1026,37 +1026,6 @@ pub(crate) fn floating_bounds_for_drag(
     )
 }
 
-/// Calculates the FreeArea preview using the active session's original press point.
-/// Keeps the DockHost presentation API independent from DragDropRequest construction.
-pub(crate) fn floating_bounds(
-    controller: &mut DockController,
-    payload: DragPayload,
-    pointer: Point,
-) -> Option<Rect> {
-    let (active_payload, origin) = match controller.drag().session().state() {
-        DragState::Pressed {
-            payload, origin, ..
-        }
-        | DragState::Dragging {
-            payload, origin, ..
-        } => (payload, origin),
-        _ => return None,
-    };
-    if active_payload != payload {
-        return None;
-    }
-
-    let request = DragDropRequest {
-        payload,
-        handle: controller.drag().session().handle()?,
-        origin,
-        point: pointer,
-        target: Some(DropTarget::FreeArea),
-        floating_bounds: None,
-    };
-    floating_bounds_for_request(controller, &request)
-}
-
 fn floating_bounds_for_request(
     controller: &mut DockController,
     request: &DragDropRequest,
