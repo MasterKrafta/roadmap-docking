@@ -1356,6 +1356,7 @@ impl FloatingWindowManager {
                 native_min_size: None,
                 native_horizontal_resize_min_widths: None,
                 native_left_resize_enabled: None,
+                native_right_resize_enabled: None,
                 native_top_resize_enabled: None,
                 native_scale_factor: Some(scale),
                 native_bounds_dirty: false,
@@ -5378,8 +5379,8 @@ impl FloatingWindowManager {
             focus: false,
             show: false,
             kind: WindowKind::Floating,
-            // Column windows are positioned by FloatingWindowManager.
-            // Their custom drag and resize behavior is connected in later stages.
+            // Column windows are positioned and resized by FloatingWindowManager.
+            // Axis::X splitter input uses the shared Core interaction pipeline.
             is_movable: false,
             app_owns_titlebar_drag: false,
             is_resizable: spec.main_drag_side.is_none()
@@ -5530,6 +5531,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
+            native_right_resize_enabled: None,
             native_top_resize_enabled: None,
             native_scale_factor: scale,
             native_bounds_dirty: false,
@@ -6148,6 +6150,7 @@ impl FloatingWindowManager {
             native_min_size: None,
             native_horizontal_resize_min_widths: None,
             native_left_resize_enabled: None,
+            native_right_resize_enabled: None,
             native_top_resize_enabled: None,
             native_scale_factor: None,
             native_bounds_dirty: false,
@@ -6292,13 +6295,16 @@ impl FloatingWindowManager {
         }
         // The right edge is the matching half of the Axis::X join. It must be
         // independently disabled so an internal splitter is never a native resize.
-        if let Err(error) = self.native_ops.set_right_resize_enabled(native_window, desired_right_enabled) {
-            tracing::warn!(
-                ?group,
-                ?column,
-                %error,
-                "could not synchronize the Floating Column right resize edge"
-            );
+        if entry.native_right_resize_enabled != Some(desired_right_enabled) {
+            match self.native_ops.set_right_resize_enabled(native_window, desired_right_enabled) {
+                Ok(()) => entry.native_right_resize_enabled = Some(desired_right_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize the Floating Column right resize edge"
+                ),
+            }
         }
         if entry.native_top_resize_enabled != Some(desired_top_enabled) {
             match self.native_ops.set_top_resize_enabled(native_window, desired_top_enabled) {
