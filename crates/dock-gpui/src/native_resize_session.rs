@@ -1,10 +1,15 @@
 use dock_core::{FloatingGroupId, Rect};
 use gpui::WindowId;
 
+use crate::window_chain::WindowGridMember;
+
 #[derive(Clone, Copy)]
 pub(super) struct NativeResizeSession {
     pub(super) group: FloatingGroupId,
+    pub(super) member: WindowGridMember,
     pub(super) window_id: WindowId,
     pub(super) start_bounds: Rect,
+    /// Initial client bounds of the resized Column HWND; None for the legacy group host.
+    pub(super) start_column_bounds: Option<Rect>,
     pub(super) transaction_started: bool,
 }
