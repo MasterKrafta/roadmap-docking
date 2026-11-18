@@ -8,7 +8,7 @@ use std::{collections::{HashMap, HashSet}, time::Duration};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
-    Node, NodeId, PanelId, Point, Rect, Size,
+    Node, NodeId, PanelId, Point, Rect, Size, SplitterRect,
 };
 use gpui::{
     AppContext, Bounds, Context, Entity, Subscription, WeakEntity, Window, WindowBounds,
@@ -89,18 +89,49 @@ fn floating_part_screen_bounds(
     )
 }
 
+fn floating_root_columns(
+    layout: &dock_core::Layout,
+    group: FloatingGroupId,
+) -> Option<Vec<NodeId>> {
+    let floating = layout.floating_group(group)?;
+    let root = layout.dock_area(floating.area)?.root;
+    match layout.node(root) {
+        Some(Node::Column(_)) => Some(vec![root]),
+        Some(Node::Split(split))
+            if split.axis == dock_core::Axis::X
+                && !split.children.is_empty()
+                && split
+                    .children
+                    .iter()
+                    .all(|child| matches!(layout.node(*child), Some(Node::Column(_)))) =>
+        {
+            Some(split.children.clone())
+        }
+        _ => None,
+    }
+}
+
 fn floating_first_column(
     layout: &dock_core::Layout,
-    metrics: &dock_core::DockMetrics,
     group: FloatingGroupId,
 ) -> Option<NodeId> {
-    layout
-        .compute_floating_rects(group, metrics)
-        .ok()?
-        .columns
-        .into_iter()
-        .min_by(|left, right| left.rect.origin.x.total_cmp(&right.rect.origin.x))
-        .map(|column| column.column)
+    floating_root_columns(layout, group)?.first().copied()
+}
+
+fn floating_root_x_splitters(
+    layout: &dock_core::Layout,
+    group: FloatingGroupId,
+    splitters: &[SplitterRect],
+) -> Option<Vec<SplitterRect>> {
+    let floating = layout.floating_group(group)?;
+    let root = layout.dock_area(floating.area)?.root;
+    Some(
+        splitters
+            .iter()
+            .filter(|splitter| splitter.owner == root && splitter.axis == dock_core::Axis::X)
+            .copied()
+            .collect(),
+    )
 }
 
 fn floating_column_host_bounds(
@@ -116,9 +147,10 @@ fn floating_column_host_bounds(
         .columns
         .iter()
         .find(|candidate| candidate.column == column)?;
+    let root_splitters = floating_root_x_splitters(layout, group, &rects.splitters)?;
     let host_rect = floating_column_host_rect(
         column_rect.rect,
-        &rects.splitters,
+        &root_splitters,
         metrics.splitter_thickness,
     );
     Some((
@@ -155,6 +187,11 @@ fn collect_floating_part_windows(
         let Ok(rects) = layout.compute_floating_rects(floating_group, metrics) else {
             continue;
         };
+        let Some(root_splitters) =
+            floating_root_x_splitters(layout, floating_group, &rects.splitters)
+        else {
+            continue;
+        };
 
         for column_rect in &rects.columns {
             let Some(Node::Column(column)) = layout.node(column_rect.column) else {
@@ -171,7 +208,7 @@ fn collect_floating_part_windows(
                 .any(|panel| transferred_panels.contains(panel));
             let host_rect = floating_column_host_rect(
                 column_rect.rect,
-                &rects.splitters,
+                &root_splitters,
                 metrics.splitter_thickness,
             );
             let bounds = floating_part_screen_bounds(
@@ -6479,13 +6516,12 @@ impl FloatingWindowManager {
 
         let member = WindowGridMember::Column(column);
         let (is_first_column, has_multiple_columns) = self.controller.update(cx, |controller, _| {
-            let metrics = controller.metrics();
-            let rects = controller
-                .layout()
-                .compute_floating_rects(group, &metrics)
-                .ok();
-            let is_first = floating_first_column(controller.layout(), &metrics, group) == Some(column);
-            (is_first, rects.is_some_and(|rects| rects.columns.len() > 1))
+            let root_columns = floating_root_columns(controller.layout(), group);
+            let is_first = root_columns
+                .as_ref()
+                .and_then(|columns| columns.first())
+                .is_some_and(|first| *first == column);
+            (is_first, root_columns.is_some_and(|columns| columns.len() > 1))
         });
         let desired_left_enabled = !self
             .window_chains
@@ -6558,9 +6594,10 @@ impl FloatingWindowManager {
                 .columns
                 .iter()
                 .find(|candidate| candidate.column == column)?;
+            let root_splitters = floating_root_x_splitters(layout, group, &rects.splitters)?;
             let host_rect = floating_column_host_rect(
                 column_rect.rect,
-                &rects.splitters,
+                &root_splitters,
                 metrics.splitter_thickness,
             );
             let column_minimum = layout
