@@ -245,6 +245,14 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
+    /// Controls whether the bottom edge and bottom corners initiate OS resizing.
+    fn set_bottom_resize_enabled(
+        &self,
+        _window: NativeWindowId,
+        _enabled: bool,
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
     /// Stores a WindowGrid's native Z priority in front-to-back order for
     /// activation-time correction. Implementations must preserve the same order
     /// when any member is activated, including vertical header-overlap constraints.
@@ -589,6 +597,7 @@ mod windows_impl {
         left_resize_enabled: bool,
         right_resize_enabled: bool,
         top_resize_enabled: bool,
+        bottom_resize_enabled: bool,
         chain_z_order: Vec<HWND>,
         left_min_client_width: i32,
         right_min_client_width: i32,
@@ -620,6 +629,7 @@ mod windows_impl {
         left_resize_enabled: bool,
         right_resize_enabled: bool,
         top_resize_enabled: bool,
+        bottom_resize_enabled: bool,
     ) -> i32 {
         if !left_resize_enabled && matches!(hit_test, HTLEFT | HTTOPLEFT | HTBOTTOMLEFT) {
             // A disabled shared left edge passes through to the previous chain member.
@@ -633,6 +643,11 @@ mod windows_impl {
             // Keep the top border available to client hit-testing so the native
             // frame cannot start resizing through a joined composition header.
             HTCLIENT as i32
+        } else if !bottom_resize_enabled
+            && matches!(hit_test, HTBOTTOM | HTBOTTOMLEFT | HTBOTTOMRIGHT)
+        {
+            // A disabled shared bottom edge passes through to the lower grid member.
+            HTTRANSPARENT
         } else {
             hit_test as i32
         }
@@ -760,11 +775,17 @@ mod windows_impl {
             // A secondary Window Chain member must not expose a left resize
             // handle: that edge is the join with its preceding native window.
             // SAFETY: The subclass owns this state for the lifetime of the HWND.
-            let (left_resize_enabled, right_resize_enabled, top_resize_enabled) = unsafe {
+            let (
+                left_resize_enabled,
+                right_resize_enabled,
+                top_resize_enabled,
+                bottom_resize_enabled,
+            ) = unsafe {
                 (
                     (*state).left_resize_enabled,
                     (*state).right_resize_enabled,
                     (*state).top_resize_enabled,
+                    (*state).bottom_resize_enabled,
                 )
             };
             let hit_test = result.0 as u32;
@@ -773,6 +794,7 @@ mod windows_impl {
                 left_resize_enabled,
                 right_resize_enabled,
                 top_resize_enabled,
+                bottom_resize_enabled,
             );
             if adjusted_hit_test != hit_test as i32 {
                 return LRESULT(adjusted_hit_test as isize);
@@ -1306,6 +1328,7 @@ mod windows_impl {
                     left_resize_enabled: true,
                     right_resize_enabled: true,
                     top_resize_enabled: true,
+                    bottom_resize_enabled: true,
                     chain_z_order: Vec::new(),
                     left_min_client_width: 0,
                     right_min_client_width: 0,
@@ -1596,6 +1619,33 @@ mod windows_impl {
             // SAFETY: This state remains owned by the live HWND subclass.
             unsafe {
                 (*(reference_data as *mut ResizeLoopState)).top_resize_enabled = enabled;
+            }
+            Ok(())
+        }
+
+        fn set_bottom_resize_enabled(
+            &self,
+            window: NativeWindowId,
+            enabled: bool,
+        ) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed by enable_resize.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            // SAFETY: This state remains owned by the live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).bottom_resize_enabled = enabled;
             }
             Ok(())
         }
