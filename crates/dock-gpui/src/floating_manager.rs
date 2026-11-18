@@ -34,340 +34,60 @@ use crate::{
     },
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PanelLayoutLocation {
-    Main,
-    Floating(FloatingGroupId),
-}
+#[path = "floating_manager/panel_layout_location.rs"]
+mod panel_layout_location;
+#[path = "floating_manager/panel_window_visibility.rs"]
+mod panel_window_visibility;
+#[path = "floating_manager/panel_window_handle.rs"]
+mod panel_window_handle;
+#[path = "floating_manager/panel_window_entry.rs"]
+mod panel_window_entry;
+#[path = "floating_manager/panel_window_registry.rs"]
+mod panel_window_registry;
+#[path = "floating_manager/composition_host_registry.rs"]
+mod composition_host_registry;
+#[path = "floating_manager/docking_window_at_point.rs"]
+mod docking_window_at_point;
+#[path = "floating_manager/native_move_target.rs"]
+mod native_move_target;
+#[path = "floating_manager/native_move_window.rs"]
+mod native_move_window;
+#[path = "floating_manager/native_move_session.rs"]
+mod native_move_session;
+#[path = "floating_manager/floating_group_snapshot.rs"]
+mod floating_group_snapshot;
+#[path = "floating_manager/floating_part_window_snapshot.rs"]
+mod floating_part_window_snapshot;
+#[path = "floating_manager/native_resize_session.rs"]
+mod native_resize_session;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PanelWindowVisibility {
-    Hidden,
-    Visible,
-}
-
-#[derive(Clone, Copy)]
-enum PanelWindowHandle {
-    Floating(WindowHandle<FloatingHost>),
-    Part(WindowHandle<FloatingPartHost>),
-    DragHost(WindowHandle<crate::drag_host_manager::DragHostSurface>),
-}
-
-impl PanelWindowHandle {
-    fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
-        match self {
-            Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
-            Self::Part(window) => window.update(cx, |_, _, _| ()).is_ok(),
-            Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
-        }
-    }
-
-    fn set_group(
-        &self,
-        group: Option<FloatingGroupId>,
-        cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Floating(window) => window
-                .update(cx, |host, window, host_cx| {
-                    host.set_host_group(group, window);
-                    host_cx.notify();
-                })
-                .map_err(|error| error.to_string()),
-            Self::Part(_) | Self::DragHost(_) => {
-                Err("Floating part windows have immutable Core ownership".into())
-            }
-        }
-    }
-
-    /// Updates the cached close-button ownership for a permanent Header host.
-    ///
-    /// Rendering a FloatingPartHost must not update FloatingWindowManager: a
-    /// reconciliation can notify that host while this manager is already updating.
-    fn set_header_close_button(
-        &self,
-        show: bool,
-        cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Part(window) => window
-                .update(cx, |host, _, host_cx| {
-                    if host.set_show_close_button(show) {
-                        host_cx.notify();
-                    }
-                })
-                .map_err(|error| error.to_string()),
-            Self::Floating(_) | Self::DragHost(_) => Ok(()),
-        }
-    }
-
-    /// Requests a redraw from the exact GPUI window that owns this host.
-    fn notify_host(&self, cx: &mut Context<FloatingWindowManager>) -> Result<(), String> {
-        match self {
-            Self::Floating(window) => window
-                .update(cx, |_, _, host_cx| host_cx.notify())
-                .map_err(|error| error.to_string()),
-            Self::Part(window) => window
-                .update(cx, |_, _, host_cx| host_cx.notify())
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => window
-                .update(cx, |_, _, host_cx| host_cx.notify())
-                .map_err(|error| error.to_string()),
-        }
-    }
-
-    fn remove_window(&self, cx: &mut Context<FloatingWindowManager>) {
-        match self {
-            Self::Floating(window) => {
-                let _ = window.update(cx, |host, window, _| {
-                    host.set_host_group(None, window);
-                    window.remove_window();
-                });
-            }
-            Self::Part(window) => {
-                let _ = window.update(cx, |_, window, _| window.remove_window());
-            }
-            Self::DragHost(window) => {
-                let _ = window.update(cx, |_, window, _| window.remove_window());
-            }
-        }
-    }
-
-}
-
-struct PanelWindowEntry {
-    window: PanelWindowHandle,
-    window_id: WindowId,
-    native_window: Option<NativeWindowId>,
-    bounds: Rect,
-    native_min_size: Option<PhysicalSize>,
-    native_horizontal_resize_min_widths: Option<(i32, i32)>,
-    native_left_resize_enabled: Option<bool>,
-    native_top_resize_enabled: Option<bool>,
-    native_scale_factor: Option<f32>,
-    /// The HWND may differ from Core bounds after the OS-owned resize loop.
-    /// A final reconciliation must write Core's canonical bounds back.
-    native_bounds_dirty: bool,
-    resize_enabled: bool,
-    host_group: Option<FloatingGroupId>,
-    visibility: PanelWindowVisibility,
-}
-
-/// Legacy native-window records keyed by a PanelId host.
-///
-/// Permanent Floating Header/Group windows are stored separately in `members`;
-/// this map remains only for transitional PanelId-based host paths.
-#[derive(Default)]
-pub struct PanelWindowRegistry {
-    /// Transitional PanelId entries are retained only for an active DragHost adoption.
-    windows: HashMap<PanelId, PanelWindowEntry>,
-    /// Permanent Floating Header/Group windows are keyed by their Core-node identity.
-    members: HashMap<WindowGridMember, PanelWindowEntry>,
-    panel_locations: HashMap<PanelId, PanelLayoutLocation>,
-}
-
-impl PanelWindowRegistry {
-    pub fn panel_count(&self) -> usize {
-        self.windows.len()
-    }
-
-    pub fn visible_count(&self) -> usize {
-        self.windows
-            .values()
-            .chain(self.members.values())
-            .filter(|entry| entry.visibility == PanelWindowVisibility::Visible)
-            .count()
-    }
+pub use composition_host_registry::CompositionHostRegistry;
+pub use panel_layout_location::PanelLayoutLocation;
+pub use panel_window_registry::PanelWindowRegistry;
+pub use panel_window_visibility::PanelWindowVisibility;
+pub(crate) use docking_window_at_point::DockingWindowAtPoint;
+use floating_group_snapshot::FloatingGroupSnapshot;
+use floating_part_window_snapshot::FloatingPartWindowSnapshot;
+use native_move_session::NativeMoveSession;
+use native_move_target::NativeMoveTarget;
+use native_move_window::NativeMoveWindow;
+use native_resize_session::NativeResizeSession;
+use panel_window_entry::PanelWindowEntry;
+use panel_window_handle::PanelWindowHandle;
 
 
 
-    pub fn window_for_panel(&self, panel: PanelId) -> Option<WindowHandle<FloatingHost>> {
-        match self.windows.get(&panel)?.window {
-            PanelWindowHandle::Floating(window) => Some(window),
-            PanelWindowHandle::Part(_) | PanelWindowHandle::DragHost(_) => None,
-        }
-    }
 
-    pub fn window_id_for_panel(&self, panel: PanelId) -> Option<WindowId> {
-        self.windows.get(&panel).map(|entry| entry.window_id)
-    }
 
-    pub fn bounds_for_panel(&self, panel: PanelId) -> Option<Rect> {
-        self.windows.get(&panel).map(|entry| entry.bounds)
-    }
 
-    pub fn native_min_size_for_panel(&self, panel: PanelId) -> Option<PhysicalSize> {
-        self.windows.get(&panel)?.native_min_size
-    }
 
-    pub fn native_scale_factor_for_panel(&self, panel: PanelId) -> Option<f32> {
-        self.windows.get(&panel)?.native_scale_factor
-    }
 
-    pub fn resize_enabled_for_panel(&self, panel: PanelId) -> Option<bool> {
-        self.windows.get(&panel).map(|entry| entry.resize_enabled)
-    }
 
-    pub fn native_window_for_panel(&self, panel: PanelId) -> Option<NativeWindowId> {
-        self.windows.get(&panel)?.native_window
-    }
 
-    pub fn layout_location_for_panel(&self, panel: PanelId) -> Option<PanelLayoutLocation> {
-        self.panel_locations.get(&panel).copied()
-    }
 
-    pub fn host_group_for_panel(&self, panel: PanelId) -> Option<FloatingGroupId> {
-        self.windows.get(&panel)?.host_group
-    }
 
-    pub fn visibility_for_panel(&self, panel: PanelId) -> Option<PanelWindowVisibility> {
-        self.windows.get(&panel).map(|entry| entry.visibility)
-    }
-}
 
-/// Legacy mapping from a Core Floating composition to its PanelId host.
-/// Permanent Floating windows no longer use this registry; Main still uses its
-/// single shared MainWindow.
-#[derive(Default)]
-pub struct CompositionHostRegistry {
-    main_window_id: Option<WindowId>,
-    floating_groups: HashMap<FloatingGroupId, PanelId>,
-}
 
-impl CompositionHostRegistry {
-    pub fn main_window_id(&self) -> Option<WindowId> {
-        self.main_window_id
-    }
-
-    pub fn panel_for_group(&self, group: FloatingGroupId) -> Option<PanelId> {
-        self.floating_groups.get(&group).copied()
-    }
-
-    pub fn group_for_panel(&self, panel: PanelId) -> Option<FloatingGroupId> {
-        self.floating_groups
-            .iter()
-            .find_map(|(group, host)| (*host == panel).then_some(*group))
-    }
-
-    pub fn floating_count(&self) -> usize {
-        self.floating_groups.len()
-    }
-}
-
-/// A registered persistent DockHost under the physical cursor, together with
-/// the pointer converted to that host's Core-local logical coordinate system.
-/// The point is always target-host-local; it is not the original drag source point.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum DockingWindowAtPoint {
-    ForeignWindow,
-    /// The pointer in MainHost-local logical coordinates.
-    Main {
-        point: Point,
-    },
-    /// The pointer in this FloatingHost's local logical coordinates.
-    Floating {
-        group: FloatingGroupId,
-        window_id: WindowId,
-        point: Point,
-    },
-    /// The pointer in one permanent Header/Group HWND, translated to Core coordinates.
-    FloatingPart {
-        group: FloatingGroupId,
-        window_id: WindowId,
-        part: DockWindowPart,
-        point: Point,
-    },
-}
-
-impl DockingWindowAtPoint {
-    pub(crate) const fn role(self) -> Option<crate::DockWindowRole> {
-        match self {
-            Self::Main { .. } => Some(crate::DockWindowRole::Main),
-            Self::Floating { group, .. } => Some(crate::DockWindowRole::Floating { group }),
-            Self::FloatingPart { group, part, .. } => {
-                Some(crate::DockWindowRole::FloatingPart { group, part })
-            },
-            Self::ForeignWindow => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum NativeMoveTarget {
-    /// The pointer was released over an unsupported/foreign managed surface.
-    /// A Group HWND drag must return to its original slot instead of tearing off.
-    RejectedGroupDrop,
-    MainDock {
-        target: DropTarget,
-        point: Point,
-    },
-    FloatingDock {
-        target: DropTarget,
-        point: Point,
-    },
-    FloatingChain {
-        anchor: FloatingGroupId,
-        anchor_member: WindowGridMember,
-        direction: WindowGridDirection,
-    },
-}
-
-#[derive(Clone, Copy)]
-struct NativeMoveWindow {
-    group: FloatingGroupId,
-    member: WindowGridMember,
-    native_window: NativeWindowId,
-    /// Actual outer-window origin used as the drag baseline.
-    drag_origin: PhysicalPoint,
-    /// Original origin restored when the gesture is cancelled.
-    cancel_origin: PhysicalPoint,
-}
-
-#[derive(Clone, Copy)]
-struct NativeMoveSession {
-    group: FloatingGroupId,
-    native_window: NativeWindowId,
-    hide_header: bool,
-    initial_cursor: PhysicalPoint,
-    start_bounds: Rect,
-    start_pointer: Point,
-    drag_threshold: f32,
-    threshold_crossed: bool,
-    high_resolution_timer: bool,
-    drop_target: Option<NativeMoveTarget>,
-    /// Header HWND that initiated a whole-WindowGrid move.
-    source_header: Option<NodeId>,
-    /// Group HWND that initiated a single-Group move.
-    source_group: Option<NodeId>,
-    /// Original Column for a GroupGrip move.
-    source_column: Option<NodeId>,
-    /// Whether the Group was the only Group in its source Column.
-    source_column_is_single_group: bool,
-}
-
-#[derive(Clone)]
-struct FloatingGroupSnapshot {
-    id: FloatingGroupId,
-    bounds: Rect,
-    z_order: i32,
-    minimum_size: Option<Size>,
-    horizontal_resize_minimum_widths: Option<(f32, f32)>,
-    panels: Vec<PanelId>,
-}
-
-#[derive(Clone, Copy)]
-struct FloatingPartWindowSnapshot {
-    member: WindowGridMember,
-    floating_group: FloatingGroupId,
-    kind: FloatingPartKind,
-    /// Initial client bounds, using the main-monitor scale until the HWND exists.
-    bounds: Rect,
-    /// Core FloatingGroup origin is already in physical virtual-desktop pixels.
-    floating_origin: Point,
-    /// Core layout origin inside the Floating client area remains logical.
-    local_origin: Point,
-    contains_transferred_panels: bool,
-}
 
 fn floating_part_screen_bounds(
     floating_bounds: Rect,
@@ -564,13 +284,6 @@ fn floating_part_boundary_member(
     floating_part_boundary_member_from_members(&members, side)
 }
 
-#[derive(Clone, Copy)]
-struct NativeResizeSession {
-    group: FloatingGroupId,
-    window_id: WindowId,
-    start_bounds: Rect,
-    transaction_started: bool,
-}
 
 
 fn previous_window_grid_link_is_external(
