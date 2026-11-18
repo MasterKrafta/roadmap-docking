@@ -7863,7 +7863,7 @@ mod floating_column_native_resize_tests {
     }
 
     #[test]
-    fn corner_resize_applies_both_horizontal_and_vertical_changes() {
+    fn corner_resize_only_updates_shared_horizontal_bounds() {
         let current = Rect::new(
             Point::new(100.0, 200.0),
             Size::new(500.0, 400.0),
@@ -7885,7 +7885,7 @@ mod floating_column_native_resize_tests {
     }
 
     #[test]
-    fn left_corner_resize_keeps_the_native_top_origin() {
+    fn left_corner_resize_only_updates_shared_horizontal_origin() {
         let current = Rect::new(
             Point::new(100.0, 200.0),
             Size::new(500.0, 400.0),
