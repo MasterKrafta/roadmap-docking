@@ -19,6 +19,9 @@ pub(super) struct PanelWindowEntry {
     /// The HWND may differ from Core bounds after the OS-owned resize loop.
     /// A final reconciliation must write Core's canonical bounds back.
     pub(super) native_bounds_dirty: bool,
+    /// Per-Column vertical viewport override, independent from sibling columns.
+    pub(super) native_vertical_origin_offset: f32,
+    pub(super) native_vertical_height: Option<f32>,
     pub(super) resize_enabled: bool,
     pub(super) host_group: Option<FloatingGroupId>,
     pub(super) visibility: PanelWindowVisibility,
