@@ -1080,14 +1080,7 @@ impl DragHostManager {
                 active.target_role,
             )
         });
-        let preserve_floating_tab_size = drag_handle == Some(DragHandle::PanelTab)
-            && matches!(
-                source_host,
-                Some(
-                    DragSourceHost::Floating { .. }
-                        | DragSourceHost::FloatingPart { .. }
-                )
-            )
+        let preserve_panel_tab_size = drag_handle == Some(DragHandle::PanelTab)
             && (target == Some(DropTarget::FreeArea) || chain_join.is_some());
         // A Main DockArea DragHost is only a hidden pointer/drop coordinator.
         // Its HWND stays at the creation point while the temporary Header/Group
@@ -1201,12 +1194,10 @@ impl DragHostManager {
                                         _ => {}
                                     }
 
-                                    // Core's Float command normally chooses the natural
-                                    // preferred height. A tab torn out of Floating already
-                                    // has a real user-sized Group viewport; preserve it on
-                                    // the newly created window instead of shrinking to the
-                                    // Panel's default preferred size.
-                                    if preserve_floating_tab_size
+                                    // PanelTab DragHost bounds follow the source Group
+                                    // viewport. Preserve those bounds after Core creates the
+                                    // Floating Group instead of shrinking to Panel preferred size.
+                                    if preserve_panel_tab_size
                                         && let Some(bounds) = free_area_bounds
                                     {
                                         for group in &created_groups {
