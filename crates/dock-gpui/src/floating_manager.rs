@@ -346,58 +346,44 @@ fn floating_part_internal_links(
     links
 }
 
-fn floating_part_boundary_member_from_members(
-    members: &[WindowGridMember],
-    side: WindowGridDirection,
-) -> Option<WindowGridMember> {
-    let first_column = members
-        .iter()
-        .find(|member| matches!(member, WindowGridMember::Column(_)))
-        .copied();
-    let last_column = members
-        .iter()
-        .rev()
-        .find(|member| matches!(member, WindowGridMember::Column(_)))
-        .copied();
-    let first_header = members
-        .iter()
-        .find(|member| matches!(member, WindowGridMember::Header(_)))
-        .copied();
-    let last_header = members
-        .iter()
-        .rev()
-        .find(|member| matches!(member, WindowGridMember::Header(_)))
-        .copied();
-    let first_group = members
-        .iter()
-        .find(|member| matches!(member, WindowGridMember::Group(_)))
-        .copied();
-    let last_group = members
-        .iter()
-        .rev()
-        .find(|member| matches!(member, WindowGridMember::Group(_)))
-        .copied();
-
-    match side {
-        WindowGridDirection::Left | WindowGridDirection::Above => {
-            first_column.or(first_header).or(first_group)
-        }
-        WindowGridDirection::Right => last_column.or(last_header).or(last_group),
-        WindowGridDirection::Below => last_group.or(last_column).or(last_header),
-    }
-}
-
 fn floating_part_boundary_member(
     specs: &[FloatingPartWindowSnapshot],
     floating_group: FloatingGroupId,
     side: WindowGridDirection,
 ) -> Option<WindowGridMember> {
-    let members = specs
+    let columns = specs
         .iter()
-        .filter(|spec| spec.floating_group() == floating_group)
-        .map(|spec| spec.member)
-        .collect::<Vec<_>>();
-    floating_part_boundary_member_from_members(&members, side)
+        .filter(|spec| {
+            spec.floating_group() == floating_group
+                && matches!(spec.kind, FloatingPartKind::Column { .. })
+        });
+
+    let selected = match side {
+        WindowGridDirection::Left => columns.min_by(|left, right| {
+            left.local_origin
+                .x
+                .total_cmp(&right.local_origin.x)
+                .then_with(|| left.local_origin.y.total_cmp(&right.local_origin.y))
+        }),
+        WindowGridDirection::Right => columns.max_by(|left, right| {
+            (left.local_origin.x + left.bounds.size.width)
+                .total_cmp(&(right.local_origin.x + right.bounds.size.width))
+                .then_with(|| left.local_origin.y.total_cmp(&right.local_origin.y))
+        }),
+        WindowGridDirection::Above => columns.min_by(|left, right| {
+            left.local_origin
+                .y
+                .total_cmp(&right.local_origin.y)
+                .then_with(|| left.local_origin.x.total_cmp(&right.local_origin.x))
+        }),
+        WindowGridDirection::Below => columns.max_by(|left, right| {
+            (left.local_origin.y + left.bounds.size.height)
+                .total_cmp(&(right.local_origin.y + right.bounds.size.height))
+                .then_with(|| left.local_origin.x.total_cmp(&right.local_origin.x))
+        }),
+    }?;
+
+    Some(selected.member)
 }
 
 fn previous_window_grid_link_is_external(
@@ -6203,6 +6189,26 @@ impl FloatingWindowManager {
 
         // Retain legacy FloatingComposition graph endpoints for this pass so
         // their external links can be migrated to real Column boundaries.
+        // A Column may have an independent native Y origin and height, so boundary
+        // selection must use its current viewport rather than Core's shared rect.
+        let boundary_specs = desired
+            .iter()
+            .copied()
+            .map(|mut spec| {
+                if let Some(entry) = self.registry.members.get(&spec.member) {
+                    let scale = entry
+                        .native_scale_factor
+                        .filter(|scale| scale.is_finite() && *scale > 0.0)
+                        .unwrap_or(1.0);
+                    spec.local_origin.y += entry.native_vertical_origin_offset / scale;
+                    if let Some(height) = entry.native_vertical_height {
+                        spec.bounds.size.height = height;
+                    }
+                }
+                spec
+            })
+            .collect::<Vec<_>>();
+
         // Stale typed members are still pruned first, allowing WindowGrid to
         // produce straight-through candidates before the Core topology is rebuilt.
         let mut live_members = self.registry.members.keys().copied().collect::<HashSet<_>>();
@@ -6237,7 +6243,7 @@ impl FloatingWindowManager {
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
         // those identities to the current Column boundary members.
-        if self.rebuild_floating_part_window_grid(&desired, &previous_part_members_by_group) {
+        if self.rebuild_floating_part_window_grid(&boundary_specs, &previous_part_members_by_group) {
             self.migrate_pending_window_grid_state();
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
@@ -7837,6 +7843,39 @@ mod floating_part_topology_tests {
         assert_eq!(
             floating_part_boundary_member(&specs, floating, WindowGridDirection::Below),
             Some(member_b),
+        );
+    }
+
+    #[test]
+    fn vertical_composition_boundaries_follow_each_columns_native_viewport() {
+        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
+        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+        let floating = floating_ids.insert(());
+        let column_a = node_ids.insert(());
+        let column_b = node_ids.insert(());
+        let column_c = node_ids.insert(());
+        let member_a = WindowGridMember::Column(column_a);
+        let member_b = WindowGridMember::Column(column_b);
+        let member_c = WindowGridMember::Column(column_c);
+
+        let mut first = column(column_a, floating, 0.0);
+        first.local_origin.y = 40.0;
+        first.bounds.size.height = 180.0;
+        let mut second = column(column_b, floating, 244.0);
+        second.local_origin.y = 0.0;
+        second.bounds.size.height = 220.0;
+        let mut third = column(column_c, floating, 488.0);
+        third.local_origin.y = 24.0;
+        third.bounds.size.height = 420.0;
+
+        let specs = [first, second, third];
+        assert_eq!(
+            floating_part_boundary_member(&specs, floating, WindowGridDirection::Above),
+            Some(member_b),
+        );
+        assert_eq!(
+            floating_part_boundary_member(&specs, floating, WindowGridDirection::Below),
+            Some(member_c),
         );
     }
 }
