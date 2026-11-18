@@ -38,13 +38,13 @@ pub(crate) struct DragHostSurface {
 }
 
 impl DragHostSurface {
-    pub(super) fn set_promoted_column_close_button(
+    pub(crate) fn set_promoted_column_close_button(
         &mut self,
         show: bool,
         cx: &mut Context<Self>,
     ) {
         if let Some(host) = self.promoted_part.as_ref() {
-            let _ = host.update(cx, |host, _, host_cx| {
+            let _ = host.update(cx, |host, host_cx| {
                 if host.set_show_close_button(show) {
                     host_cx.notify();
                 }
