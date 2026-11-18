@@ -8147,6 +8147,7 @@ mod floating_move_source_identity_tests {
     use super::native_move_source_member;
     use crate::window_chain::WindowGridMember;
     use dock_core::NodeId;
+    use slotmap::Key;
 
     #[test]
     fn floating_column_header_drag_uses_column_host_identity() {
