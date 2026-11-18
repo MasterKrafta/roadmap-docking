@@ -955,6 +955,8 @@ impl DragHostManager {
 
         let update: Result<(Option<DropTarget>, Option<Rect>), String> =
             self.controller.update(cx, |controller, controller_cx| {
+            let mut resolved_zone = None;
+            let mut floating_edge_zones = Vec::new();
             let target_result: Result<Option<DropTarget>, dock_core::ComputeRectsError> =
                 if matches!(payload, DragPayload::DockArea { .. })
                     && (source.is_none() || dock_area_drag_uses_free_area(target_window))
@@ -966,9 +968,9 @@ impl DragHostManager {
                 } else {
                     match (source, target_window) {
                         (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => {
-                            controller
-                                .prepare_drop_resolver(source)
-                                .and_then(|resolver| resolver.resolve(point))
+                            let resolver = controller.prepare_drop_resolver(source)?;
+                            resolved_zone = resolver.resolve_zone(point)?;
+                            Ok(resolved_zone.map(|zone| zone.target))
                         }
                         (
                             Some(source),
@@ -982,9 +984,18 @@ impl DragHostManager {
                                 point,
                                 ..
                             }),
-                        ) => controller
-                            .prepare_floating_window_drop_resolver(window_id, group, source)
-                            .and_then(|resolver| resolver.resolve(point)),
+                        ) => {
+                            let resolver = controller
+                                .prepare_floating_window_drop_resolver(window_id, group, source)?;
+                            resolved_zone = resolver.resolve_zone(point)?;
+                            floating_edge_zones = resolver
+                                .zones()
+                                .iter()
+                                .filter(|zone| matches!(zone.zone, dock_core::DropZone::Left | dock_core::DropZone::Right))
+                                .copied()
+                                .collect();
+                            Ok(resolved_zone.map(|zone| zone.target))
+                        }
                         (Some(_), Some(DockingWindowAtPoint::ForeignWindow)) => Ok(None),
                         // No managed Dock window is under the cursor. This is the
                         // desktop/free-space destination for both Main and Floating
@@ -1066,7 +1077,7 @@ impl DragHostManager {
         });
         let target_role = target_window.and_then(DockingWindowAtPoint::role);
         if source_host == DragSourceHost::Main
-            && handle == DragHandle::DockAreaHeader
+            && matches!(handle, DragHandle::DockAreaHeader | DragHandle::GroupGrip)
         {
             let should_log = self.active
                 .as_mut()
@@ -1080,7 +1091,7 @@ impl DragHostManager {
                 });
             if should_log {
                 eprintln!(
-                    "Main DockArea drag target: cursor={cursor:?}, target_window={target_window:?}, target={target:?}, target_role={target_role:?}"
+                    "Main docking drag target: handle={handle:?}, cursor={cursor:?}, target_window={target_window:?}, target={target:?}, target_role={target_role:?}, resolved_zone={resolved_zone:?}, floating_edge_zones={floating_edge_zones:?}"
                 );
             }
         }
