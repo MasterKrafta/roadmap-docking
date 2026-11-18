@@ -6426,7 +6426,7 @@ impl FloatingWindowManager {
     }
 
     fn sync_native_column_resize_constraints(
-        &self,
+        &mut self,
         column: NodeId,
         group: FloatingGroupId,
         window_id: WindowId,
