@@ -20,6 +20,7 @@ pub(super) struct PanelWindowEntry {
     /// A final reconciliation must write Core's canonical bounds back.
     pub(super) native_bounds_dirty: bool,
     /// Per-Column vertical viewport override, independent from sibling columns.
+    /// Stored in physical pixels because native bounds use desktop coordinates.
     pub(super) native_vertical_origin_offset: f32,
     pub(super) native_vertical_height: Option<f32>,
     pub(super) resize_enabled: bool,
