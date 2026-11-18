@@ -597,26 +597,7 @@ impl FloatingWindowManager {
         &self.host_registry
     }
 
-    pub(crate) fn floating_column_vertical_origin_offset(
-        &self,
-        column: NodeId,
-        group: FloatingGroupId,
-    ) -> f32 {
-        let Some(entry) = self.registry.members.get(&WindowGridMember::Column(column))
-            .filter(|entry| entry.host_group == Some(group))
-        else {
-            return 0.0;
-        };
-        let scale = entry
-            .native_window
-            .and_then(|window| self.native_ops.scale_factor(window).ok())
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .or(entry.native_scale_factor)
-            .unwrap_or(1.0);
-        entry.native_vertical_origin_offset / scale
-    }
-
-    pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
+remove manager getter    pub(crate) fn floating_group_for_member(&self, member: WindowGridMember) -> Option<FloatingGroupId> {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
             WindowGridMember::Column(_) | WindowGridMember::Header(_) | WindowGridMember::Group(_) => self
@@ -1871,12 +1852,23 @@ impl FloatingWindowManager {
                 || (native_column_bounds.size.height - current_column_bounds.size.height).abs()
                     > 0.5;
         if vertical_bounds_changed {
+            let origin_y_offset =
+                native_column_bounds.origin.y - current_column_bounds.origin.y;
             if let Some(entry) = self.registry.members.get_mut(&member) {
-                entry.native_vertical_origin_offset =
-                    native_column_bounds.origin.y - current_column_bounds.origin.y;
+                entry.native_vertical_origin_offset = origin_y_offset;
                 entry.native_vertical_height = Some(native_column_bounds.size.height);
                 entry.native_bounds_dirty = true;
             }
+            self.controller.update(cx, |controller, controller_cx| {
+                controller.set_floating_column_viewport(
+                    state.window_id,
+                    group,
+                    column,
+                    native_column_bounds.size.height,
+                    origin_y_offset / scale_factor,
+                );
+                controller_cx.notify();
+            });
         }
 
         // A vertical-only drag is local to this Column HWND. Its layout is
