@@ -26,7 +26,7 @@ use crate::{
 };
 
 use super::{
-    floating_column_host_rect, floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
+    floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_part_owner_and_column, handle_floating_escape, observe_floating_focus_loss,
     render_floating_pointer_input, FloatingHostOpenMenu, FloatingHostSnapshot, FloatingPartKind,
     FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
