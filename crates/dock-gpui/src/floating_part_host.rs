@@ -4,7 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use dock_core::{ColumnRect, DockSide, DragPayload, FloatingGroupId, GroupRect, NodeId, Point, Rect, TabHeaderRect, TabStripRect, PanelRect};
+use dock_core::{
+    ColumnRect, DockSide, DragPayload, DragPreview, DropZoneRect, FloatingGroupId,
+    GroupRect, NodeId, Point, Rect, TabHeaderRect, TabStripRect, PanelRect,
+};
 use gpui::{
     App, Context, Entity, FocusHandle, HitboxId, IntoElement, ParentElement, Render, Styled,
     WeakEntity, Window, div, prelude::InteractiveElement as _, rgb,
@@ -12,6 +15,7 @@ use gpui::{
 use ui::Theme;
 
 use crate::{
+    components::DropOverlay,
     dock_components::{
         active_panels_for_groups, collect_group_presentations, CompositionHeader, DockGroupView,
         PanelTransferPresentation,
@@ -301,6 +305,13 @@ impl Render for FloatingPartHost {
                         show_close_button,
                         Some(close_action),
                     ));
+                if snapshot.drag_preview.is_some() {
+                    root = root.child(render_floating_drop_overlay(
+                        &snapshot,
+                        column_rect.rect.origin,
+                        self.theme,
+                    ));
+                }
                 let manager_for_escape = self.manager.clone();
                 let controller_for_escape = self.controller.clone();
                 let tab_press_for_escape = self.tab_press.clone();
@@ -332,6 +343,87 @@ impl Render for FloatingPartHost {
                 .into_any_element(),
         }
     }
+}
+
+fn render_floating_drop_overlay(
+    snapshot: &FloatingHostSnapshot,
+    origin: Point,
+    theme: Theme,
+) -> impl IntoElement {
+    let groups = snapshot
+        .rects
+        .groups
+        .iter()
+        .map(|group| {
+            GroupRect::new(
+                group.group,
+                floating_part_local_rect(group.rect, origin),
+            )
+        })
+        .collect::<Vec<_>>();
+    let columns = snapshot
+        .rects
+        .columns
+        .iter()
+        .map(|column| {
+            ColumnRect::new(
+                column.column,
+                floating_part_local_rect(column.rect, origin),
+            )
+        })
+        .collect::<Vec<_>>();
+    let tab_headers = snapshot
+        .rects
+        .tab_headers
+        .iter()
+        .map(|header| {
+            TabHeaderRect::new(
+                header.group,
+                header.panel,
+                header.index,
+                floating_part_local_rect(header.rect, origin),
+            )
+        })
+        .collect::<Vec<_>>();
+    let tab_strips = snapshot
+        .rects
+        .tab_strips
+        .iter()
+        .map(|strip| {
+            TabStripRect::new(
+                strip.group,
+                floating_part_local_rect(strip.rect, origin),
+            )
+        })
+        .collect::<Vec<_>>();
+    let resolved_zone = snapshot.active_drop_zone.map(|zone| {
+        DropZoneRect::new(
+            zone.target,
+            zone.zone,
+            floating_part_local_rect(zone.rect, origin),
+        )
+    });
+    let preview = snapshot.drag_preview.map(|preview| DragPreview {
+        point: Point::new(
+            preview.point.x - origin.x,
+            preview.point.y - origin.y,
+        ),
+        ..preview
+    });
+    let floating_bounds = floating_part_local_rect(snapshot.floating.rect, origin);
+
+    DropOverlay::render(
+        resolved_zone,
+        preview,
+        &groups,
+        &columns,
+        &snapshot.column_groups,
+        &tab_headers,
+        &tab_strips,
+        None,
+        Some(floating_bounds),
+        theme,
+    )
 }
 
 impl FloatingPartHost {
@@ -580,12 +672,20 @@ impl FloatingPartHost {
         if dragged_group == Some(group_id)
             || transfer.groups_without_visible_tabs.contains(&group_id)
         {
-            return root.child(DockGroupView::render_placeholder(
+            root = root.child(DockGroupView::render_placeholder(
                 local_group,
                 Point::ZERO,
                 snapshot.metrics,
                 self.theme,
             ));
+            if snapshot.drag_preview.is_some() {
+                root = root.child(render_floating_drop_overlay(
+                    snapshot,
+                    group_rect.rect.origin,
+                    self.theme,
+                ));
+            }
+            return root;
         }
 
         let local_strip = dock_core::TabStripRect::new(
@@ -739,6 +839,14 @@ impl FloatingPartHost {
                 toggle_context_menu,
             ))
             .child(PanelHost::render(panel_rects, Point::ZERO, self.theme));
+
+        if snapshot.drag_preview.is_some() {
+            root = root.child(render_floating_drop_overlay(
+                snapshot,
+                group_rect.rect.origin,
+                self.theme,
+            ));
+        }
 
         if let Some(open) = self.open_context_menu.as_ref()
             && context_menu_target_exists(
