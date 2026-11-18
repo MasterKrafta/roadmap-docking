@@ -5,7 +5,7 @@ use crate::{components::floating::FloatingPartKind, window_chain::WindowGridMemb
 #[derive(Clone, Copy)]
 pub(super) struct FloatingPartWindowSnapshot {
     pub(super) member: WindowGridMember,
-    pub(super) floating_group: FloatingGroupId,
+    pub(super) floating_group: Option<FloatingGroupId>,
     pub(super) kind: FloatingPartKind,
     /// Present only for temporary Header/Group hosts created from a Main DockArea drag.
     pub(super) main_drag_side: Option<DockSide>,
@@ -16,4 +16,13 @@ pub(super) struct FloatingPartWindowSnapshot {
     /// Core layout origin inside the Floating client area remains logical.
     pub(super) local_origin: Point,
     pub(super) contains_transferred_panels: bool,
+}
+
+impl FloatingPartWindowSnapshot {
+    /// Returns the Core owner for a permanent Floating Header/Group snapshot.
+    /// Temporary Main-drag parts intentionally have no FloatingGroup yet.
+    pub(super) fn floating_group(self) -> FloatingGroupId {
+        self.floating_group
+            .expect("permanent Floating part snapshot must have a Core owner")
+    }
 }
