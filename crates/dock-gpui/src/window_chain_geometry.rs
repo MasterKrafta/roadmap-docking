@@ -268,10 +268,30 @@ pub(crate) fn arrange_contiguous_window_chain_bounds(
 /// their client top/bottom edges without overlap. Repeated links on one side
 /// are laid out as a deterministic outward lane in member order.
 pub(crate) fn arrange_window_grid_bounds(
+    bounds: Vec<(WindowGridMember, Rect)>,
+    frames: &[NativeFrameGeometry],
+    links: &[WindowGridLink],
+    anchor: WindowGridMember,
+) -> Option<Vec<(WindowGridMember, Rect)>> {
+    arrange_window_grid_bounds_with_preserved_offsets(
+        bounds,
+        frames,
+        links,
+        anchor,
+        &HashSet::new(),
+    )
+}
+
+/// Arranges a WindowGrid while preserving the perpendicular offset across
+/// selected internal links. Floating Columns in one Core composition can have
+/// independent vertical viewports, so their horizontal WindowGrid links must
+/// retain their Y offset instead of forcing every Column to the same top edge.
+pub(crate) fn arrange_window_grid_bounds_with_preserved_offsets(
     mut bounds: Vec<(WindowGridMember, Rect)>,
     frames: &[NativeFrameGeometry],
     links: &[WindowGridLink],
     anchor: WindowGridMember,
+    preserve_parallel_offsets: &HashSet<WindowGridLink>,
 ) -> Option<Vec<(WindowGridMember, Rect)>> {
     if bounds.len() != frames.len()
         || bounds.is_empty()
@@ -295,6 +315,7 @@ pub(crate) fn arrange_window_grid_bounds(
     }
 
     let anchor_index = *indices.get(&anchor)?;
+    let original_bounds = bounds.clone();
     if bounds.len() == 1 {
         return links.is_empty().then_some(bounds);
     }
@@ -346,6 +367,26 @@ pub(crate) fn arrange_window_grid_bounds(
 
             let mut previous = current;
             for neighbour in neighbours {
+                let parallel_offset = if let Some(link) = links.iter().find(|link| {
+                    preserve_parallel_offsets.contains(link)
+                        && ((link.from == bounds[previous].0 && link.to == bounds[neighbour].0)
+                            || (link.to == bounds[previous].0
+                                && link.from == bounds[neighbour].0))
+                }) {
+                    let _ = link;
+                    Some(match direction {
+                        WindowGridDirection::Left | WindowGridDirection::Right => {
+                            original_bounds[neighbour].1.origin.y
+                                - original_bounds[previous].1.origin.y
+                        }
+                        WindowGridDirection::Above | WindowGridDirection::Below => {
+                            original_bounds[neighbour].1.origin.x
+                                - original_bounds[previous].1.origin.x
+                        }
+                    })
+                } else {
+                    None
+                };
                 let placed = if previous < neighbour {
                     let (before_neighbour, from_neighbour) = bounds.split_at_mut(neighbour);
                     place_grid_neighbour(
@@ -354,6 +395,7 @@ pub(crate) fn arrange_window_grid_bounds(
                         &mut from_neighbour[0].1,
                         &frames[neighbour],
                         direction,
+                        parallel_offset,
                     )
                 } else {
                     let (before_previous, from_previous) = bounds.split_at_mut(previous);
@@ -363,6 +405,7 @@ pub(crate) fn arrange_window_grid_bounds(
                         &mut before_previous[neighbour].1,
                         &frames[neighbour],
                         direction,
+                        parallel_offset,
                     )
                 };
                 placed?;
@@ -411,6 +454,7 @@ fn place_grid_neighbour(
     to_bounds: &mut Rect,
     to_frame: &NativeFrameGeometry,
     direction: WindowGridDirection,
+    parallel_offset: Option<f32>,
 ) -> Option<()> {
     let x = match direction {
         WindowGridDirection::Left => {
@@ -423,13 +467,17 @@ fn place_grid_neighbour(
                 - from_frame.visible_right_inset
                 - to_frame.visible_left_inset
         }
-        WindowGridDirection::Above | WindowGridDirection::Below => {
-            from_bounds.origin.x + from_frame.client_left_inset - to_frame.client_left_inset
-        }
+        WindowGridDirection::Above | WindowGridDirection::Below => parallel_offset
+            .map(|offset| from_bounds.origin.x + offset)
+            .unwrap_or_else(|| {
+                from_bounds.origin.x + from_frame.client_left_inset - to_frame.client_left_inset
+            }),
     };
 
     let y = match direction {
-        WindowGridDirection::Left | WindowGridDirection::Right => from_bounds.origin.y,
+        WindowGridDirection::Left | WindowGridDirection::Right => parallel_offset
+            .map(|offset| from_bounds.origin.y + offset)
+            .unwrap_or(from_bounds.origin.y),
         WindowGridDirection::Below => {
             let from_client_bottom = from_bounds.origin.y
                 + from_frame.client_top_inset
@@ -1268,6 +1316,39 @@ mod window_grid_bounds_tests {
             above[0].1.origin.x + anchor_frame.client_left_inset,
             above[1].1.origin.x + moving_frame.client_left_inset,
         );
+    }
+
+    #[test]
+    fn internal_horizontal_links_preserve_column_vertical_offsets_during_alignment() {
+        use std::collections::HashSet;
+
+        let [anchor, internal, external] =
+            groups(3).try_into().expect("three group ids");
+        let initial = vec![
+            bounds(anchor, 100.0, 200.0, 100.0, 80.0),
+            bounds(internal, 208.0, 245.0, 100.0, 160.0),
+            bounds(external, 600.0, 320.0, 100.0, 120.0),
+        ];
+        let internal_link = link(anchor, internal, WindowGridDirection::Right);
+        let external_link = link(internal, external, WindowGridDirection::Right);
+        let frames = [
+            frame(100.0, 80.0, 1.0),
+            frame(100.0, 160.0, 1.0),
+            frame(100.0, 120.0, 1.0),
+        ];
+
+        let arranged = arrange_window_grid_bounds_with_preserved_offsets(
+            initial,
+            &frames,
+            &[internal_link, external_link],
+            anchor,
+            &HashSet::from([internal_link]),
+        )
+        .expect("internal Column offsets should coexist with an external horizontal join");
+
+        assert_eq!(arranged[0].1.origin, Point::new(100.0, 200.0));
+        assert_eq!(arranged[1].1.origin, Point::new(208.0, 245.0));
+        assert_eq!(arranged[2].1.origin, Point::new(316.0, 245.0));
     }
 
     #[test]
