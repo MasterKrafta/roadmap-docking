@@ -56,7 +56,9 @@ impl Render for DragHostSurface {
             return root.child(promoted_part);
         }
 
-        if self.handoff_placeholder {
+        if self.handoff_placeholder || self.dock_area.is_some() {
+            // Main DockArea drags are rendered by the temporary Header/Group HWNDs.
+            // This hidden DragHost remains only as the pointer/drop-tracking coordinator.
             return root;
         }
 
