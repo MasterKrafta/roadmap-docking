@@ -1080,8 +1080,6 @@ impl DragHostManager {
                 active.target_role,
             )
         });
-        let preserve_panel_tab_size = drag_handle == Some(DragHandle::PanelTab)
-            && (target == Some(DropTarget::FreeArea) || chain_join.is_some());
         // A Main DockArea DragHost is only a hidden pointer/drop coordinator.
         // Its HWND stays at the creation point while the temporary Header/Group
         // windows follow the cursor, so its native bounds are stale at release.
@@ -1194,28 +1192,6 @@ impl DragHostManager {
                                         _ => {}
                                     }
 
-                                    // PanelTab DragHost bounds follow the source Group
-                                    // viewport. Preserve those bounds after Core creates the
-                                    // Floating Group instead of shrinking to Panel preferred size.
-                                    if preserve_panel_tab_size
-                                        && let Some(bounds) = free_area_bounds
-                                    {
-                                        for group in &created_groups {
-                                            if let Err(error) = controller.dispatch(
-                                                DockCommand::ResizeFloatingBounds {
-                                                    group: *group,
-                                                    bounds,
-                                                },
-                                            ) {
-                                                tracing::warn!(
-                                                    ?id,
-                                                    ?group,
-                                                    %error,
-                                                    "could not preserve the source Group size for a detached tab"
-                                                );
-                                            }
-                                        }
-                                    }
                                 }
                                 Err(error) => {
                                     tracing::warn!(?id, %error, "DragHost drop command was rejected");
