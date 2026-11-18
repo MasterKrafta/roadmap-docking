@@ -2546,7 +2546,7 @@ impl FloatingWindowManager {
             y: screen_area_bounds.origin.y.round() as i32,
         };
 
-        let mut created = HashMap::new();
+        let mut created: HashMap<WindowGridMember, PanelWindowEntry> = HashMap::new();
         for (member, kind, local_bounds) in parts {
             let Some(bounds) = self.screen_bounds_from_main_local(local_bounds) else {
                 for entry in created.into_values() {
@@ -2590,7 +2590,7 @@ impl FloatingWindowManager {
 
     /// Shows the temporary Main-origin Header/Group windows after Main has detached
     /// every transferred PanelView.
-    pub(crate) fn show_main_drag_parts(&mut self) -> bool {
+    pub(crate) fn show_main_drag_parts(&mut self, cx: &mut Context<Self>) -> bool {
         if self.pending_main_drag_parts.is_empty() {
             return false;
         }
