@@ -89,6 +89,26 @@ fn floating_part_screen_bounds(
     )
 }
 
+fn floating_column_core_bounds(
+    layout: &dock_core::Layout,
+    metrics: &dock_core::DockMetrics,
+    group: FloatingGroupId,
+    column: NodeId,
+    scale_factor: f32,
+) -> Option<(Rect, Rect)> {
+    let floating = layout.floating_group(group)?;
+    let column_rect = layout
+        .compute_floating_rects(group, metrics)
+        .ok()?
+        .columns
+        .into_iter()
+        .find(|candidate| candidate.column == column)?;
+    Some((
+        floating.bounds,
+        floating_part_screen_bounds(floating.bounds, column_rect.rect, scale_factor),
+    ))
+}
+
 fn floating_part_reference_group(
     spec: FloatingPartWindowSnapshot,
     desired: &[FloatingPartWindowSnapshot],
@@ -1336,6 +1356,50 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Starts native resize tracking for a permanent Floating Column HWND.
+    pub(crate) fn observe_native_column_resize(
+        &mut self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        self.ensure_native_column_resize_session(column, group, window_id, cx);
+    }
+
+    /// Samples the native client bounds of one Floating Column after GPUI reports
+    /// a window-bounds change. The manager translates that rectangle to the
+    /// containing Floating composition before dispatching a Core resize command.
+    pub(crate) fn sync_native_column_resize_bounds(
+        &mut self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ensure_native_column_resize_session(column, group, window_id, cx) {
+            return;
+        }
+        let member = WindowGridMember::Column(column);
+        let Some(native_window) = self
+            .registry
+            .members
+            .get(&member)
+            .filter(|entry| entry.window_id == window_id && entry.host_group == Some(group))
+            .and_then(|entry| entry.native_window)
+        else {
+            return;
+        };
+        let Some(bounds) = self.core_bounds_from_native_window(native_window) else {
+            return;
+        };
+        let Some(mut state) = self.native_resize.filter(|state| {
+            state.member == member && state.group == group && state.window_id == window_id
+        }) else {
+            return;
+        };
+        self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+    }
     /// Samples current native bounds after the GPUI window-bounds observer fires.
     /// All geometry components are read from the HWND at deferred execution time.
     pub(crate) fn sync_native_resize_bounds(
@@ -1357,7 +1421,9 @@ impl FloatingWindowManager {
             return;
         };
         let Some(mut state) = self.native_resize.filter(|state| {
-            state.group == group && state.window_id == window_id
+            state.group == group
+                && state.member == WindowGridMember::FloatingComposition(group)
+                && state.window_id == window_id
         }) else {
             return;
         };
@@ -1374,7 +1440,9 @@ impl FloatingWindowManager {
             return false;
         }
         if let Some(state) = self.native_resize {
-            return state.group == group && state.window_id == window_id;
+            return state.group == group
+                && state.member == WindowGridMember::FloatingComposition(group)
+                && state.window_id == window_id;
         }
         let Some(entry) = self.panel_window_for_group(group) else {
             return false;
@@ -1403,8 +1471,10 @@ impl FloatingWindowManager {
         }
         self.native_resize = Some(NativeResizeSession {
             group,
+            member: WindowGridMember::FloatingComposition(group),
             window_id,
             start_bounds,
+            start_column_bounds: None,
             transaction_started: false,
         });
         // The OS may have changed the HWND before the first Core resize sample.
@@ -1421,6 +1491,75 @@ impl FloatingWindowManager {
         true
     }
 
+    fn ensure_native_column_resize_session(
+        &mut self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.native_move.is_some() {
+            return false;
+        }
+        let member = WindowGridMember::Column(column);
+        if let Some(state) = self.native_resize {
+            return state.group == group && state.member == member && state.window_id == window_id;
+        }
+        let Some(entry) = self.registry.members.get(&member) else {
+            return false;
+        };
+        if entry.window_id != window_id || entry.host_group != Some(group) {
+            return false;
+        }
+        let Some(native_window) = entry.native_window else {
+            return false;
+        };
+        if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            return false;
+        }
+        let scale_factor = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some((start_bounds, start_column_bounds)) = self.controller.update(cx, |controller, _| {
+            floating_column_core_bounds(
+                controller.layout(),
+                &controller.metrics(),
+                group,
+                column,
+                scale_factor,
+            )
+        }) else {
+            return false;
+        };
+
+        // Protect metric updates from the moment Windows enters its modal sizing
+        // loop, even before the first size delta opens the Core history transaction.
+        let session_started = self.controller.update(cx, |controller, _| {
+            controller.begin_native_resize_session()
+        });
+        if !session_started {
+            return false;
+        }
+        self.native_resize = Some(NativeResizeSession {
+            group,
+            member,
+            window_id,
+            start_bounds,
+            start_column_bounds: Some(start_column_bounds),
+            transaction_started: false,
+        });
+        if let Some(entry) = self.registry.members.get_mut(&member) {
+            // Keep Core authoritative for every sibling Column, but do not let
+            // reconciliation overwrite the HWND currently inside WM_SIZING.
+            entry.native_bounds_dirty = true;
+        }
+        self.sync_native_column_resize_constraints(column, group, window_id, cx);
+        self.schedule_native_resize(cx, group, window_id);
+        true
+    }
     fn schedule_native_resize(
         &self,
         cx: &mut Context<Self>,
@@ -1455,6 +1594,9 @@ impl FloatingWindowManager {
         }) else {
             return false;
         };
+        if let WindowGridMember::Column(column) = state.member {
+            return self.tick_native_column_resize(column, group, window_id, state, cx);
+        }
 
         let native_window = self.panel_window_for_group(group).and_then(|entry| {
             (entry.window_id == window_id).then_some(entry.native_window).flatten()
@@ -1486,6 +1628,166 @@ impl FloatingWindowManager {
         false
     }
 
+    fn tick_native_column_resize(
+        &mut self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        mut state: NativeResizeSession,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let member = WindowGridMember::Column(column);
+        let native_window = self.registry.members.get(&member).and_then(|entry| {
+            (entry.window_id == window_id && entry.host_group == Some(group))
+                .then_some(entry.native_window)
+                .flatten()
+        });
+        let Some(native_window) = native_window else {
+            self.finish_native_resize_transaction(state, cx);
+            return false;
+        };
+
+        // The bounds observer is the fast path. Polling remains necessary because
+        // Windows can coalesce several WM_SIZE notifications inside its modal loop.
+        if self.native_ops.is_resizing(native_window).unwrap_or(false) {
+            if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+                self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+            }
+            self.sync_native_column_resize_constraints(column, group, window_id, cx);
+            self.native_resize = Some(state);
+            return true;
+        }
+
+        if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
+            self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+        }
+        self.finish_native_resize_transaction(state, cx);
+        false
+    }
+    fn apply_native_column_resize_bounds(
+        &mut self,
+        column: NodeId,
+        group: FloatingGroupId,
+        native_column_bounds: Rect,
+        state: &mut NativeResizeSession,
+        cx: &mut Context<Self>,
+    ) {
+        let member = WindowGridMember::Column(column);
+        let native_window = self
+            .registry
+            .members
+            .get(&member)
+            .filter(|entry| entry.window_id == state.window_id)
+            .and_then(|entry| entry.native_window);
+        let scale_factor = native_window
+            .and_then(|window| self.native_ops.scale_factor(window).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some((current_group_bounds, current_column_bounds)) = self.controller.update(cx, |controller, _| {
+            floating_column_core_bounds(
+                controller.layout(),
+                &controller.metrics(),
+                group,
+                column,
+                scale_factor,
+            )
+        }) else {
+            return;
+        };
+
+        let native_edge = native_window
+            .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
+            .flatten()
+            .map(|edge| match edge {
+                platform::NativeHorizontalResizeEdge::Left => dock_core::FloatingResizeEdge::Left,
+                platform::NativeHorizontalResizeEdge::Right => dock_core::FloatingResizeEdge::Right,
+            });
+        let edge = native_edge.or_else(|| {
+            let width_changed =
+                (native_column_bounds.size.width - current_column_bounds.size.width).abs() > 0.5;
+            width_changed.then(|| {
+                let start_x = state
+                    .start_column_bounds
+                    .unwrap_or(current_column_bounds)
+                    .origin
+                    .x;
+                if (native_column_bounds.origin.x - start_x).abs() > 0.5 {
+                    dock_core::FloatingResizeEdge::Left
+                } else {
+                    dock_core::FloatingResizeEdge::Right
+                }
+            })
+        });
+
+        // Column HWND bounds use physical desktop origins and logical client sizes.
+        // Convert only edge deltas to the composition's logical width; Core then
+        // resizes the first/last Column and preserves all internal split positions.
+        let width_delta = native_column_bounds.size.width - current_column_bounds.size.width;
+        let target_group_bounds = match edge {
+            Some(dock_core::FloatingResizeEdge::Left) => Rect::new(
+                Point::new(native_column_bounds.origin.x, current_group_bounds.origin.y),
+                Size::new(
+                    current_group_bounds.size.width + width_delta,
+                    current_group_bounds.size.height,
+                ),
+            ),
+            Some(dock_core::FloatingResizeEdge::Right) => Rect::new(
+                current_group_bounds.origin,
+                Size::new(
+                    current_group_bounds.size.width + width_delta,
+                    current_group_bounds.size.height,
+                ),
+            ),
+            None => Rect::new(
+                Point::new(
+                    current_group_bounds.origin.x,
+                    native_column_bounds.origin.y,
+                ),
+                Size::new(
+                    current_group_bounds.size.width,
+                    native_column_bounds.size.height,
+                ),
+            ),
+        };
+        if target_group_bounds == current_group_bounds {
+            return;
+        }
+
+        if !state.transaction_started {
+            state.transaction_started = self.controller.update(cx, |controller, _| {
+                controller.begin_native_resize_transaction()
+            });
+        }
+        self.native_resize = Some(*state);
+        if !state.transaction_started {
+            return;
+        }
+
+        let command = match edge {
+            Some(edge) => DockCommand::ResizeFloatingBoundsFromEdge {
+                group,
+                bounds: target_group_bounds,
+                edge,
+                scale_factor,
+            },
+            None => DockCommand::ResizeFloatingBounds {
+                group,
+                bounds: target_group_bounds,
+            },
+        };
+        self.controller.update(cx, |controller, controller_cx| {
+            if let Err(error) = controller.dispatch(command) {
+                tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize Floating Column native bounds with Core"
+                );
+            }
+            controller.flush_events(controller_cx);
+            controller_cx.notify();
+        });
+    }
     fn apply_native_resize_bounds(
         &mut self,
         group: FloatingGroupId,
@@ -5451,13 +5753,24 @@ impl FloatingWindowManager {
                 previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
             });
             if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
-                if let Some(native_window) = native_window {
-                    self.sync_part_window_bounds(native_window, target_bounds);
-                }
+                let resizing_this_member = self
+                    .native_resize
+                    .is_some_and(|session| session.member == spec.member);
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                    entry.bounds = target_bounds;
-                    entry.native_scale_factor = current_scale;
-                    entry.native_bounds_dirty = false;
+                    if resizing_this_member {
+                        // Windows owns this HWND until WM_EXITSIZEMOVE. Remember
+                        // the newest Core target but leave its live bounds untouched.
+                        entry.bounds = target_bounds;
+                        entry.native_scale_factor = current_scale;
+                        entry.native_bounds_dirty = true;
+                    } else {
+                        if let Some(native_window) = native_window {
+                            self.sync_part_window_bounds(native_window, target_bounds);
+                        }
+                        entry.bounds = target_bounds;
+                        entry.native_scale_factor = current_scale;
+                        entry.native_bounds_dirty = false;
+                    }
                 }
             }
 
@@ -5540,6 +5853,28 @@ impl FloatingWindowManager {
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
                 .retain(|candidate| !rebuilt_links.contains(candidate));
+        }
+
+        // Native resizing belongs to each persistent Column HWND. Configure it
+        // only after the WindowGrid links are rebuilt, so shared edges are disabled
+        // on both sides of every internal Axis::X boundary.
+        let resize_columns = desired
+            .iter()
+            .filter_map(|spec| match spec.member {
+                WindowGridMember::Column(column) => {
+                    Some((spec.member, spec.floating_group(), column))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (member, group, column) in resize_columns {
+            let Some(mut entry) = self.registry.members.remove(&member) else {
+                continue;
+            };
+            if entry.visibility == PanelWindowVisibility::Visible {
+                self.sync_native_column_resize(&mut entry, group, column, cx);
+            }
+            self.registry.members.insert(member, entry);
         }
 
         // Cache the single close-button owner on the rightmost Column host.
@@ -5883,6 +6218,146 @@ impl FloatingWindowManager {
         work_areas.first().copied()
     }
 
+    fn sync_native_column_resize_constraints(
+        &self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) {
+        let member = WindowGridMember::Column(column);
+        let Some(mut entry) = self.registry.members.remove(&member) else {
+            return;
+        };
+        if entry.window_id != window_id || entry.host_group != Some(group) {
+            self.registry.members.insert(member, entry);
+            return;
+        }
+        self.sync_native_column_resize(&mut entry, group, column, cx);
+        self.registry.members.insert(member, entry);
+    }
+
+    fn sync_native_column_resize(
+        &self,
+        entry: &mut PanelWindowEntry,
+        group: FloatingGroupId,
+        column: NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(native_window) = entry.native_window else {
+            return;
+        };
+        if !entry.resize_enabled {
+            match self.native_ops.enable_resize(native_window) {
+                Ok(()) => entry.resize_enabled = true,
+                Err(error) => {
+                    tracing::warn!(
+                        ?group,
+                        ?column,
+                        %error,
+                        "could not enable native Floating Column resize"
+                    );
+                    return;
+                }
+            }
+        }
+
+        let member = WindowGridMember::Column(column);
+        let desired_left_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(member, WindowGridDirection::Left);
+        let desired_right_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(member, WindowGridDirection::Right);
+        let desired_top_enabled = !self
+            .window_chains
+            .has_neighbor_on_side(member, WindowGridDirection::Above);
+
+        if entry.native_left_resize_enabled != Some(desired_left_enabled) {
+            match self.native_ops.set_left_resize_enabled(native_window, desired_left_enabled) {
+                Ok(()) => entry.native_left_resize_enabled = Some(desired_left_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize the Floating Column left resize edge"
+                ),
+            }
+        }
+        // The right edge is the matching half of the Axis::X join. It must be
+        // independently disabled so an internal splitter is never a native resize.
+        if let Err(error) = self.native_ops.set_right_resize_enabled(native_window, desired_right_enabled) {
+            tracing::warn!(
+                ?group,
+                ?column,
+                %error,
+                "could not synchronize the Floating Column right resize edge"
+            );
+        }
+        if entry.native_top_resize_enabled != Some(desired_top_enabled) {
+            match self.native_ops.set_top_resize_enabled(native_window, desired_top_enabled) {
+                Ok(()) => entry.native_top_resize_enabled = Some(desired_top_enabled),
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize the Floating Column top resize edge"
+                ),
+            }
+        }
+
+        let minimum = self.controller.update(cx, |controller, _| {
+            let metrics = controller.metrics();
+            let column_minimum = controller
+                .layout()
+                .floating_column_minimum_size(group, column, &metrics)
+                .ok()?;
+            let composition_minimum = controller
+                .layout()
+                .floating_minimum_size(group, &metrics)
+                .ok()?;
+            Some(Size::new(
+                column_minimum.width,
+                column_minimum.height.max(composition_minimum.height),
+            ))
+        });
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let desired_minimum = minimum.and_then(|minimum| {
+            DockGeometry::physical_size_from_logical(minimum, scale)
+        });
+        if entry.native_min_size != desired_minimum {
+            match self.native_ops.set_min_size(native_window, desired_minimum) {
+                Ok(()) => entry.native_min_size = desired_minimum,
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize the Floating Column minimum size"
+                ),
+            }
+        }
+
+        let desired_edge_minimums = minimum.and_then(|minimum| {
+            let width = DockGeometry::physical_coordinate(minimum.width, scale)?;
+            Some((width, width))
+        });
+        if entry.native_horizontal_resize_min_widths != desired_edge_minimums {
+            match self.native_ops.set_horizontal_resize_min_widths(native_window, desired_edge_minimums) {
+                Ok(()) => entry.native_horizontal_resize_min_widths = desired_edge_minimums,
+                Err(error) => tracing::warn!(
+                    ?group,
+                    ?column,
+                    %error,
+                    "could not synchronize Floating Column horizontal minimum widths"
+                ),
+            }
+        }
+    }
     fn sync_native_resize_edge_policy(
         &self,
         entry: &mut PanelWindowEntry,
