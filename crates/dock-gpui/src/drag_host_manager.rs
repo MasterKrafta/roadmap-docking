@@ -1107,11 +1107,11 @@ impl DragHostManager {
             None
         };
         let free_area_bounds = free_area_bounds.or(restored_free_area_bounds);
-        // A GroupGrip tear-off keeps the Group viewport and adds a separate
-        // CompositionHeader above it. A PanelTab DragHost already occupies the
-        // final composition height, so its Group part must lose this header row.
         let needs_column_header = (target == Some(DropTarget::FreeArea) || chain_join.is_some())
-            && matches!(drag_handle, Some(DragHandle::GroupGrip));
+            && matches!(
+                drag_handle,
+                Some(DragHandle::PanelTab | DragHandle::GroupGrip)
+            );
         let free_area_bounds = if needs_column_header {
             let header_height = self.controller.update(cx, |controller, _| {
                 controller.metrics().column_header_height
