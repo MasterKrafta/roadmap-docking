@@ -953,7 +953,12 @@ impl DragHostManager {
             _ => crate::input::drag::drop_source(payload),
         };
 
-        let update: Result<(Option<DropTarget>, Option<Rect>), String> =
+        let update: Result<(
+            Option<DropTarget>,
+            Option<Rect>,
+            Option<dock_core::DropZoneRect>,
+            Vec<dock_core::DropZoneRect>,
+        ), String> =
             self.controller.update(cx, |controller, controller_cx| {
             let mut resolved_zone = None;
             let mut floating_edge_zones = Vec::new();
@@ -968,8 +973,12 @@ impl DragHostManager {
                 } else {
                     match (source, target_window) {
                         (Some(source), Some(DockingWindowAtPoint::Main { point, .. })) => {
-                            let resolver = controller.prepare_drop_resolver(source)?;
-                            resolved_zone = resolver.resolve_zone(point)?;
+                            let resolver = controller
+                                .prepare_drop_resolver(source)
+                                .map_err(|error| error.to_string())?;
+                            resolved_zone = resolver
+                                .resolve_zone(point)
+                                .map_err(|error| error.to_string())?;
                             Ok(resolved_zone.map(|zone| zone.target))
                         }
                         (
@@ -986,8 +995,11 @@ impl DragHostManager {
                             }),
                         ) => {
                             let resolver = controller
-                                .prepare_floating_window_drop_resolver(window_id, group, source)?;
-                            resolved_zone = resolver.resolve_zone(point)?;
+                                .prepare_floating_window_drop_resolver(window_id, group, source)
+                                .map_err(|error| error.to_string())?;
+                            resolved_zone = resolver
+                                .resolve_zone(point)
+                                .map_err(|error| error.to_string())?;
                             floating_edge_zones = resolver
                                 .zones()
                                 .iter()
@@ -1056,9 +1068,9 @@ impl DragHostManager {
                 None
             };
             controller_cx.notify();
-            Ok((target, local_free_area_bounds))
+            Ok((target, local_free_area_bounds, resolved_zone, floating_edge_zones))
         });
-        let (target, local_free_area_bounds) = match update {
+        let (target, local_free_area_bounds, resolved_zone, floating_edge_zones) = match update {
             Ok(update) => update,
             Err(error) => {
                 tracing::warn!(
