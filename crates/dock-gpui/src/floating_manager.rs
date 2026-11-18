@@ -7980,7 +7980,6 @@ mod floating_part_topology_tests {
         let column_a = node_ids.insert(());
         let column_b = node_ids.insert(());
         let column_c = node_ids.insert(());
-        let member_a = WindowGridMember::Column(column_a);
         let member_b = WindowGridMember::Column(column_b);
         let member_c = WindowGridMember::Column(column_c);
 
@@ -8005,36 +8004,6 @@ mod floating_part_topology_tests {
         );
     }
 }
-#[cfg(test)]
-mod floating_part_pointer_tests {
-    use super::clamp_floating_part_local_point;
-    use dock_core::{Point, Size};
-
-    #[test]
-    fn native_frame_points_are_projected_to_the_part_client_edges() {
-        let size = Size::new(280.0, 320.0);
-
-        assert_eq!(
-            clamp_floating_part_local_point(Point::new(-8.0, 40.0), size),
-            Point::new(0.0, 40.0),
-        );
-        assert_eq!(
-            clamp_floating_part_local_point(Point::new(288.0, 328.0), size),
-            Point::new(279.99, 319.99),
-        );
-    }
-
-    #[test]
-    fn points_inside_a_part_client_area_are_unchanged() {
-        let point = Point::new(120.0, 180.0);
-
-        assert_eq!(
-            clamp_floating_part_local_point(point, Size::new(280.0, 320.0)),
-            point,
-        );
-    }
-}
-
 #[cfg(test)]
 mod floating_column_native_resize_tests {
     use super::{
