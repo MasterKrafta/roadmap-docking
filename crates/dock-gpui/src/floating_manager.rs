@@ -89,6 +89,20 @@ fn floating_part_screen_bounds(
     )
 }
 
+fn floating_first_column(
+    layout: &dock_core::Layout,
+    metrics: &dock_core::DockMetrics,
+    group: FloatingGroupId,
+) -> Option<NodeId> {
+    layout
+        .compute_floating_rects(group, metrics)
+        .ok()?
+        .columns
+        .into_iter()
+        .min_by(|left, right| left.rect.origin.x.total_cmp(&right.rect.origin.x))
+        .map(|column| column.column)
+}
+
 fn floating_column_host_bounds(
     layout: &dock_core::Layout,
     metrics: &dock_core::DockMetrics,
@@ -1707,27 +1721,15 @@ impl FloatingWindowManager {
 
         let native_edge = native_window
             .and_then(|window| self.native_ops.horizontal_resize_edge(window).ok())
-            .flatten()
-            .map(|edge| match edge {
-                platform::NativeHorizontalResizeEdge::Left => dock_core::FloatingResizeEdge::Left,
-                platform::NativeHorizontalResizeEdge::Right => dock_core::FloatingResizeEdge::Right,
-            });
-        let edge = native_edge.or_else(|| {
-            let width_changed =
-                (native_column_bounds.size.width - current_column_bounds.size.width).abs() > 0.5;
-            width_changed.then(|| {
-                let start_x = state
-                    .start_column_bounds
-                    .unwrap_or(current_column_bounds)
-                    .origin
-                    .x;
-                if (native_column_bounds.origin.x - start_x).abs() > 0.5 {
-                    dock_core::FloatingResizeEdge::Left
-                } else {
-                    dock_core::FloatingResizeEdge::Right
-                }
-            })
-        });
+            .flatten();
+        let width_changed =
+            (native_column_bounds.size.width - current_column_bounds.size.width).abs() > 0.5;
+        // The only enabled internal right edge belongs to the first Column.
+        // Core's Left edge selector means "resize the first Column", regardless
+        // of whether its native left or right border initiated the resize.
+        let edge = native_edge
+            .map(|_| dock_core::FloatingResizeEdge::Left)
+            .or_else(|| width_changed.then_some(dock_core::FloatingResizeEdge::Left));
 
         // Column HWND bounds use physical desktop origins and logical client sizes.
         // Core receives only the width delta; its edge command preserves internal
@@ -6479,12 +6481,13 @@ impl FloatingWindowManager {
         }
 
         let member = WindowGridMember::Column(column);
+        let is_first_column = self.controller.update(cx, |controller, _| {
+            floating_first_column(controller.layout(), &controller.metrics(), group) == Some(column)
+        });
         let desired_left_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Left);
-        let desired_right_enabled = !self
-            .window_chains
-            .has_neighbor_on_side(member, WindowGridDirection::Right);
+        let desired_right_enabled = is_first_column;
         let desired_top_enabled = !self
             .window_chains
             .has_neighbor_on_side(member, WindowGridDirection::Above);
@@ -6503,8 +6506,9 @@ impl FloatingWindowManager {
                 ),
             }
         }
-        // The right edge is the matching half of the Axis::X join. It must be
-        // independently disabled so an internal splitter is never a native resize.
+        // Floating uses the first Column's right native edge as the only
+        // internal horizontal resize handle. Core resizes that first Column and
+        // shifts every following Column while preserving their individual widths.
         if entry.native_right_resize_enabled != Some(desired_right_enabled) {
             match self.native_ops.set_right_resize_enabled(native_window, desired_right_enabled) {
                 Ok(()) => entry.native_right_resize_enabled = Some(desired_right_enabled),
