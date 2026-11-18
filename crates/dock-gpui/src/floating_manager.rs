@@ -77,6 +77,24 @@ use native_resize_session::NativeResizeSession;
 use panel_window_entry::PanelWindowEntry;
 use panel_window_handle::PanelWindowHandle;
 
+fn floating_member_drag_point(
+    screen: PhysicalPoint,
+    client_origin: PhysicalPoint,
+    core_bounds: Rect,
+    scale: f32,
+) -> Option<Point> {
+    let local = DockGeometry::host_local_point_from_screen(
+        screen,
+        client_origin,
+        Point::ZERO,
+        scale,
+    )?;
+    Some(Point::new(
+        core_bounds.origin.x + local.x,
+        core_bounds.origin.y + local.y,
+    ))
+}
+
 fn floating_part_screen_bounds(
     floating_bounds: Rect,
     local_bounds: Rect,
@@ -3727,7 +3745,7 @@ impl FloatingWindowManager {
                 {
                     return None;
                 }
-                self.core_point_for_floating_member(
+                self.core_point_for_floating_member_drag_source(
                     member,
                     group,
                     entry.window_id,
@@ -3741,7 +3759,7 @@ impl FloatingWindowManager {
                     source_window_id.is_some_and(|id| id == entry.window_id)
                 }) {
                     let native_window = entry.native_window?;
-                    return self.core_point_for_floating_member(
+                    return self.core_point_for_floating_member_drag_source(
                         *member,
                         entry.host_group?,
                         entry.window_id,
@@ -3797,7 +3815,7 @@ impl FloatingWindowManager {
         DockGeometry::host_local_point_from_screen(screen, client, Point::ZERO, scale)
     }
 
-    fn core_point_for_floating_member(
+    fn core_point_for_floating_member_drag_source(
         &self,
         member: WindowGridMember,
         group: FloatingGroupId,
@@ -3806,18 +3824,20 @@ impl FloatingWindowManager {
         screen: PhysicalPoint,
         cx: &mut Context<Self>,
     ) -> Option<Point> {
-        // window_from_point() selects this HWND using GetWindowRect, which includes
-        // its non-client frame. Map that same physical rectangle onto the Core part
-        // bounds so a pointer on the visible/native frame still reaches the outer
-        // Core drop zones instead of producing coordinates beyond the part.
-        let native_bounds = self.native_ops.window_rect(native_window).ok()?;
-        let native_width = (i64::from(native_bounds.right) - i64::from(native_bounds.left)) as f32;
-        let native_height = (i64::from(native_bounds.bottom) - i64::from(native_bounds.top)) as f32;
-        if native_width <= 0.0 || native_height <= 0.0 {
-            return None;
-        }
+        let core_bounds = self.floating_member_core_bounds(member, group, window_id, cx)?;
+        let client_origin = self.native_ops.client_origin(native_window).ok()?;
+        let scale = self.native_ops.scale_factor(native_window).ok()?;
+        floating_member_drag_point(screen, client_origin, core_bounds, scale)
+    }
 
-        let core_bounds = self.controller.update(cx, |controller, _| {
+    fn floating_member_core_bounds(
+        &self,
+        member: WindowGridMember,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        cx: &mut Context<Self>,
+    ) -> Option<Rect> {
+        self.controller.update(cx, |controller, _| {
             let rects = controller.floating_geometry(window_id, group).ok()?;
             match member {
                 WindowGridMember::Column(column) => rects
@@ -3842,7 +3862,30 @@ impl FloatingWindowManager {
                     .map(|rect| rect.rect),
                 WindowGridMember::FloatingComposition(_) => None,
             }
-        })?;
+        })
+    }
+
+    fn core_point_for_floating_member(
+        &self,
+        member: WindowGridMember,
+        group: FloatingGroupId,
+        window_id: WindowId,
+        native_window: NativeWindowId,
+        screen: PhysicalPoint,
+        cx: &mut Context<Self>,
+    ) -> Option<Point> {
+        // window_from_point() selects this HWND using GetWindowRect, which includes
+        // its non-client frame. Map that same physical rectangle onto the Core part
+        // bounds so a pointer on the visible/native frame still reaches the outer
+        // Core drop zones instead of producing coordinates beyond the part.
+        let native_bounds = self.native_ops.window_rect(native_window).ok()?;
+        let native_width = (i64::from(native_bounds.right) - i64::from(native_bounds.left)) as f32;
+        let native_height = (i64::from(native_bounds.bottom) - i64::from(native_bounds.top)) as f32;
+        if native_width <= 0.0 || native_height <= 0.0 {
+            return None;
+        }
+
+        let core_bounds = self.floating_member_core_bounds(member, group, window_id, cx)?;
 
         const EDGE_EPSILON: f32 = 0.001;
         let x_fraction = ((i64::from(screen.x) - i64::from(native_bounds.left)) as f32
@@ -7461,9 +7504,12 @@ mod focus_tests {
 
 #[cfg(test)]
 mod coordinate_tests {
-    use super::{native_rect_has_reachable_title_area, restored_window_origin};
+    use super::{
+        floating_member_drag_point, native_rect_has_reachable_title_area,
+        restored_window_origin,
+    };
     use crate::geometry::DockGeometry;
-    use dock_core::Point;
+    use dock_core::{Point, Rect, Size};
     use platform::{PhysicalPoint, PhysicalRect};
 
     #[test]
@@ -7581,6 +7627,18 @@ mod coordinate_tests {
             ),
             Some(local),
         );
+    }
+
+    #[test]
+    fn floating_member_drag_point_tracks_cursor_beyond_source_window() {
+        let point = floating_member_drag_point(
+            PhysicalPoint { x: 10, y: 500 },
+            PhysicalPoint { x: 100, y: 200 },
+            Rect::new(Point::new(300.0, 400.0), Size::new(600.0, 500.0)),
+            1.5,
+        );
+
+        assert_eq!(point, Some(Point::new(240.0, 600.0)));
     }
 
     #[test]
