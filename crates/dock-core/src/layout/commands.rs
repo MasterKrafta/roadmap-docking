@@ -592,6 +592,7 @@ impl Layout {
                         mode: column.mode,
                         groups,
                         group_ratios: column.group_ratios,
+                        floating_height: column.floating_height,
                         last_expanded_width: column.last_expanded_width,
                     })
                 }
