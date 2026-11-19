@@ -1409,6 +1409,7 @@ impl FloatingWindowManager {
         let Some(entry) = self.registry.members.get(&member) else {
             return false;
         };
+        let registry_width = entry.bounds.size.width;
         if entry.window_id != window_id || entry.host_group != Some(group) {
             return false;
         }
