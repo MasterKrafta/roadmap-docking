@@ -668,7 +668,15 @@ impl DockController {
             point,
         ) {
             tracing::debug!(%error, ?group, "could not begin floating-window title drag");
-            let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
+            if let Err(cancel_error) =
+                self.history.cancel_transaction(&mut self.layout, &self.metrics)
+            {
+                tracing::warn!(
+                    ?group,
+                    %cancel_error,
+                    "could not roll back native Floating move transaction after drag initialization failed"
+                );
+            }
             self.native_window_move_transaction_active = false;
             return false;
         }
