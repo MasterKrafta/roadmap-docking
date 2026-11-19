@@ -20,7 +20,7 @@ use dock_core::{
 use crate::{
     components::{
         floating::{
-            floating_group_and_column_for_group, floating_group_column_for_panel, FloatingPartHost,
+            floating_group_and_column_for_group, floating_group_column_for_panel, FloatingColumnHost,
         },
     },
     floating_manager::{floating_window_chain_direction, DockingWindowAtPoint},
@@ -1598,7 +1598,7 @@ impl DragHostManager {
                 return false;
             }
             surface.promoted_part = Some(host_cx.new(|_| {
-                FloatingPartHost::new_column(
+                FloatingColumnHost::new_column(
                     controller,
                     floating_group,
                     column,
