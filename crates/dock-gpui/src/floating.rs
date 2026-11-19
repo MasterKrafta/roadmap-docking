@@ -1859,12 +1859,12 @@ mod floating_dock_area_header_hit_tests {
 }
 
 #[cfg(test)]
-mod floating_column_host_geometry_tests {
+mod floating_column_local_geometry_tests {
     use super::{floating_local_point_to_core, floating_column_local_rect};
     use dock_core::{Point, Rect, Size};
 
     #[test]
-    fn part_window_pointer_is_rebased_to_the_core_composition_origin() {
+    fn column_window_pointer_is_rebased_to_the_core_composition_origin() {
         let core = floating_local_point_to_core(
             Point::new(12.0, 24.0),
             Point::new(180.0, 96.0),
@@ -1875,7 +1875,7 @@ mod floating_column_host_geometry_tests {
     }
 
     #[test]
-    fn detached_group_geometry_is_rebased_to_the_window_origin() {
+    fn column_local_geometry_is_rebased_to_the_window_origin() {
         let local = floating_column_local_rect(
             Rect::new(Point::new(180.0, 96.0), Size::new(420.0, 260.0)),
             Point::new(180.0, 96.0),
