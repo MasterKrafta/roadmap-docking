@@ -180,14 +180,6 @@ impl FloatingPartHost {
         host
     }
 
-    pub(crate) fn adopt_main_drag_part(&mut self, floating_group: FloatingGroupId) -> bool {
-        if self.main_drag_side.take().is_none() {
-            return false;
-        }
-        self.floating_group = Some(floating_group);
-        true
-    }
-
     fn new(
         controller: Entity<DockController>,
         floating_group: Option<FloatingGroupId>,
