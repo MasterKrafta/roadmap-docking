@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dock_core::FloatingGroupId;
-use gpui::{AppContext, Context, WindowHandle};
+use gpui::{AnyWindowHandle, AppContext, Context, WindowHandle};
 
 use crate::{
     components::{FloatingHost, floating::FloatingPartHost},
@@ -21,7 +21,10 @@ impl PanelWindowHandle {
     pub(super) fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
         match self {
             Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
-            Self::Part(window) => window.update(cx, |_, _, _| ()).is_ok(),
+            // A FloatingPartHost can be inside its own GPUI update while the
+            // manager reconciles it. Its native HWND is checked by the manager;
+            // never probe the root Entity through WindowHandle::update here.
+            Self::Part(_) => true,
             Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
         }
     }
@@ -44,57 +47,32 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Updates the cached close-button ownership for a permanent Column host.
+    /// Refreshes cached native client bounds without updating the root Host Entity.
     ///
-    /// Rendering a FloatingPartHost must not update FloatingWindowManager: a
-    /// reconciliation can notify that host while this manager is already updating.
-    pub(super) fn set_column_close_button(
-        &self,
-        show: bool,
-        cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Part(window) => window
-                .update(cx, |host, _, host_cx| {
-                    if host.set_show_close_button(show) {
-                        host_cx.notify();
-                    }
-                })
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => window
-                .update(cx, |surface, _, surface_cx| {
-                    surface.set_promoted_column_close_button(show, surface_cx);
-                })
-                .map_err(|error| error.to_string()),
-            Self::Floating(_) => Ok(()),
-        }
-    }
-
-    /// Refreshes GPUI's cached client bounds after the current entity update unwinds.
-    ///
-    /// Native bounds can change while the destination FloatingPartHost is still
-    /// handling a resize event. Updating its WindowHandle synchronously here
-    /// would re-enter the same host Entity.
+    /// A FloatingPartHost may be handling pointer input or rendering when the
+    /// manager reconciles a resize. AnyWindowHandle updates the Window directly,
+    /// avoiding a re-entrant update of the root entity. Retry while GPUI has the
+    /// native Window temporarily taken for its current event/update cycle.
     pub(super) fn refresh_bounds_later(
         &self,
         cx: &mut Context<FloatingWindowManager>,
     ) {
-        let window = *self;
+        let window: AnyWindowHandle = match self {
+            Self::Floating(window) => (*window).into(),
+            Self::Part(window) => (*window).into(),
+            Self::DragHost(window) => (*window).into(),
+        };
         cx.spawn(async move |_, app| {
-            app.background_executor()
-                .timer(Duration::from_millis(1))
-                .await;
-
-            match window {
-                Self::Floating(window) => {
-                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
+            for _ in 0..16 {
+                if window
+                    .update(app, |_, window, app| window.bounds_changed(app))
+                    .is_ok()
+                {
+                    break;
                 }
-                Self::Part(window) => {
-                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
-                }
-                Self::DragHost(window) => {
-                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
-                }
+                app.background_executor()
+                    .timer(Duration::from_millis(8))
+                    .await;
             }
         })
         .detach();
@@ -106,9 +84,12 @@ impl PanelWindowHandle {
             Self::Floating(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
-            Self::Part(window) => window
-                .update(cx, |_, _, host_cx| host_cx.notify())
-                .map_err(|error| error.to_string()),
+            Self::Part(window) => {
+                let window: AnyWindowHandle = (*window).into();
+                window
+                    .update(cx, |_, window, _| window.refresh())
+                    .map_err(|error| error.to_string())
+            }
             Self::DragHost(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
@@ -124,6 +105,7 @@ impl PanelWindowHandle {
                 });
             }
             Self::Part(window) => {
+                let window: AnyWindowHandle = (*window).into();
                 let _ = window.update(cx, |_, window, _| window.remove_window());
             }
             Self::DragHost(window) => {
