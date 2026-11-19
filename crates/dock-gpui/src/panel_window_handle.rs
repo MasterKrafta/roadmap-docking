@@ -15,16 +15,6 @@ pub(super) enum PanelWindowHandle {
 }
 
 impl PanelWindowHandle {
-    pub(super) fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
-        match self {
-            // A FloatingColumnHost can be inside its own GPUI update while the
-            // manager reconciles it. Its native HWND is checked by the manager;
-            // never probe the root Entity through WindowHandle::update here.
-            Self::Column(_) => true,
-            Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
-        }
-    }
-
     /// Updates close-button ownership without mutating a permanent FloatingColumnHost.
     /// Its presentation state is shared with the manager through PanelWindowEntry.
     pub(super) fn set_column_close_button(
