@@ -1596,20 +1596,18 @@ impl FloatingWindowManager {
             }
         }
 
-        // Keep this HWND's local layout tied to its current client size during
-        // the native modal resize loop; Core's persistent bounds may update later.
-        self.controller.update(cx, |controller, controller_cx| {
-            if controller.set_floating_column_viewport(
-                state.window_id,
-                group,
-                column,
-                native_column_bounds.size.width,
-                native_column_bounds.size.height,
-                origin_y_offset / scale_factor,
-            ) {
+        if vertical_bounds_changed {
+            self.controller.update(cx, |controller, controller_cx| {
+                controller.set_floating_column_viewport(
+                    state.window_id,
+                    group,
+                    column,
+                    native_column_bounds.size.height,
+                    origin_y_offset / scale_factor,
+                );
                 controller_cx.notify();
-            }
-        });
+            });
+        }
 
         // A vertical-only drag is local to this Column HWND. Its layout is
         // recomputed from the native viewport; it must not resize sibling Columns.
@@ -4391,7 +4389,6 @@ impl FloatingWindowManager {
                             window_id,
                             spec.floating_group(),
                             column,
-                            spec.bounds.size.width,
                             spec.bounds.size.height,
                             origin_y_offset / scale,
                         );
