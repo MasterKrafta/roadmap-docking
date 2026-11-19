@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use dock_core::{
     ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, FlyoutState, FloatingGroupRect, GroupRect, NodeId,
@@ -6,15 +6,15 @@ use dock_core::{
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
 use gpui::{
-    AnyView, App, Entity, IntoElement, ParentElement, Styled, WeakEntity, div,
-    prelude::InteractiveElement as _, px, rgb,
+    AnyView, App, Entity, IntoElement, ParentElement, Styled, div,
+    prelude::InteractiveElement as _, px,
 };
 use ui::Theme;
 
 use crate::{
     components::main_dock::render_column_content,
     dock_components::{
-        CompositionHeader, DockGroupView, GroupPresentation,
+        CompositionHeader, GroupPresentation,
     },
     DockController,
 };
