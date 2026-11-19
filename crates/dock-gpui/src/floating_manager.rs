@@ -1014,8 +1014,8 @@ impl FloatingWindowManager {
                 |manager, _, event: &DockEvent, manager_cx| {
                     match event {
                         DockEvent::LayoutChanged { .. } => {
-                            // LayoutChanged can be emitted from inside a Floating part
-                            // host update. Reconcile updates native hosts, so always defer
+                            // LayoutChanged can be emitted from inside a Floating Column host
+                            // update. Reconcile updates native hosts, so always defer
                             // it until the active GPUI host update unwinds.
                             manager.schedule_reconcile(manager_cx);
                         }
@@ -2637,7 +2637,7 @@ impl FloatingWindowManager {
         true
     }
 
-    /// Destroys temporary part windows when a Main DockArea drag is cancelled
+    /// Destroys temporary Column windows when a Main DockArea drag is cancelled
     /// or released onto a non-Floating target.
     pub(crate) fn close_main_drag_columns(
         &mut self,
@@ -3682,7 +3682,7 @@ impl FloatingWindowManager {
                     ?group,
                     ?member,
                     %error,
-                    "could not notify a Floating Column/Group window after DragHost handoff"
+                    "could not notify a Floating Column HWND after DragHost handoff"
                 );
                 all_windows_ready = false;
                 continue;
@@ -3908,7 +3908,7 @@ impl FloatingWindowManager {
             tracing::warn!(
                 ?group,
                 %error,
-                "could not activate a Floating Group window after DragHost close"
+                "could not activate a Floating Column HWND after DragHost close"
             );
             return false;
         }
@@ -4104,7 +4104,7 @@ impl FloatingWindowManager {
             tracing::error!(
                 ?spec.member,
                 %error,
-                "could not assign the main window as Floating part owner"
+                "could not assign the main window as Floating Column owner"
             );
             let _ = window.update(cx, |_, window, _| window.remove_window());
             return None;
@@ -4173,7 +4173,7 @@ impl FloatingWindowManager {
             tracing::debug!(
                 ?native_window,
                 %error,
-                "could not synchronize Floating part native bounds"
+                "could not synchronize Floating Column native bounds"
             );
         }
     }
