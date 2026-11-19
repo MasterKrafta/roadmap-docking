@@ -38,16 +38,9 @@ pub(crate) use window_grid_registry::WindowGridRegistry;
 #[cfg(test)]
 mod tests {
     use super::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
-    use dock_core::{FloatingGroupId, NodeId};
+    use dock_core::NodeId;
     use slotmap::SlotMap;
     use std::collections::HashSet;
-
-    fn groups(count: usize) -> Vec<WindowGridMember> {
-        let mut ids = SlotMap::<FloatingGroupId, ()>::with_key();
-        (0..count)
-            .map(|_| WindowGridMember::FloatingComposition(ids.insert(())))
-            .collect()
-    }
 
     fn columns(count: usize) -> Vec<WindowGridMember> {
         let mut ids = SlotMap::<NodeId, ()>::with_key();
@@ -57,27 +50,25 @@ mod tests {
     }
 
     #[test]
-    fn header_group_and_legacy_composition_have_distinct_member_identities() {
-        let mut floating_ids = SlotMap::<FloatingGroupId, ()>::with_key();
+    fn each_column_node_has_a_distinct_window_identity() {
         let mut node_ids = SlotMap::<NodeId, ()>::with_key();
-        let header = WindowGridMember::Header(node_ids.insert(()));
-        let group = WindowGridMember::Group(node_ids.insert(()));
-        let composition = WindowGridMember::FloatingComposition(floating_ids.insert(()));
+        let column_a = WindowGridMember::Column(node_ids.insert(()));
+        let column_b = WindowGridMember::Column(node_ids.insert(()));
         let mut grid = WindowGridRegistry::default();
 
-        assert!(grid.link_after(header, group));
-        assert!(grid.link_after(group, composition));
-        assert_eq!(grid.members_for(header), vec![header, group, composition]);
-        assert_eq!(grid.direction_between(header, group), Some(WindowGridDirection::Right));
-        assert_eq!(header.floating_group(), None);
-        assert_eq!(group.floating_group(), None);
-        assert!(composition.floating_group().is_some());
+        assert_ne!(column_a, column_b);
+        assert!(grid.link_after(column_a, column_b));
+        assert_eq!(grid.members_for(column_a), vec![column_a, column_b]);
+        assert_eq!(
+            grid.direction_between(column_a, column_b),
+            Some(WindowGridDirection::Right)
+        );
         assert!(grid.is_valid());
     }
 
     #[test]
     fn links_before_and_after_keep_the_existing_horizontal_order() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -91,7 +82,7 @@ mod tests {
     #[test]
     fn supports_all_four_adjacency_directions_and_their_reverse() {
         let [left, right, above, below, anchor] =
-            groups(5).try_into().expect("five group ids");
+            columns(5).try_into().expect("five group ids");
 
         for (moving, side, opposite) in [
             (left, WindowGridDirection::Left, WindowGridDirection::Right),
@@ -109,7 +100,7 @@ mod tests {
 
     #[test]
     fn joining_existing_components_preserves_their_internal_links() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -142,7 +133,7 @@ mod tests {
     #[test]
     fn ambiguous_moving_grid_boundary_is_rejected_without_mutating_either_grid() {
         let [anchor, branch, moving, lower, other] =
-            groups(5).try_into().expect("five group ids");
+            columns(5).try_into().expect("five group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_to_side(moving, branch, WindowGridDirection::Right));
@@ -170,7 +161,7 @@ mod tests {
             WindowGridDirection::Above,
             WindowGridDirection::Below,
         ] {
-            let [a, b, c] = groups(3).try_into().expect("three group ids");
+            let [a, b, c] = columns(3).try_into().expect("three group ids");
             let mut grid = WindowGridRegistry::default();
 
             assert!(grid.link_to_side(a, b, side));
@@ -192,7 +183,7 @@ mod tests {
 
     #[test]
     fn rejects_self_links_duplicate_edges_and_cycles_without_mutating_state() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(!grid.link_to_side(a, a, WindowGridDirection::Right));
@@ -209,7 +200,7 @@ mod tests {
 
     #[test]
     fn sequence_join_preserves_horizontal_order_for_each_target_side() {
-        let [anchor, a, b, c] = groups(4).try_into().expect("four group ids");
+        let [anchor, a, b, c] = columns(4).try_into().expect("four group ids");
 
         for side in [
             WindowGridDirection::Left,
@@ -229,7 +220,7 @@ mod tests {
 
     #[test]
     fn a_sequence_cannot_be_joined_to_its_own_grid() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
         assert!(grid.link_after(a, b));
         let before = grid.clone();
@@ -241,7 +232,7 @@ mod tests {
 
     #[test]
     fn resize_edge_ownership_uses_direct_neighbours_not_member_order() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_to_side(a, b, WindowGridDirection::Right));
@@ -264,67 +255,47 @@ mod tests {
     }
 
     #[test]
-    fn replace_all_links_builds_typed_header_and_group_topology_transactionally() {
-        let mut node_ids = SlotMap::<NodeId, ()>::with_key();
-        let header_a = WindowGridMember::Header(node_ids.insert(()));
-        let group_a1 = WindowGridMember::Group(node_ids.insert(()));
-        let group_a2 = WindowGridMember::Group(node_ids.insert(()));
-        let header_b = WindowGridMember::Header(node_ids.insert(()));
-        let group_b = WindowGridMember::Group(node_ids.insert(()));
+    fn replace_all_links_builds_column_topology_transactionally() {
+        let [column_a1, column_a2, column_b1, column_b2, column_c] =
+            columns(5).try_into().expect("five Column ids");
         let links = [
             WindowGridLink {
-                from: header_a,
-                to: group_a1,
+                from: column_a1,
+                to: column_a2,
                 direction: WindowGridDirection::Below,
             },
             WindowGridLink {
-                from: group_a1,
-                to: group_a2,
-                direction: WindowGridDirection::Below,
-            },
-            WindowGridLink {
-                from: header_a,
-                to: header_b,
+                from: column_a1,
+                to: column_b1,
                 direction: WindowGridDirection::Right,
             },
             WindowGridLink {
-                from: header_b,
-                to: group_b,
+                from: column_b1,
+                to: column_b2,
                 direction: WindowGridDirection::Below,
+            },
+            WindowGridLink {
+                from: column_b1,
+                to: column_c,
+                direction: WindowGridDirection::Right,
             },
         ];
         let mut registry = WindowGridRegistry::default();
 
         assert!(registry.replace_all_links(&links));
-        let members = registry.members_for(header_a);
+        let members = registry.members_for(column_a1);
         assert_eq!(members.len(), 5);
-        assert!(members.contains(&header_a));
-        assert!(members.contains(&group_a1));
-        assert!(members.contains(&group_a2));
-        assert!(members.contains(&header_b));
-        assert!(members.contains(&group_b));
-        assert_eq!(registry.all_links().len(), links.len());
-
-        let original = registry.clone();
-        let cyclic = [
-            links[0],
-            links[1],
-            links[2],
-            links[3],
-            WindowGridLink {
-                from: group_b,
-                to: header_a,
-                direction: WindowGridDirection::Right,
-            },
-        ];
-        assert!(!registry.replace_all_links(&cyclic));
-        assert_eq!(registry.all_links(), original.all_links());
+        assert!(members.contains(&column_a1));
+        assert!(members.contains(&column_a2));
+        assert!(members.contains(&column_b1));
+        assert!(members.contains(&column_b2));
+        assert!(members.contains(&column_c));
         assert!(registry.is_valid());
     }
 
     #[test]
     fn only_linked_windows_are_marked_as_chained() {
-        let [a, b, standalone] = groups(3).try_into().expect("three group ids");
+        let [a, b, standalone] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(!grid.is_chained(a));
@@ -339,7 +310,7 @@ mod tests {
 
     #[test]
     fn direct_middle_member_removal_splits_until_geometry_is_validated() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -354,7 +325,7 @@ mod tests {
 
     #[test]
     fn removing_the_first_member_rekeys_the_remaining_component() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -368,7 +339,7 @@ mod tests {
 
     #[test]
     fn removing_a_member_at_a_branch_does_not_invent_an_adjacency() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -384,7 +355,7 @@ mod tests {
 
     #[test]
     fn pruning_missing_middle_group_returns_a_straight_reconnect_candidate() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -415,7 +386,7 @@ mod tests {
 
     #[test]
     fn pruning_a_vertical_middle_group_returns_a_below_reconnect_candidate() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_to_side(a, b, WindowGridDirection::Below));
@@ -437,7 +408,7 @@ mod tests {
 
     #[test]
     fn pruning_a_straight_run_of_missing_members_produces_one_live_reconnect() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -462,7 +433,7 @@ mod tests {
 
     #[test]
     fn pruning_missing_groups_splits_and_preserves_other_components() {
-        let [a, b, c, d] = groups(4).try_into().expect("four group ids");
+        let [a, b, c, d] = columns(4).try_into().expect("four group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
@@ -482,7 +453,7 @@ mod tests {
 
     #[test]
     fn pruning_dissolves_short_components_and_is_idempotent() {
-        let [a, b, c] = groups(3).try_into().expect("three group ids");
+        let [a, b, c] = columns(3).try_into().expect("three group ids");
         let mut grid = WindowGridRegistry::default();
 
         assert!(grid.link_after(a, b));
