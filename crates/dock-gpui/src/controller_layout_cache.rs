@@ -17,10 +17,10 @@ impl DockController {
     ) -> Option<f32> {
         self.floating_column_viewports
             .get(&window_id)
-            .filter(|(owner, current_column, _, _)| {
+            .filter(|(owner, current_column, _, _, _)| {
                 *owner == group && *current_column == column
             })
-            .map(|(_, _, _, origin_y)| *origin_y)
+            .map(|(_, _, _, _, origin_y)| *origin_y)
     }
 
     /// Updates the native viewport used to lay out one Floating Column.
@@ -29,27 +29,36 @@ impl DockController {
         window_id: WindowId,
         group: FloatingGroupId,
         column: NodeId,
+        width: f32,
         height: f32,
         origin_y_offset: f32,
     ) -> bool {
-        if !height.is_finite() || height <= 0.0 || !origin_y_offset.is_finite() {
+        if !width.is_finite()
+            || width <= 0.0
+            || !height.is_finite()
+            || height <= 0.0
+            || !origin_y_offset.is_finite()
+        {
             return false;
         }
         let unchanged = self
             .floating_column_viewports
             .get(&window_id)
-            .is_some_and(|(current_group, current_column, current_height, current_origin_y)| {
-                *current_group == group
-                    && *current_column == column
-                    && (*current_height - height).abs() <= 0.5
-                    && (*current_origin_y - origin_y_offset).abs() <= 0.5
-            });
+            .is_some_and(
+                |(current_group, current_column, current_width, current_height, current_origin_y)| {
+                    *current_group == group
+                        && *current_column == column
+                        && (*current_width - width).abs() <= 0.5
+                        && (*current_height - height).abs() <= 0.5
+                        && (*current_origin_y - origin_y_offset).abs() <= 0.5
+                },
+            );
         if unchanged {
             return false;
         }
 
         self.floating_column_viewports
-            .insert(window_id, (group, column, height, origin_y_offset));
+            .insert(window_id, (group, column, width, height, origin_y_offset));
         self.floating_rects.remove(&window_id);
         self.drag.clear_resolver();
         true
@@ -287,13 +296,14 @@ impl DockController {
             .floating_column_viewports
             .get(&window_id)
             .copied()
-            .filter(|(owner, _, _, _)| *owner == group);
+            .filter(|(owner, _, _, _, _)| *owner == group);
         FloatingRectCacheKey {
             window_id,
             group,
-            column: column_viewport.map(|(_, column, _, _)| column),
-            column_height: column_viewport.map(|(_, _, height, _)| height),
-            column_origin_y_offset: column_viewport.map(|(_, _, _, origin_y)| origin_y),
+            column: column_viewport.map(|(_, column, _, _, _)| column),
+            column_width: column_viewport.map(|(_, _, width, _, _)| width),
+            column_height: column_viewport.map(|(_, _, _, height, _)| height),
+            column_origin_y_offset: column_viewport.map(|(_, _, _, _, origin_y)| origin_y),
             layout_version: self.layout.version(),
             metrics_revision: self.metrics_revision,
             chrome: self.layout.chrome(),
@@ -318,11 +328,18 @@ impl DockController {
             .floating_column_viewports
             .get(&window_id)
             .copied()
-            .filter(|(owner, _, _, _)| *owner == group);
+            .filter(|(owner, _, _, _, _)| *owner == group);
         let rects = match column_viewport {
-            Some((_, column, height, origin_y)) => self
+            Some((_, column, width, height, origin_y)) => self
                 .layout
-                .compute_floating_column_rects(group, column, height, origin_y, &self.metrics),
+                .compute_floating_column_rects(
+                    group,
+                    column,
+                    width,
+                    height,
+                    origin_y,
+                    &self.metrics,
+                ),
             None => self.layout.compute_floating_rects(group, &self.metrics),
         };
         let rects = match rects {
