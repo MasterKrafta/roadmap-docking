@@ -1,7 +1,8 @@
-//! Logical membership and adjacency for independent native Floating windows.
+//! Logical membership and adjacency for independent Floating Column HWNDs.
 //!
-//! A WindowGrid stores only relationships between windows. It does not own
-//! native handles, window bounds, or Core layout state.
+//! A WindowGrid stores only links between native windows. It does not own
+//! native handles, window bounds, or Core layout state. A short-lived
+//! FloatingComposition endpoint is used only while Core links migrate to Columns.
 
 #[path = "window_grid_member.rs"]
 mod window_grid_member;
