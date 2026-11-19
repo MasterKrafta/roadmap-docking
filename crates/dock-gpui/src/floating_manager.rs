@@ -6337,6 +6337,21 @@ impl FloatingWindowManager {
                 }
             }
 
+            // Core-driven Column resizing changes the HWND outside GPUI's own
+            // window layout loop. Refresh GPUI's cached client bounds as well,
+            // otherwise the native window can grow while its rendered viewport
+            // remains at the previous height.
+            if core_height_changed
+                && let Some(window) = self.registry.members.get(&spec.member).map(|entry| entry.window)
+                && let Err(error) = window.refresh_bounds(cx)
+            {
+                tracing::debug!(
+                    ?spec.member,
+                    %error,
+                    "could not refresh a Floating Column's GPUI bounds after Core resize"
+                );
+            }
+
             let native_window = self
                 .registry
                 .members
