@@ -1441,18 +1441,35 @@ impl FloatingWindowManager {
             });
             if let (Some(native_bounds), Some(core_column_width)) =
                 (native_bounds, core_column_width)
-                && ((native_bounds.size.width - core_column_width).abs() > 0.5
-                    || (registry_width - core_column_width).abs() > 0.5)
             {
-                eprintln!(
-                    "[FLOATING_RESIZE_DIAG] event=observer_final_bounds_mismatch group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1} registry_width={:.1} hwnd_bounds={:?}",
-                    group,
-                    column,
-                    native_bounds.size.width,
-                    core_column_width,
-                    registry_width,
-                    native_bounds,
-                );
+                let native_width_delta = native_bounds.size.width - core_column_width;
+                let registry_width_delta = registry_width - core_column_width;
+                if native_width_delta.abs() > 0.5 || registry_width_delta.abs() > 0.5 {
+                    eprintln!(
+                        "[FLOATING_RESIZE_DIAG] event=observer_final_bounds_mismatch group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1} registry_width={:.1} hwnd_bounds={:?}",
+                        group,
+                        column,
+                        native_bounds.size.width,
+                        core_column_width,
+                        registry_width,
+                        native_bounds,
+                    );
+                }
+
+                // GPUI can report the final HWND bounds after WM_EXITSIZEMOVE
+                // and after the polling task has already stopped. Reuse the
+                // existing adoption path only when Core and the registry agree
+                // and the native client width is the sole newer value.
+                if native_width_delta.abs() > 0.5 && registry_width_delta.abs() <= 0.5 {
+                    eprintln!(
+                        "[FLOATING_RESIZE_DIAG] event=late_native_resize_recovery_requested group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1}",
+                        group,
+                        column,
+                        native_bounds.size.width,
+                        core_column_width,
+                    );
+                    self.adopt_untracked_native_column_resize(cx);
+                }
             }
             return false;
         }
