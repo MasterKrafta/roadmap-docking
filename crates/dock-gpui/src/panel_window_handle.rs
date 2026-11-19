@@ -29,6 +29,23 @@ impl PanelWindowHandle {
         }
     }
 
+    /// Updates close-button ownership without mutating a permanent FloatingPartHost.
+    /// Its presentation state is shared with the manager through PanelWindowEntry.
+    pub(super) fn set_column_close_button(
+        &self,
+        show: bool,
+        cx: &mut Context<FloatingWindowManager>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Part(_) | Self::Floating(_) => Ok(()),
+            Self::DragHost(window) => window
+                .update(cx, |surface, _, surface_cx| {
+                    surface.set_promoted_column_close_button(show, surface_cx);
+                })
+                .map_err(|error| error.to_string()),
+        }
+    }
+
     pub(super) fn set_group(
         &self,
         group: Option<FloatingGroupId>,
