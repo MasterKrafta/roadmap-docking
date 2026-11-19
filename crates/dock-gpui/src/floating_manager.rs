@@ -447,14 +447,6 @@ fn window_grid_member(group: FloatingGroupId) -> WindowGridMember {
 }
 
 
-fn floating_groups_in_native_z_order(
-    groups: &[FloatingGroupSnapshot],
-    grids: &WindowGridRegistry,
-) -> Vec<FloatingGroupId> {
-    let z_orders = groups.iter().map(|group| (window_grid_member(group.id), group.z_order)).collect::<Vec<_>>();
-    grid_window_members_in_native_z_order(&z_orders, grids).into_iter().filter_map(WindowGridMember::floating_group).collect()
-}
-
 fn floating_chain_drop_target_is_supported(
     target: DropTarget,
     target_is_main: bool,
