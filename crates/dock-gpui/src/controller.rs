@@ -614,46 +614,6 @@ impl DockController {
     ///
     /// These are environment repairs, not user edits. The controller is freshly
     /// constructed for this layout, so the correction must not become an Undo step.
-    pub(crate) fn apply_initial_monitor_bounds(
-        &mut self,
-        corrections: &[(FloatingGroupId, Rect)],
-    ) -> Result<(), CommandError> {
-        if corrections.is_empty() {
-            return Ok(());
-        }
-        if self.has_active_pointer_interaction() || self.native_window_move_transaction_active {
-            return Err(CommandError::InvalidValue {
-                field: "initial_monitor_bounds",
-                reason: "cannot repair initial monitor bounds during an active pointer interaction",
-            });
-        }
-
-        let commands = corrections
-            .iter()
-            .map(|(group, bounds)| DockCommand::ResizeFloatingBounds {
-                group: *group,
-                bounds: *bounds,
-            })
-            .collect::<Vec<_>>();
-        let before_panels = self.panel_keys();
-        let previous_version = self.layout.version();
-
-        match self
-            .history
-            .apply_sequence(&mut self.layout, commands, &self.metrics)
-        {
-            Ok(_) => {
-                self.finish_success(before_panels, previous_version, std::iter::empty());
-                self.history.clear();
-                Ok(())
-            }
-            Err(error) => {
-                self.finish_failure(&error);
-                Err(error)
-            }
-        }
-    }
-
     /// Opens one history transaction while an existing FloatingHost moves natively.
     pub(crate) fn begin_native_window_move_transaction(&mut self) -> bool {
         if self.native_window_move_transaction_active
@@ -733,27 +693,6 @@ impl DockController {
     /// Starts a native GroupGrip move without creating a DragHost or transferring PanelViews.
     ///
     /// The persistent Group HWND remains the presentation host for the entire gesture.
-    pub(crate) fn begin_floating_group_move(
-        &mut self,
-        group: NodeId,
-        point: Point,
-    ) -> bool {
-        if self.has_active_pointer_interaction() || !self.begin_native_window_move_transaction() {
-            return false;
-        }
-        if let Err(error) = self.begin_drag_interaction(
-            DragPayload::Group { group },
-            DragHandle::GroupGrip,
-            point,
-        ) {
-            tracing::debug!(%error, ?group, "could not begin native Floating Group move");
-            let _ = self.history.cancel_transaction(&mut self.layout, &self.metrics);
-            self.native_window_move_transaction_active = false;
-            return false;
-        }
-        true
-    }
-
     /// Called only after a resize command owned by the active interaction succeeds.
     pub(crate) fn record_resize_layout_version(&mut self) {
         if let Some(interaction) = self.interaction.as_mut() {
