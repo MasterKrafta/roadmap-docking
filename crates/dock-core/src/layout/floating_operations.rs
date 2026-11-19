@@ -1836,21 +1836,28 @@ impl Layout {
                 for (column_id, rendered_width) in
                     split.children.iter().copied().zip(rendered_widths.iter().copied())
                 {
+                    let minimum_width = match self.nodes.get(column_id) {
+                        Some(Node::Column(column)) if !column.mode.is_rail() => {
+                            Some(self.minimum_column_width(column_id, metrics)?)
+                        }
+                        _ => None,
+                    };
+                    if let Some(minimum_width) = minimum_width
+                        && rendered_width < minimum_width
+                    {
+                        eprintln!(
+                            "[FLOATING_RESIZE_DIAG] event=rendered_column_below_minimum group={:?} column={:?} rendered_width={:.6} minimum_width={:.6} deficit={:.6} tolerance={:.6}",
+                            group,
+                            column_id,
+                            rendered_width,
+                            minimum_width,
+                            minimum_width - rendered_width,
+                            PIXEL_TOLERANCE,
+                        );
+                    }
                     if let Some(Node::Column(column)) = self.nodes.get_mut(column_id)
                         && !column.mode.is_rail()
                     {
-                        let minimum_width = self.minimum_column_width(column_id, metrics)?;
-                        if rendered_width < minimum_width {
-                            eprintln!(
-                                "[FLOATING_RESIZE_DIAG] event=rendered_column_below_minimum group={:?} column={:?} rendered_width={:.6} minimum_width={:.6} deficit={:.6} tolerance={:.6}",
-                                group,
-                                column_id,
-                                rendered_width,
-                                minimum_width,
-                                minimum_width - rendered_width,
-                                PIXEL_TOLERANCE,
-                            );
-                        }
                         column.width = rendered_width;
                         if column.mode == ColumnMode::Expanded {
                             column.last_expanded_width = Some(rendered_width);
