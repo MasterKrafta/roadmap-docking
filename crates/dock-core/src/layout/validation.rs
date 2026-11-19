@@ -741,7 +741,7 @@ impl Layout {
                         node: node_id,
                         reason: ValidationReason::MinimumWidthRequiredByExpandedContentsExceedsPanelMaximumWidth,
                     });
-                } else if column.width < minimum {
+                } else if column.width + PIXEL_TOLERANCE < minimum {
                     errors.push(ValidationError::InvalidColumn {
                         node: node_id,
                         reason: ValidationReason::ExpandedWidthBelowMinimumWidthRequiredByContents,
