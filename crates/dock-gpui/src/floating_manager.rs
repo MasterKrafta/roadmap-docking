@@ -3118,12 +3118,18 @@ impl FloatingWindowManager {
         if state.high_resolution_timer {
             let _ = self.native_ops.end_high_resolution_timer();
         }
-        let _ = self.controller.update(cx, |controller, controller_cx| {
+        if let Err(error) = self.controller.update(cx, |controller, controller_cx| {
             let result = controller.cancel_pointer_interaction_on_escape();
             controller.flush_events(controller_cx);
             controller_cx.notify();
             result
-        });
+        }) {
+            tracing::warn!(
+                ?state.group,
+                %error,
+                "could not cancel Core pointer interaction for native Floating move"
+            );
+        }
         for member in moving_windows {
             if let Err(error) = self.native_ops.move_window(member.native_window, member.cancel_origin) {
                 tracing::warn!(?state.group, moving_group = ?member.group, %error, "could not restore floating chain member after cancellation");
@@ -3133,12 +3139,17 @@ impl FloatingWindowManager {
     }
 
     fn cancel_controller_move(&mut self, cx: &mut Context<Self>) {
-        let _ = self.controller.update(cx, |controller, controller_cx| {
+        if let Err(error) = self.controller.update(cx, |controller, controller_cx| {
             let result = controller.cancel_pointer_interaction();
             controller.flush_events(controller_cx);
             controller_cx.notify();
             result
-        });
+        }) {
+            tracing::warn!(
+                %error,
+                "could not cancel Core pointer interaction after Floating move failure"
+            );
+        }
     }
 
     /// Applies pending WindowChain bounds after the current GPUI update unwinds.
