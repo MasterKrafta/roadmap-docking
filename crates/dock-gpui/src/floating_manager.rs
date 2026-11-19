@@ -528,10 +528,6 @@ fn floating_groups_in_move_order(
     groups
 }
 
-fn native_move_source_member(source_column_host: Option<NodeId>) -> Option<WindowGridMember> {
-    source_column_host.map(WindowGridMember::Column)
-}
-
 /// Reconciles the native-window registry with the current Core Layout.
 pub struct FloatingWindowManager {
     controller: Entity<DockController>,
@@ -2046,7 +2042,7 @@ impl FloatingWindowManager {
             threshold_crossed: false,
             high_resolution_timer,
             drop_target: None,
-            source_column_host: Some(column),
+            source_column_host: column,
         });
         self.schedule_native_move(cx, group, source_window_id);
         true
@@ -2071,17 +2067,12 @@ impl FloatingWindowManager {
 
     fn tick_native_move(&mut self, group: FloatingGroupId, window_id: WindowId, cx: &mut Context<Self>) -> bool {
         let Some(mut state) = self.native_move.filter(|state| state.group == group) else { return false; };
-        let source_is_current = if let Some(member) =
-            native_move_source_member(state.source_column_host)
-        {
-            self.registry.members.get(&member).is_some_and(|entry| {
-                entry.window_id == window_id
-                    && entry.native_window == Some(state.native_window)
-                    && entry.host_group == Some(group)
-            })
-        } else {
-            self.column_window_for_group(group).is_some_and(|entry| entry.window_id == window_id)
-        };
+        let source_member = WindowGridMember::Column(state.source_column_host);
+        let source_is_current = self.registry.members.get(&source_member).is_some_and(|entry| {
+            entry.window_id == window_id
+                && entry.native_window == Some(state.native_window)
+                && entry.host_group == Some(group)
+        });
         if !source_is_current || self.native_move_windows.is_empty() {
             self.cancel_native_move(state, cx);
             return false;
@@ -2920,7 +2911,7 @@ impl FloatingWindowManager {
         self.native_move = None;
         let result = match state.drop_target {
             Some(NativeMoveTarget::FloatingChain { anchor, anchor_member, direction }) => {
-                let moving_member = state.source_column_host.map(WindowGridMember::Column).unwrap_or_else(|| window_grid_member(state.group));
+                let moving_member = WindowGridMember::Column(state.source_column_host);
                 self.finish_floating_window_chain_move(moving_member, anchor, anchor_member, direction, &moving_windows, cx)
             }
             Some(NativeMoveTarget::MainDock { target: DropTarget::MainColumn { side, index }, .. }) if moving_groups.len() > 1 => {
@@ -5818,15 +5809,3 @@ mod floating_column_native_resize_tests {
     }
 }
 
-#[cfg(test)]
-mod floating_move_source_identity_tests {
-    use super::native_move_source_member;
-    use crate::window_chain::WindowGridMember;
-    use dock_core::NodeId;
-
-    #[test]
-    fn floating_column_header_drag_uses_column_host_identity() {
-        let column = NodeId::null();
-        assert_eq!(native_move_source_member(Some(column)), Some(WindowGridMember::Column(column)));
-    }
-}
