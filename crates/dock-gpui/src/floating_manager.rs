@@ -702,8 +702,6 @@ impl FloatingWindowManager {
             .collect()
     }
 
-    /// Returns the connected real Column HWNDs in native front-to-back order.
-    /// A standalone Floating Column returns its own single Column window.
     /// Inserts the moving Floating Column's complete WindowGrid immediately before the anchor.
     #[allow(dead_code)] // Consumed by the whole-window docking stage.
     pub(crate) fn link_window_chain_before(
