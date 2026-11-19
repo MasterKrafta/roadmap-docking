@@ -6,7 +6,6 @@ members = [
     "crates/dock-gpui",
     "crates/platform",
     "crates/ui",
-    "tearoff",
 ]
 default-members = ["app", "crates/dock-core", "crates/dock-gpui", "crates/platform", "crates/ui"]
 
