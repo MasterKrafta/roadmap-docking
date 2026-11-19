@@ -10,7 +10,7 @@ use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, 
 use crate::{
     components::{
         context_menu::GroupMenuToggle,
-        floating::FloatingPartHost,
+        floating::FloatingColumnHost,
         MainDockView,
         PanelHost,
     },
@@ -34,7 +34,7 @@ pub(crate) struct DragHostSurface {
     pub(super) handoff_placeholder: bool,
     /// When a GroupGrip or detached PanelTab creates a new Floating Column,
     /// this same HWND becomes its permanent host instead of being replaced.
-    pub(super) promoted_part: Option<Entity<FloatingPartHost>>,
+    pub(super) promoted_column: Option<Entity<FloatingColumnHost>>,
 }
 
 impl DragHostSurface {
@@ -43,7 +43,7 @@ impl DragHostSurface {
         show: bool,
         cx: &mut Context<Self>,
     ) {
-        if let Some(host) = self.promoted_part.as_ref() {
+        if let Some(host) = self.promoted_column.as_ref() {
             let _ = host.update(cx, |host, host_cx| {
                 if host.set_show_close_button(show) {
                     host_cx.notify();
@@ -67,8 +67,8 @@ impl Render for DragHostSurface {
             .size_full()
             .overflow_hidden();
 
-        if let Some(promoted_part) = self.promoted_part.clone() {
-            return root.child(promoted_part);
+        if let Some(promoted_column) = self.promoted_column.clone() {
+            return root.child(promoted_column);
         }
 
         if self.handoff_placeholder || self.dock_area.is_some() {
