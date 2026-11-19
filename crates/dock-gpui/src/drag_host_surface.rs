@@ -1,27 +1,19 @@
 use std::{collections::{HashMap, HashSet}, rc::Rc};
 
-use dock_core::{
-    ColumnRect, DockSide, DragPayload, GroupRect, Node, NodeId, PanelId, PanelRect,
-    SplitterRect,
-    TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
-};
+use dock_core::{DockSide, DragPayload, Node, NodeId, PanelId};
 use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div};
 
 use crate::{
     components::{
         context_menu::GroupMenuToggle,
         floating::FloatingColumnHost,
-        MainDockView,
         PanelHost,
     },
     dock_components::{collect_group_presentations, DockGroupView},
     DockController, DockTheme, DragSourceHost,
 };
 
-use super::{
-    dock_area_bounds, source_layout_rects, translate_rect,
-    DragDockAreaPresentation, DragGroupPresentation,
-};
+use super::{source_layout_rects, DragGroupPresentation};
 
 pub(crate) struct DragHostSurface {
     pub(super) theme: DockTheme,
@@ -77,230 +69,7 @@ impl Render for DragHostSurface {
             return root;
         }
 
-        if let Some(side) = self.dock_area
-            && let Some(snapshot) = self.controller.update(cx, |controller, _| {
-                let (root, panels) = {
-                    let session = controller.drag().host_session()?;
-                    if session.source_host() != DragSourceHost::Main
-                        || !matches!(
-                            session.payload(),
-                            DragPayload::DockArea { side: active } if active == side
-                        )
-                        || !session.all_panel_views_source_detached()
-                    {
-                        return None;
-                    }
-                    (
-                        controller.layout().main_area(side)?.root,
-                        session.transferred_panels().to_vec(),
-                    )
-                };
-
-                let mut node_ids = HashSet::new();
-                let mut column_ids = HashSet::new();
-                let mut column_groups = HashMap::new();
-                crate::dock_host::collect_subtree_nodes(
-                    controller.layout(),
-                    root,
-                    &mut node_ids,
-                    &mut column_ids,
-                    &mut column_groups,
-                );
-
-                let rects = controller.geometry().ok()?.clone();
-                let source_columns = rects
-                    .columns
-                    .iter()
-                    .filter(|column| column_ids.contains(&column.column))
-                    .copied()
-                    .collect::<Vec<_>>();
-                let area_rect = dock_area_bounds(&source_columns)?;
-                let columns = source_columns
-                    .iter()
-                    .map(|column| {
-                        ColumnRect::new(
-                            column.column,
-                            translate_rect(column.rect, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let group_ids = column_groups
-                    .values()
-                    .flat_map(|groups| groups.iter().copied())
-                    .collect::<HashSet<_>>();
-                let groups = rects
-                    .groups
-                    .iter()
-                    .filter(|group| group_ids.contains(&group.group))
-                    .map(|group| {
-                        GroupRect::new(
-                            group.group,
-                            translate_rect(group.rect, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let tab_strips = rects
-                    .tab_strips
-                    .iter()
-                    .filter(|strip| group_ids.contains(&strip.group))
-                    .map(|strip| {
-                        TabStripRect::new(
-                            strip.group,
-                            translate_rect(strip.rect, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let tab_headers = rects
-                    .tab_headers
-                    .iter()
-                    .filter(|header| group_ids.contains(&header.group))
-                    .map(|header| {
-                        TabHeaderRect::new(
-                            header.group,
-                            header.panel,
-                            header.index,
-                            translate_rect(header.rect, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let tab_overflows = rects
-                    .tab_overflows
-                    .iter()
-                    .filter(|overflow| group_ids.contains(&overflow.group))
-                    .map(|overflow| {
-                        TabOverflowRect::new(
-                            overflow.group,
-                            translate_rect(overflow.button_rect, area_rect.origin),
-                            overflow.hidden_tabs.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let presentations = collect_group_presentations(
-                    controller.layout(),
-                    controller.registry(),
-                    &node_ids,
-                    Some(&rects),
-                );
-                let panel_views = rects
-                    .panels
-                    .iter()
-                    .filter(|panel| panels.contains(&panel.panel))
-                    .filter_map(|panel| {
-                        let view = controller.panel_view_for_drag(panel.panel)?;
-                        Some((
-                            PanelRect::new(
-                                panel.panel,
-                                translate_rect(panel.rect, area_rect.origin),
-                            ),
-                            Some(view),
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                let column_modes = column_ids
-                    .iter()
-                    .filter_map(|column| match controller.layout().node(*column) {
-                        Some(Node::Column(value)) => Some((*column, value.mode)),
-                        _ => None,
-                    })
-                    .collect::<HashMap<_, _>>();
-                let rail_display_orders = column_modes
-                    .iter()
-                    .filter(|(_, mode)| mode.is_rail())
-                    .filter_map(|(column, _)| {
-                        controller
-                            .layout()
-                            .column_display_order(*column)
-                            .ok()
-                            .map(|order| (*column, order))
-                    })
-                    .collect::<HashMap<_, _>>();
-                let splitters = rects
-                    .splitters
-                    .iter()
-                    .filter(|splitter| node_ids.contains(&splitter.owner))
-                    .map(|splitter| {
-                        SplitterRect::new(
-                            splitter.owner,
-                            splitter.boundary_index,
-                            splitter.axis,
-                            translate_rect(splitter.rect, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let vertical_overflow = rects
-                    .vertical_overflow
-                    .iter()
-                    .filter(|overflow| column_ids.contains(&overflow.owner))
-                    .map(|overflow| {
-                        VerticalOverflow::new(
-                            overflow.owner,
-                            translate_rect(overflow.viewport, area_rect.origin),
-                            translate_rect(overflow.content_extent, area_rect.origin),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let node_sides = node_ids
-                    .iter()
-                    .map(|node| (*node, side))
-                    .collect::<HashMap<_, _>>();
-                let column_sides = column_ids
-                    .iter()
-                    .map(|column| (*column, side))
-                    .collect::<HashMap<_, _>>();
-
-                Some(DragDockAreaPresentation {
-                    columns,
-                    groups,
-                    panels: panel_views,
-                    tab_strips,
-                    tab_headers,
-                    tab_overflows,
-                    presentations,
-                    rail_display_orders,
-                    node_ids,
-                    node_sides,
-                    column_sides,
-                    column_groups,
-                    column_modes,
-                    splitters,
-                    vertical_overflow,
-                    metrics: controller.metrics(),
-                })
-            })
-        {
-            let toggle_menu: GroupMenuToggle = Rc::new(|_, _, _| {});
-            root = root.child(MainDockView::render(
-                &snapshot.columns,
-                &snapshot.groups,
-                snapshot.panels,
-                None,
-                None,
-                &snapshot.tab_strips,
-                &snapshot.tab_headers,
-                &snapshot.tab_overflows,
-                &snapshot.presentations,
-                &snapshot.rail_display_orders,
-                None,
-                None,
-                &[],
-                snapshot.metrics,
-                None,
-                toggle_menu,
-                true,
-                &snapshot.splitters,
-                None,
-                &snapshot.vertical_overflow,
-                &snapshot.node_ids,
-                &snapshot.node_sides,
-                &snapshot.column_sides,
-                &snapshot.column_groups,
-                &snapshot.column_modes,
-                &HashMap::new(),
-                self.controller.clone(),
-                self.theme,
-                true,
-            ));
-        } else if let Some(group) = self.group
+        if let Some(group) = self.group
             && let Some(snapshot) = self.controller.update(cx, |controller, _| {
                 let (source_host, source_window_id, panel) = {
                     let session = controller.drag().host_session()?;
