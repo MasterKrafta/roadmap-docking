@@ -526,7 +526,14 @@ fn floating_column_geometry_uses_its_own_height_without_resizing_siblings() {
 
     let shared = layout.compute_floating_rects(floating, &metrics).unwrap();
     let resized = layout
-        .compute_floating_column_rects(floating, right_column, 520.0, 16.0, &metrics)
+        .compute_floating_column_rects(
+            floating,
+            right_column,
+            shared.columns[1].rect.size.width,
+            520.0,
+            16.0,
+            &metrics,
+        )
         .unwrap();
 
     assert_eq!(shared.columns.len(), 2);
