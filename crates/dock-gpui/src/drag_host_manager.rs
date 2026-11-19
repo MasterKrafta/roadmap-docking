@@ -1604,6 +1604,7 @@ impl DragHostManager {
                     column,
                     theme,
                     manager_weak,
+                    std::rc::Rc::new(std::cell::Cell::new(false)),
                 )
             }));
             host_cx.notify();
