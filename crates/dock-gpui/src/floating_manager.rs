@@ -905,6 +905,52 @@ impl FloatingWindowManager {
         floating_column_outer_bounds(spec.floating_origin, spec.local_origin, spec.bounds.size, frame)
     }
 
+    fn column_window_target_bounds(
+        &self,
+        spec: FloatingColumnWindowSnapshot,
+        native_window: Option<NativeWindowId>,
+        previous_scale: Option<f32>,
+        current_bounds: Rect,
+        native_vertical_origin_offset: f32,
+        native_vertical_height: Option<f32>,
+    ) -> (Rect, Option<f32>, Option<f32>) {
+        let current_scale = native_window
+            .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .or(previous_scale);
+        let mut target_spec = spec;
+        let mut target_vertical_origin_offset = None;
+        if let Some(height) = native_vertical_height {
+            let stored_scale = previous_scale.unwrap_or(1.0);
+            let target_scale = current_scale.unwrap_or(stored_scale);
+            let logical_offset = native_vertical_origin_offset / stored_scale;
+            let physical_offset = logical_offset * target_scale;
+            target_spec.bounds.size.height = height;
+            target_spec.floating_origin.y += physical_offset;
+            target_vertical_origin_offset = Some(physical_offset);
+        }
+        let target_bounds = native_window
+            .and_then(|native_window| {
+                self.column_outer_bounds_for_target(
+                    target_spec,
+                    native_window,
+                    current_scale,
+                )
+            })
+            .unwrap_or_else(|| {
+                if native_window.is_some() {
+                    current_bounds
+                } else {
+                    target_spec.bounds
+                }
+            });
+        (
+            target_bounds,
+            target_vertical_origin_offset,
+            current_scale,
+        )
+    }
+
     /// Returns each member's measured native frame using its own HWND and DPI.
     fn frame_geometries_for_bounds(
         &self,
@@ -2059,6 +2105,10 @@ impl FloatingWindowManager {
             controller.flush_events(controller_cx);
             controller_cx.notify();
         });
+
+        if width_changed {
+            self.sync_native_sibling_column_windows(group, member, cx);
+        }
     }
 
     fn finish_native_resize_transaction(
@@ -4342,6 +4392,104 @@ impl FloatingWindowManager {
         })
     }
 
+    fn sync_native_sibling_column_windows(
+        &mut self,
+        group: FloatingGroupId,
+        resized_member: WindowGridMember,
+        cx: &mut Context<Self>,
+    ) {
+        let scale = self
+            .main_native_window
+            .and_then(|main| self.native_ops.scale_factor(main).ok())
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let desired = self.controller.update(cx, |controller, _| {
+            let transferred_panels = controller
+                .drag()
+                .host_session()
+                .map(|session| session.transferred_panels().iter().copied().collect())
+                .unwrap_or_default();
+            collect_floating_column_windows(
+                controller.layout(),
+                &controller.metrics(),
+                scale,
+                &transferred_panels,
+            )
+        });
+
+        for spec in desired {
+            if spec.floating_group() != group
+                || spec.member == resized_member
+                || spec.contains_transferred_panels
+            {
+                continue;
+            }
+            let Some((
+                current_bounds,
+                native_bounds_dirty,
+                Some(native_window),
+                previous_scale,
+                native_vertical_origin_offset,
+                native_vertical_height,
+                visibility,
+                window,
+            )) = self.registry.members.get(&spec.member).map(|entry| {
+                (
+                    entry.bounds,
+                    entry.native_bounds_dirty,
+                    entry.native_window,
+                    entry.native_scale_factor,
+                    entry.native_vertical_origin_offset,
+                    entry.native_vertical_height,
+                    entry.visibility,
+                    entry.window,
+                )
+            }) else {
+                continue;
+            };
+            if visibility != PanelWindowVisibility::Visible {
+                continue;
+            }
+
+            let (target_bounds, target_vertical_origin_offset, current_scale) =
+                self.column_window_target_bounds(
+                    spec,
+                    Some(native_window),
+                    previous_scale,
+                    current_bounds,
+                    native_vertical_origin_offset,
+                    native_vertical_height,
+                );
+            let core_width_changed =
+                (current_bounds.size.width - spec.bounds.size.width).abs() > 0.5;
+            let core_height_changed =
+                (current_bounds.size.height - spec.bounds.size.height).abs() > 0.5;
+            let scale_changed = current_scale.is_some_and(|scale| {
+                previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
+            });
+
+            if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
+                self.sync_column_window_bounds(
+                    native_window,
+                    target_bounds,
+                    "native_resize_sibling",
+                );
+                if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                    entry.bounds = target_bounds;
+                    if let Some(offset) = target_vertical_origin_offset {
+                        entry.native_vertical_origin_offset = offset;
+                    }
+                    entry.native_scale_factor = current_scale;
+                    entry.native_bounds_dirty = false;
+                }
+            }
+
+            if core_width_changed || core_height_changed {
+                window.refresh_bounds_later(cx);
+            }
+        }
+    }
+
     fn sync_column_window_bounds(
         &self,
         native_window: NativeWindowId,
@@ -4710,15 +4858,34 @@ impl FloatingWindowManager {
             };
 
             let current = self.registry.members.get(&spec.member).map(|entry| {
-                (entry.bounds, entry.native_bounds_dirty, entry.native_window, entry.native_scale_factor)
+                (
+                    entry.bounds,
+                    entry.native_bounds_dirty,
+                    entry.native_window,
+                    entry.native_scale_factor,
+                    entry.native_vertical_origin_offset,
+                    entry.native_vertical_height,
+                )
             });
-            let Some((current_bounds, native_bounds_dirty, native_window, previous_scale)) = current else {
+            let Some((
+                current_bounds,
+                native_bounds_dirty,
+                native_window,
+                previous_scale,
+                native_vertical_origin_offset,
+                native_vertical_height,
+            )) = current else {
                 continue;
             };
-            let current_scale = native_window
-                .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-                .or(previous_scale);
+            let (target_bounds, target_vertical_origin_offset, current_scale) =
+                self.column_window_target_bounds(
+                    spec,
+                    native_window,
+                    previous_scale,
+                    current_bounds,
+                    native_vertical_origin_offset,
+                    native_vertical_height,
+                );
             if core_height_changed
                 && let WindowGridMember::Column(column) = spec.member
             {
@@ -4742,30 +4909,6 @@ impl FloatingWindowManager {
                     });
                 }
             }
-            let mut target_spec = spec;
-            let mut target_vertical_origin_offset = None;
-            if let Some(entry) = self.registry.members.get(&spec.member)
-                && let Some(height) = entry.native_vertical_height
-            {
-                let stored_scale = entry.native_scale_factor.unwrap_or(1.0);
-                let target_scale = current_scale.unwrap_or(stored_scale);
-                let logical_offset = entry.native_vertical_origin_offset / stored_scale;
-                let physical_offset = logical_offset * target_scale;
-                target_spec.bounds.size.height = height;
-                target_spec.floating_origin.y += physical_offset;
-                target_vertical_origin_offset = Some(physical_offset);
-            }
-            let target_bounds = native_window
-                .and_then(|native_window| {
-                    self.column_outer_bounds_for_target(
-                        target_spec,
-                        native_window,
-                        current_scale,
-                                )
-                })
-                .unwrap_or_else(|| {
-                    if native_window.is_some() { current_bounds } else { target_spec.bounds }
-                });
             let core_width_changed =
                 (current_bounds.size.width - spec.bounds.size.width).abs() > 0.5;
             let resizing_this_member = self.native_resize.is_some_and(|session| {
