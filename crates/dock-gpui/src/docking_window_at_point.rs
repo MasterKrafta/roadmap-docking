@@ -1,7 +1,7 @@
 use dock_core::{FloatingGroupId, Point};
 use gpui::WindowId;
 
-use crate::DockWindowPart;
+use dock_core::NodeId;
 
 /// A registered persistent DockHost under the physical cursor, together with
 /// the pointer converted to that host's Core-local logical coordinate system.
@@ -19,13 +19,13 @@ pub(crate) enum DockingWindowAtPoint {
         window_id: WindowId,
         point: Point,
     },
-    /// The pointer in one permanent Header/Group HWND, translated to Core coordinates.
-    FloatingPart {
+    /// The pointer in one permanent Floating Column HWND.
+    FloatingColumn {
         group: FloatingGroupId,
         window_id: WindowId,
-        part: DockWindowPart,
+        column: NodeId,
         point: Point,
-    },
+    }
 }
 
 impl DockingWindowAtPoint {
@@ -33,8 +33,8 @@ impl DockingWindowAtPoint {
         match self {
             Self::Main { .. } => Some(crate::DockWindowRole::Main),
             Self::Floating { group, .. } => Some(crate::DockWindowRole::Floating { group }),
-            Self::FloatingPart { group, part, .. } => {
-                Some(crate::DockWindowRole::FloatingPart { group, part })
+            Self::FloatingColumn { group, column, .. } => {
+                Some(crate::DockWindowRole::FloatingColumn { group, column })
             },
             Self::ForeignWindow => None,
         }
