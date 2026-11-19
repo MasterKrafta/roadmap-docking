@@ -1718,7 +1718,6 @@ mod floating_tab_drag_zone_tests {
             rail_display_orders: HashMap::new(),
             metrics,
             drag_preview: None,
-            drag_zones: Vec::new(),
             active_drop_zone: None,
             resize_preview: None,
         };
