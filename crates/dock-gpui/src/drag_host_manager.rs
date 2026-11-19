@@ -442,7 +442,7 @@ impl DragHostManager {
                     dock_area,
                     render_detached_tab,
                     handoff_placeholder: false,
-                    promoted_part: None,
+                    promoted_column: None,
                 })
             })
             .map_err(|error| DragHostError::OpenWindow(error.to_string()))?;
@@ -1582,10 +1582,10 @@ impl DragHostManager {
         let theme = self.theme;
         let manager_weak = manager.downgrade();
         let promoted = window.update(cx, |surface, _, host_cx| {
-            if surface.promoted_part.is_some() {
+            if surface.promoted_column.is_some() {
                 return false;
             }
-            surface.promoted_part = Some(host_cx.new(|_| {
+            surface.promoted_column = Some(host_cx.new(|_| {
                 FloatingColumnHost::new_column(
                     controller,
                     floating_group,
@@ -1614,7 +1614,7 @@ impl DragHostManager {
         });
         if !adopted {
             let _ = window.update(cx, |surface, _, host_cx| {
-                surface.promoted_part = None;
+                surface.promoted_column = None;
                 host_cx.notify();
             });
             return false;
