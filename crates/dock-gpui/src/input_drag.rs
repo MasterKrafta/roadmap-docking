@@ -6,7 +6,7 @@ use dock_core::{
 use gpui::{App, Entity, WindowId};
 
 use crate::{
-    dock_components::DockTab, DockController, DockWindowPart, DragHostManager, DragSourceHost,
+    dock_components::DockTab, DockController, DragHostManager, DragSourceHost,
     FloatingWindowManager,
 };
 
@@ -15,7 +15,7 @@ use crate::{
 pub(crate) struct FloatingTabDrag {
     pub(crate) source_window_id: WindowId,
     pub(crate) source_group: FloatingGroupId,
-    pub(crate) source_part: Option<DockWindowPart>,
+    pub(crate) source_column: NodeId,
     pub(crate) panel: PanelId,
     pub(crate) press_origin: Point,
     pub(crate) layout_version: u64,
@@ -226,7 +226,7 @@ pub(crate) fn begin_panel_drag_host(
                 };
                 (source_rect, source_group_size)
             }
-            DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
+            DragSourceHost::FloatingColumn { group, .. } => {
                 let rects = controller.floating_geometry(source_window_id, group).ok()?;
                 let source_rect = match handle {
                     // Match GroupGrip: anchor the full DragHost at the Group origin.
@@ -344,7 +344,7 @@ pub(crate) fn begin_group_drag_host(
                 .iter()
                 .find(|rect| rect.group == group)
                 .copied()?,
-            DragSourceHost::Floating { group: floating } | DragSourceHost::FloatingPart { group: floating, .. } => controller
+            DragSourceHost::FloatingColumn { group: floating, .. } => controller
                 .floating_geometry(source_window_id, floating)
                 .ok()?
                 .groups
@@ -506,10 +506,10 @@ pub(crate) fn update_floating_tab_drag(
                     payload,
                     DragHandle::PanelTab,
                     drag.press_origin,
-                    drag.source_part.map_or(
-                        DragSourceHost::Floating { group: drag.source_group },
-                        |part| DragSourceHost::FloatingPart { group: drag.source_group, part },
-                    ),
+                    DragSourceHost::FloatingColumn {
+                        group: drag.source_group,
+                        column: drag.source_column,
+                    },
                     drag.source_window_id,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
@@ -527,10 +527,10 @@ pub(crate) fn update_floating_tab_drag(
                     payload,
                     DragHandle::PanelTab,
                     drag.press_origin,
-                    drag.source_part.map_or(
-                        DragSourceHost::Floating { group: drag.source_group },
-                        |part| DragSourceHost::FloatingPart { group: drag.source_group, part },
-                    ),
+                    DragSourceHost::FloatingColumn {
+                        group: drag.source_group,
+                        column: drag.source_column,
+                    },
                     drag.source_window_id,
                 ) {
                     tracing::debug!(%error, "could not begin floating tab drag");
@@ -1075,7 +1075,7 @@ fn floating_bounds_for_request_in_host(
             };
             (source_rect, source_group_size)
         }
-        DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
+        DragSourceHost::FloatingColumn { group, .. } => {
             let window_id = source_window_id?;
             let rects = controller.floating_geometry(window_id, group).ok()?;
             let source_rect = source_rect_for_request(
