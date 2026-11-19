@@ -1104,20 +1104,24 @@ impl FloatingWindowManager {
         Some(Rect::new(Point::new(origin.x as f32, origin.y as f32), bounds.size))
     }
 
-    /// Checks the cursor against the exact part HWND that initiated a Floating drag.
-    /// The fallback path keeps compatibility with the legacy full-composition host.
+    /// Checks the cursor against the exact Floating Column HWND that initiated the drag.
     pub(crate) fn cursor_over_other_docking_window_from_source(
-        &self, source_group: FloatingGroupId, source_window_id: WindowId, source_column: Option<NodeId>,
+        &self,
+        source_group: FloatingGroupId,
+        source_window_id: WindowId,
+        source_column: NodeId,
     ) -> bool {
-        let source_window = match source_column {
-            Some(column) => self.registry.members.get(&WindowGridMember::Column(column))
-                .filter(|entry| entry.host_group == Some(source_group) && entry.window_id == source_window_id)
-                .and_then(|entry| entry.native_window),
-            None => self.column_window_for_group(source_group)
-                .filter(|entry| entry.window_id == source_window_id)
-                .and_then(|entry| entry.native_window),
+        let Some(source_window) = self
+            .registry
+            .members
+            .get(&WindowGridMember::Column(source_column))
+            .filter(|entry| {
+                entry.host_group == Some(source_group) && entry.window_id == source_window_id
+            })
+            .and_then(|entry| entry.native_window)
+        else {
+            return false;
         };
-        let Some(source_window) = source_window else { return false; };
         self.cursor_over_other_docking_window_from_native(source_window)
     }
 
