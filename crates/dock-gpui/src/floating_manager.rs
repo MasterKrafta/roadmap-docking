@@ -4,7 +4,12 @@
 //! one HWND containing its Header and complete vertical Group stack. The shared
 //! DockController remains the sole owner of Layout and panel views.
 
-use std::{collections::{HashMap, HashSet}, time::Duration};
+use std::{
+    cell::Cell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+    time::Duration,
+};
 
 use dock_core::{
     DockCommand, DockSide, DragPayload, DragState, DropSource, DropTarget, FloatingGroupId,
@@ -1607,6 +1612,7 @@ impl FloatingWindowManager {
                 resize_enabled,
                 host_group: Some(floating_group),
                 visibility: PanelWindowVisibility::Visible,
+                close_button_visible: None,
             },
         );
         true
@@ -5836,6 +5842,8 @@ impl FloatingWindowManager {
         let controller = self.controller.clone();
         let theme = self.theme;
         let manager = cx.entity().downgrade();
+        let close_button_visible = Rc::new(Cell::new(false));
+        let host_close_button_visible = close_button_visible.clone();
         let logical_origin = self.gpui_origin_for_bounds(spec.bounds);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::new(
@@ -5864,6 +5872,7 @@ impl FloatingWindowManager {
                     spec.kind,
                     theme,
                     manager,
+                    host_close_button_visible.clone(),
                 )
             } else {
                 match spec.kind {
@@ -5873,6 +5882,7 @@ impl FloatingWindowManager {
                         column,
                         theme,
                         manager,
+                        host_close_button_visible.clone(),
                     ),
                     FloatingPartKind::Header { column } => FloatingPartHost::new_header(
                         controller,
@@ -6013,6 +6023,8 @@ impl FloatingWindowManager {
                 Some(spec.floating_group())
             },
             visibility: PanelWindowVisibility::Hidden,
+            close_button_visible: matches!(spec.kind, FloatingPartKind::Column { .. })
+                .then_some(close_button_visible),
         })
     }
 
@@ -6451,6 +6463,23 @@ impl FloatingWindowManager {
             self.registry.members.insert(member, entry);
         }
 
+        // Update the shared presentation state directly. The Host reads this
+        // Cell during its next render; reconciliation never re-enters its Entity.
+        let close_button_states = self
+            .registry
+            .members
+            .iter()
+            .filter_map(|(member, entry)| {
+                let WindowGridMember::Column(column) = member else {
+                    return None;
+                };
+                Some((*column, entry.close_button_visible.clone()?))
+            })
+            .collect::<Vec<_>>();
+        for (column, state) in close_button_states {
+            state.set(self.is_rightmost_column(column));
+        }
+
         prune_result
     }
 
@@ -6703,6 +6732,7 @@ impl FloatingWindowManager {
             resize_enabled: false,
             host_group: None,
             visibility: PanelWindowVisibility::Hidden,
+            close_button_visible: None,
         })
     }
 
