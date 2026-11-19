@@ -330,21 +330,20 @@ impl Layout {
         Ok(output)
     }
 
-    /// Resolves one Floating Column independently at its native viewport size.
+    /// Resolves one Floating Column independently at its native viewport height.
     ///
-    /// Floating Column HWNDs own their client width and height. This computes the
-    /// selected Column's complete subtree using its live native dimensions without
-    /// changing the model geometry or the sibling Columns in the same composition.
+    /// Floating Column HWNDs share horizontal Core geometry but own their vertical
+    /// client heights. This computes the selected Column's complete subtree without
+    /// changing the heights of sibling Columns in the same Floating composition.
     pub fn compute_floating_column_rects(
         &self,
         group: crate::FloatingGroupId,
         column: crate::NodeId,
-        width: f32,
         height: f32,
         origin_y_offset: f32,
         metrics: &DockMetrics,
     ) -> Result<LayoutRects, ComputeRectsError> {
-        if !width.is_finite() || width <= 0.0 || !height.is_finite() || height <= 0.0 {
+        if !height.is_finite() || height <= 0.0 {
             return Err(ComputeRectsError::Geometry(GeometryError::NonPositiveDimension));
         }
         if !origin_y_offset.is_finite() {
@@ -390,7 +389,7 @@ impl Layout {
                 base_column.rect.origin.x,
                 base_column.rect.origin.y + origin_y_offset,
             ),
-            Size::new(width, height),
+            Size::new(base_column.rect.size.width, height),
         );
         column_rect
             .validate_non_empty()
