@@ -13,7 +13,7 @@ use super::FloatingWindowManager;
 #[derive(Clone, Copy)]
 pub(super) enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
-    Part(WindowHandle<FloatingColumnHost>),
+    Column(WindowHandle<FloatingColumnHost>),
     DragHost(WindowHandle<DragHostSurface>),
 }
 
@@ -24,7 +24,7 @@ impl PanelWindowHandle {
             // A FloatingColumnHost can be inside its own GPUI update while the
             // manager reconciles it. Its native HWND is checked by the manager;
             // never probe the root Entity through WindowHandle::update here.
-            Self::Part(_) => true,
+            Self::Column(_) => true,
             Self::DragHost(window) => window.update(cx, |_, _, _| ()).is_ok(),
         }
     }
@@ -37,7 +37,7 @@ impl PanelWindowHandle {
         cx: &mut Context<FloatingWindowManager>,
     ) -> Result<(), String> {
         match self {
-            Self::Part(_) | Self::Floating(_) => Ok(()),
+            Self::Column(_) | Self::Floating(_) => Ok(()),
             Self::DragHost(window) => window
                 .update(cx, |surface, _, surface_cx| {
                     surface.set_promoted_column_close_button(show, surface_cx);
@@ -58,8 +58,8 @@ impl PanelWindowHandle {
                     host_cx.notify();
                 })
                 .map_err(|error| error.to_string()),
-            Self::Part(_) | Self::DragHost(_) => {
-                Err("Floating part windows have immutable Core ownership".into())
+            Self::Column(_) | Self::DragHost(_) => {
+                Err("Floating Column windows have immutable Core ownership".into())
             }
         }
     }
@@ -76,7 +76,7 @@ impl PanelWindowHandle {
     ) {
         let window: AnyWindowHandle = match self {
             Self::Floating(window) => (*window).into(),
-            Self::Part(window) => (*window).into(),
+            Self::Column(window) => (*window).into(),
             Self::DragHost(window) => (*window).into(),
         };
         cx.spawn(async move |_, app| {
@@ -101,7 +101,7 @@ impl PanelWindowHandle {
             Self::Floating(window) => window
                 .update(cx, |_, _, host_cx| host_cx.notify())
                 .map_err(|error| error.to_string()),
-            Self::Part(window) => {
+            Self::Column(window) => {
                 let window: AnyWindowHandle = (*window).into();
                 window
                     .update(cx, |_, window, _| window.refresh())
@@ -121,7 +121,7 @@ impl PanelWindowHandle {
                     window.remove_window();
                 });
             }
-            Self::Part(window) => {
+            Self::Column(window) => {
                 let window: AnyWindowHandle = (*window).into();
                 cx.spawn(async move |_, app| {
                     for _ in 0..16 {
