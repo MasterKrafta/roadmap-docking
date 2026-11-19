@@ -598,7 +598,7 @@ impl DragHostManager {
         if !host_state_ready {
             if let Some(manager) = self.floating_manager.as_ref() {
                 manager.update(cx, |manager, manager_cx| {
-                    manager.close_main_drag_parts(manager_cx);
+                    manager.close_main_drag_columns(manager_cx);
                 });
             }
             self.controller.update(cx, |controller, _| {
@@ -1315,7 +1315,7 @@ impl DragHostManager {
             // could not be adopted. Do not leave a second visible set above Main.
             if let Some(manager) = self.floating_manager.as_ref() {
                 manager.update(cx, |manager, manager_cx| {
-                    manager.close_main_drag_parts(manager_cx);
+                    manager.close_main_drag_columns(manager_cx);
                 });
             }
         }
@@ -2111,14 +2111,14 @@ impl DragHostManager {
         }
         drop(active.source_detach_subscription.take());
 
-        // Only Main DockArea drags create temporary Main part windows. A content
+        // Only Main DockArea drags create temporary Main Column windows. A content
         // handoff can close its DragHost from inside FloatingWindowManager's own
         // render/update callback, so do not re-enter that manager for other drags.
         if active.dock_area.is_some()
             && let Some(manager) = self.floating_manager.as_ref()
         {
             manager.update(cx, |manager, manager_cx| {
-                manager.close_main_drag_parts(manager_cx);
+                manager.close_main_drag_columns(manager_cx);
             });
         }
 
