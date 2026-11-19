@@ -714,7 +714,7 @@ impl FloatingColumnHost {
             self.tab_press.clone(),
             self.group_press.clone(),
             self.pointer_capture.clone(),
-            Some(column_id),
+            column_id,
             column_rect.rect.origin,
         );
 
