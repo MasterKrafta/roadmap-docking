@@ -896,7 +896,7 @@ impl DragHostManager {
         let moved = if dock_area.is_some() {
             floating_manager.as_ref().is_some_and(|floating_manager| {
                 floating_manager.update(cx, |manager, _| {
-                    manager.move_main_drag_parts(cursor, grab_offset)
+                    manager.move_main_drag_columns(cursor, grab_offset)
                 })
             })
         } else {
@@ -1501,7 +1501,7 @@ impl DragHostManager {
             return false;
         };
         let adopted = manager.update(cx, |manager, manager_cx| {
-            manager.adopt_main_drag_parts(manager_cx)
+            manager.adopt_main_drag_columns(manager_cx)
         });
         if !adopted {
             return false;
