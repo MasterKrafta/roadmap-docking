@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, rc::Rc};
+use std::{collections::HashSet, rc::Rc};
 
 use dock_core::{DockSide, DragPayload, Node, NodeId, PanelId};
 use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div};
@@ -10,7 +10,7 @@ use crate::{
         PanelHost,
     },
     dock_components::{collect_group_presentations, DockGroupView},
-    DockController, DockTheme, DragSourceHost,
+    DockController, DockTheme,
 };
 
 use super::{source_layout_rects, DragGroupPresentation};
