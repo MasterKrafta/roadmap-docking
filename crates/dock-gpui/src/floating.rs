@@ -68,7 +68,7 @@ fn floating_tab_drag_host_required(leaves_source: bool, over_other_window: bool)
 }
 
 
-/// Maps a pointer event from a Floating part HWND back into the composition's Core space.
+/// Maps a pointer event from a Floating Column HWND back into the composition's Core space.
 fn floating_pointer_point(
     position: gpui::Point<gpui::Pixels>,
     core_origin: Point,
