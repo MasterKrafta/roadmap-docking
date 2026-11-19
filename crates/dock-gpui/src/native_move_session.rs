@@ -7,7 +7,6 @@ use super::NativeMoveTarget;
 pub(super) struct NativeMoveSession {
     pub(super) group: FloatingGroupId,
     pub(super) native_window: NativeWindowId,
-    pub(super) hide_header: bool,
     pub(super) initial_cursor: PhysicalPoint,
     pub(super) start_bounds: Rect,
     pub(super) start_pointer: Point,
