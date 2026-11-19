@@ -16,7 +16,6 @@ pub use drag_source_host::DragSourceHost;
 
 #[cfg(test)]
 mod tests {
-    use dock_core::FloatingGroupId;
     use slotmap::Key as _;
 
     use super::{DockWindowRole, DragHostId};
@@ -33,7 +32,7 @@ mod tests {
 
     #[test]
     fn new_drag_host_session_has_no_detached_panel_views() {
-        use dock_core::{DragHandle, DragPayload, PanelId};
+        use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
 
         let session = super::DragHostSession::new(
             DragPayload::Panel {
@@ -55,11 +54,12 @@ mod tests {
         let mut panel_ids = slotmap::SlotMap::<PanelId, ()>::with_key();
         let panel = panel_ids.insert(());
         let other_panel = panel_ids.insert(());
-        let source_group = FloatingGroupId::null();
+        let source_group = dock_core::FloatingGroupId::null();
+        let source_column = NodeId::null();
         let mut session = super::DragHostSession::new(
             DragPayload::Panel { panel },
             DragHandle::PanelTab,
-            super::DragSourceHost::Floating { group: source_group },
+            super::DragSourceHost::FloatingColumn { group: source_group, column: source_column },
             None,
         );
         let drag_host = DragHostId::from_raw(11);
@@ -176,9 +176,6 @@ mod tests {
         assert_eq!(dragging, DockWindowRole::Dragging { id: drag_id });
         assert_ne!(
             dragging,
-            DockWindowRole::Floating {
-                group: FloatingGroupId::null(),
-            }
         );
         assert_ne!(
             dragging,
