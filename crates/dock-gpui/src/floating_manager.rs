@@ -27,7 +27,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DockWindowPart, DragHostManager, DragSourceHost,
-    components::{FloatingHost, floating::{floating_column_host_rect, floating_part_local_rect, FloatingPartHost, FloatingPartKind}},
+    components::{FloatingHost, floating::{floating_column_host_rect, floating_part_local_rect, FloatingColumnHost, FloatingPartKind}},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
@@ -5836,7 +5836,7 @@ impl FloatingWindowManager {
 
         let window = match cx.open_window(options, move |_, app| {
             let host = if let Some(side) = spec.main_drag_side {
-                FloatingPartHost::new_main_drag(
+                FloatingColumnHost::new_main_drag(
                     controller,
                     side,
                     spec.kind,
@@ -5846,7 +5846,7 @@ impl FloatingWindowManager {
                 )
             } else {
                 match spec.kind {
-                    FloatingPartKind::Column { column } => FloatingPartHost::new_column(
+                    FloatingPartKind::Column { column } => FloatingColumnHost::new_column(
                         controller,
                         spec.floating_group(),
                         column,
@@ -5854,14 +5854,14 @@ impl FloatingWindowManager {
                         manager,
                         host_close_button_visible.clone(),
                     ),
-                    FloatingPartKind::Header { column } => FloatingPartHost::new_header(
+                    FloatingPartKind::Header { column } => FloatingColumnHost::new_header(
                         controller,
                         spec.floating_group(),
                         column,
                         theme,
                         manager,
                     ),
-                    FloatingPartKind::Group { column, group } => FloatingPartHost::new_group(
+                    FloatingPartKind::Group { column, group } => FloatingColumnHost::new_group(
                         controller,
                         spec.floating_group(),
                         column,
@@ -6434,7 +6434,7 @@ impl FloatingWindowManager {
         }
 
         // Permanent Column hosts share their close-button state with the manager,
-        // so changing the owner never updates a FloatingPartHost Entity.
+        // so changing the owner never updates a FloatingColumnHost Entity.
         let column_windows = self
             .registry
             .members
@@ -6456,7 +6456,7 @@ impl FloatingWindowManager {
             let state_changed = close_button_visible
                 .is_some_and(|state| state.replace(show_close_button) != show_close_button);
             if state_changed {
-                // Refresh without leasing FloatingPartHost; it may be handling the
+                // Refresh without leasing FloatingColumnHost; it may be handling the
                 // same drag/resize event that caused this reconciliation.
                 if let Err(error) = window.notify_host(cx) {
                     tracing::debug!(?column, %error, "could not refresh the close-button owner");
