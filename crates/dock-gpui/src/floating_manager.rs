@@ -1586,25 +1586,30 @@ impl FloatingWindowManager {
             (native_column_bounds.origin.y - current_column_bounds.origin.y).abs() > 0.5
                 || (native_column_bounds.size.height - current_column_bounds.size.height).abs()
                     > 0.5;
+        let origin_y_offset =
+            native_column_bounds.origin.y - base_column_bounds.origin.y;
         if vertical_bounds_changed {
-            let origin_y_offset =
-                native_column_bounds.origin.y - base_column_bounds.origin.y;
             if let Some(entry) = self.registry.members.get_mut(&member) {
                 entry.native_vertical_origin_offset = origin_y_offset;
                 entry.native_vertical_height = Some(native_column_bounds.size.height);
                 entry.native_bounds_dirty = true;
             }
-            self.controller.update(cx, |controller, controller_cx| {
-                controller.set_floating_column_viewport(
-                    state.window_id,
-                    group,
-                    column,
-                    native_column_bounds.size.height,
-                    origin_y_offset / scale_factor,
-                );
-                controller_cx.notify();
-            });
         }
+
+        // Keep this HWND's local layout tied to its current client size during
+        // the native modal resize loop; Core's persistent bounds may update later.
+        self.controller.update(cx, |controller, controller_cx| {
+            if controller.set_floating_column_viewport(
+                state.window_id,
+                group,
+                column,
+                native_column_bounds.size.width,
+                native_column_bounds.size.height,
+                origin_y_offset / scale_factor,
+            ) {
+                controller_cx.notify();
+            }
+        });
 
         // A vertical-only drag is local to this Column HWND. Its layout is
         // recomputed from the native viewport; it must not resize sibling Columns.
@@ -4386,6 +4391,7 @@ impl FloatingWindowManager {
                             window_id,
                             spec.floating_group(),
                             column,
+                            spec.bounds.size.width,
                             spec.bounds.size.height,
                             origin_y_offset / scale,
                         );
