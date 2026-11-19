@@ -63,7 +63,7 @@ fn source_layout_rects(
     match source_host {
         DragSourceHost::Main => Some(controller.geometry().ok()?.clone()),
         DragSourceHost::Floating { group }
-        | DragSourceHost::FloatingPart { group, .. } => {
+        | DragSourceHost::FloatingColumn { group, .. } => {
             Some(controller.floating_geometry(source_window_id, group).ok()?.clone())
         }
     }
@@ -107,12 +107,12 @@ fn floating_window_chain_target(
     };
     let group = match target_role {
         Some(DockWindowRole::Floating { group })
-        | Some(DockWindowRole::FloatingPart { group, .. }) => group,
+        | Some(DockWindowRole::FloatingColumn { group, .. }) => group,
         _ => return None,
     };
     let source_group = match source_host {
         DragSourceHost::Main => None,
-        DragSourceHost::Floating { group } | DragSourceHost::FloatingPart { group, .. } => {
+        DragSourceHost::Floating { group } | DragSourceHost::FloatingColumn { group, .. } => {
             Some(group)
         }
     };
@@ -993,7 +993,7 @@ impl DragHostManager {
                                 group,
                                 window_id,
                                 point,
-                            }) | Some(DockingWindowAtPoint::FloatingPart {
+                            }) | Some(DockingWindowAtPoint::FloatingColumn {
                                 group,
                                 window_id,
                                 point,
@@ -1038,7 +1038,7 @@ impl DragHostManager {
                     .and_then(|target| match target {
                         DockingWindowAtPoint::Main { point, .. }
                         | DockingWindowAtPoint::Floating { point, .. }
-                        | DockingWindowAtPoint::FloatingPart { point, .. } => Some(point),
+                        | DockingWindowAtPoint::FloatingColumn { point, .. } => Some(point),
                         DockingWindowAtPoint::ForeignWindow => None,
                     })
                     .unwrap_or(source_point)
@@ -1486,7 +1486,7 @@ impl DragHostManager {
             && target_role == Some(DockWindowRole::Main)
             && matches!(
                 source_host,
-                Some(DragSourceHost::Floating { .. } | DragSourceHost::FloatingPart { .. })
+                Some(DragSourceHost::Floating { .. } | DragSourceHost::FloatingColumn { .. })
             )
             && let Some(manager) = self.floating_manager.clone()
         {
@@ -2344,7 +2344,7 @@ mod drag_host_scale_tests {
 #[cfg(test)]
 mod floating_window_chain_target_tests {
     use super::{dock_area_drag_uses_free_area, floating_window_chain_target, DockingWindowAtPoint};
-    use crate::{DockWindowPart, DockWindowRole, DragSourceHost, window_chain::WindowGridDirection};
+    use crate::{DockWindowRole, DragSourceHost, window_chain::WindowGridDirection};
     use dock_core::{DragHandle, DropTarget, DropZone, FloatingGroupId, NodeId};
     use slotmap::Key;
 
@@ -2354,17 +2354,17 @@ mod floating_window_chain_target_tests {
         let group = NodeId::null();
         let floating_roles = [
             Some(DockWindowRole::Floating { group: anchor }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Column { column: group },
+                column: group ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Header { column: group },
+                column: group ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Group { group },
+                column: group,
             }),
         ];
         let zones = [
@@ -2397,13 +2397,13 @@ mod floating_window_chain_target_tests {
         let group = NodeId::null();
         let floating_roles = [
             Some(DockWindowRole::Floating { group: anchor }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Header { column: group },
+                column: group ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Group { group },
+                column: group,
             }),
         ];
         let zones = [
@@ -2444,17 +2444,15 @@ mod floating_window_chain_target_tests {
         let target_node = nodes.insert(());
         let target_roles = [
             Some(DockWindowRole::Floating { group: target_group }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: target_group,
-                part: DockWindowPart::Header {
-                    column: target_node,
-                },
+                column: target_node,
+                ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: target_group,
-                part: DockWindowPart::Group {
-                    group: target_node,
-                },
+                column: target_node,
+                ,
             }),
         ];
 
@@ -2473,11 +2471,10 @@ mod floating_window_chain_target_tests {
             for target_role in target_roles {
                 assert_eq!(
                     floating_window_chain_target(
-                        DragSourceHost::FloatingPart {
+                        DragSourceHost::FloatingColumn {
                             group: source,
-                            part: DockWindowPart::Group {
-                                group: source_node,
-                            },
+                            column: source_node,
+                            ,
                         },
                         Some(DragHandle::GroupGrip),
                         target,
@@ -2496,13 +2493,13 @@ mod floating_window_chain_target_tests {
         let group = NodeId::null();
         let floating_roles = [
             Some(DockWindowRole::Floating { group: anchor }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Header { column: group },
+                column: group ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: anchor,
-                part: crate::DockWindowPart::Group { group },
+                column: group,
             }),
         ];
         let zones = [
@@ -2567,22 +2564,22 @@ mod floating_window_chain_target_tests {
         });
         let target_roles = [
             Some(DockWindowRole::Floating { group: source_group }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: source_group,
-                part: DockWindowPart::Header { column: target_column },
+                column: target_column ,
             }),
-            Some(DockWindowRole::FloatingPart {
+            Some(DockWindowRole::FloatingColumn {
                 group: source_group,
-                part: DockWindowPart::Group { group: target_group },
+                column: target_group ,
             }),
         ];
 
         for target_role in target_roles {
             assert_eq!(
                 floating_window_chain_target(
-                    DragSourceHost::FloatingPart {
+                    DragSourceHost::FloatingColumn {
                         group: source_group,
-                        part: DockWindowPart::Group { group: target_group },
+                        column: target_group ,
                     },
                     Some(DragHandle::GroupGrip),
                     left,
@@ -2609,9 +2606,9 @@ mod floating_window_chain_target_tests {
             let target = Some(DropTarget::GroupEdge { group, zone });
             assert_eq!(
                 floating_window_chain_target(
-                    DragSourceHost::FloatingPart {
+                    DragSourceHost::FloatingColumn {
                         group: source_group,
-                        part: DockWindowPart::Group { group },
+                        column: group,
                     },
                     Some(DragHandle::GroupGrip),
                     target,
@@ -2664,22 +2661,20 @@ mod floating_window_chain_target_tests {
         for (zone, direction) in zones {
             assert_eq!(
                 floating_window_chain_target(
-                    DragSourceHost::FloatingPart {
+                    DragSourceHost::FloatingColumn {
                         group: moving_floating,
-                        part: DockWindowPart::Column {
-                            column: source_column,
-                        },
+                        column: source_column,
+                        ,
                     },
                     Some(DragHandle::PanelTab),
                     Some(DropTarget::GroupEdge {
                         group: target_group,
                         zone,
                     }),
-                    Some(DockWindowRole::FloatingPart {
+                    Some(DockWindowRole::FloatingColumn {
                         group: target_floating,
-                        part: DockWindowPart::Column {
-                            column: target_column,
-                        },
+                        column: target_column,
+                        ,
                     }),
                 ),
                 Some((target_floating, direction)),
