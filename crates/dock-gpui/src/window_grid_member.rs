@@ -1,13 +1,13 @@
 use dock_core::{FloatingGroupId, NodeId};
 
-/// Stable identity of one persistent native member in a Floating WindowGrid.
-///
-/// FloatingComposition is retained only as a compatibility endpoint for external
-/// links. Every persistent Floating HWND is represented by one Core Column.
+/// Identity used by the logical WindowGrid while native Column HWNDs are materialized.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum WindowGridMember {
+    /// Short-lived Core-level endpoint used while a FloatingGroup is waiting for
+    /// its physical Column HWND entries or while an external group link is migrated.
+    /// This variant never represents a native window.
     FloatingComposition(FloatingGroupId),
-    /// Complete native window containing one Core Column's Header and Group stack.
+    /// The only persistent Floating HWND member: Header + all Groups of one Column.
     Column(NodeId),
 }
 
@@ -16,7 +16,7 @@ impl WindowGridMember {
         Self::FloatingComposition(group)
     }
 
-    /// Returns the legacy Core FloatingGroup represented by a compatibility endpoint.
+    /// Returns a Core FloatingGroup only for the temporary composition endpoint.
     pub(crate) const fn floating_group(self) -> Option<FloatingGroupId> {
         match self {
             Self::FloatingComposition(group) => Some(group),
