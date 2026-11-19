@@ -626,7 +626,7 @@ mod windows_impl {
         position: &WINDOWPOS,
         state: &ResizeLoopState,
     ) {
-        if position.flags & SWP_NOSIZE != 0 {
+        if position.flags & SWP_NOSIZE != SET_WINDOW_POS_FLAGS(0) {
             return;
         }
 
@@ -687,7 +687,7 @@ mod windows_impl {
             state.horizontal_edge,
             dpi,
             scale,
-            position.flags,
+            position.flags.0,
             position.x,
             position.y,
             position.cx,
