@@ -204,7 +204,7 @@ impl NativeFrameGeometry {
 /// adding this HWND's client insets recovers the composition client origin before
 /// the local logical offset is scaled. The final conversion subtracts the new
 /// HWND's own insets, keeping its client area aligned with the Core rectangle.
-pub(crate) fn floating_part_outer_bounds(
+pub(crate) fn floating_column_outer_bounds(
     floating_outer_origin: Point,
     local_origin: Point,
     logical_size: Size,
@@ -1001,7 +1001,7 @@ mod contiguous_window_chain_bounds_tests {
 mod window_grid_bounds_tests {
     use super::{
         NativeFrameGeometry, arrange_window_grid_bounds,
-        arrange_window_grid_bounds_with_preserved_offsets, floating_part_outer_bounds,
+        arrange_window_grid_bounds_with_preserved_offsets, floating_column_outer_bounds,
         match_moving_window_width_to_target,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember};
@@ -1066,20 +1066,20 @@ mod window_grid_bounds_tests {
     }
 
     #[test]
-    fn floating_part_bounds_keep_header_and_groups_on_the_core_client_grid() {
+    fn floating_column_bounds_keep_header_and_groups_on_the_core_client_grid() {
         let frame = frame_with_native_insets(
             200.0, 120.0, 1.5, 6.0, 6.0, 8.0, 30.0, 8.0, 10.0,
         );
         let floating_origin = Point::new(1000.0, 600.0);
 
-        let header = floating_part_outer_bounds(
+        let header = floating_column_outer_bounds(
             floating_origin,
             Point::ZERO,
             Size::new(240.0, 40.0),
             frame,
         )
         .expect("Header should align to the original Floating outer origin");
-        let group = floating_part_outer_bounds(
+        let group = floating_column_outer_bounds(
             floating_origin,
             Point::new(0.0, 40.0),
             Size::new(240.0, 180.0),
