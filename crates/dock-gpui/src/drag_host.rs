@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn new_drag_host_session_has_no_detached_panel_views() {
-        use dock_core::{DragHandle, DragPayload, NodeId, PanelId};
+        use dock_core::{DragHandle, DragPayload, PanelId};
 
         let session = super::DragHostSession::new(
             DragPayload::Panel {
