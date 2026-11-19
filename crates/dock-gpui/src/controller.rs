@@ -71,7 +71,7 @@ pub struct DockController {
     main_window_id: Option<WindowId>,
     floating_rects: HashMap<WindowId, FloatingGeometryCache>,
     /// Current native viewport for each permanent Floating Column HWND.
-    floating_column_viewports: HashMap<WindowId, (FloatingGroupId, NodeId, f32, f32)>,
+    floating_column_viewports: HashMap<WindowId, (FloatingGroupId, NodeId, f32, f32, f32)>,
     drag: DragController,
     interaction: Option<ResizeInteraction>,
     resize_frame: ResizeFrameThrottle,
@@ -728,15 +728,20 @@ impl DockController {
         rects: Option<&LayoutRects>,
     ) -> Result<(), ResizeInteractionError> {
         if matches!(&hit, HitResult::Splitter { axis: Axis::Y, .. }) {
-            let column_height = rects
+            let (column_width, column_height) = rects
                 .and_then(|rects| {
                     rects
                         .columns
                         .iter()
                         .find(|rect| rect.column == column)
-                        .map(|rect| rect.rect.size.height)
+                        .map(|rect| (rect.rect.size.width, rect.rect.size.height))
                 })
-                .filter(|height| height.is_finite() && *height > 0.0)
+                .filter(|(width, height)| {
+                    width.is_finite()
+                        && *width > 0.0
+                        && height.is_finite()
+                        && *height > 0.0
+                })
                 .ok_or(ResizeInteractionError::NotResizeHandle)?;
 
             // Persist the current native viewport as transient Core state before
@@ -760,15 +765,16 @@ impl DockController {
             let origin_y_offset = self
                 .floating_column_viewports
                 .get(&window_id)
-                .filter(|(group, current_column, _, _)| {
+                .filter(|(group, current_column, _, _, _)| {
                     *group == floating_group && *current_column == column
                 })
-                .map(|(_, _, _, origin)| *origin)
+                .map(|(_, _, _, _, origin)| *origin)
                 .unwrap_or(0.0);
             self.set_floating_column_viewport(
                 window_id,
                 floating_group,
                 column,
+                column_width,
                 column_height,
                 origin_y_offset,
             );
