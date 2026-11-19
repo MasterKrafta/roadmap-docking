@@ -705,16 +705,6 @@ impl FloatingWindowManager {
 
     /// Returns the connected real Column HWNDs in native front-to-back order.
     /// A standalone Floating Column returns its own single Column window.
-    pub(crate) fn window_grid_members_in_native_order(
-        &self,
-        group: FloatingGroupId,
-    ) -> Vec<WindowGridMember> {
-        let key = self.grid_anchor_member_for_group(group);
-        let members = self.window_chains.members_for(key);
-        let links = self.window_chains.links_for(key).unwrap_or_default();
-        floating_grid_members_in_native_front_to_back(&members, links).unwrap_or(members)
-    }
-
     /// Inserts the moving Floating Column's complete WindowGrid immediately before the anchor.
     #[allow(dead_code)] // Consumed by the whole-window docking stage.
     pub(crate) fn link_window_chain_before(
@@ -1219,11 +1209,6 @@ impl FloatingWindowManager {
                 .dispatch_sequence_in(commands, controller_cx)
                 .map(|_| ())
         })
-    }
-
-    pub(crate) fn hide_floating_header(&self, group: FloatingGroupId) -> bool {
-        self.native_move
-            .is_some_and(|state| state.group == group && state.hide_header)
     }
 
     /// Returns whether an HWND belongs to the persistent Main/Floating hosts.
@@ -2034,7 +2019,6 @@ impl FloatingWindowManager {
         self.native_move = Some(NativeMoveSession {
             group,
             native_window: source_window,
-            hide_header: false,
             initial_cursor: cursor,
             start_bounds,
             start_pointer: pointer,
@@ -4874,6 +4858,7 @@ fn collect_panel_order(
     }
 }
 
+#[cfg(test)]
 fn native_rect_has_reachable_title_area(
     rect: platform::PhysicalRect,
     work_areas: &[platform::PhysicalRect],
@@ -4895,6 +4880,7 @@ fn native_rect_has_reachable_title_area(
     })
 }
 
+#[cfg(test)]
 fn restored_window_origin(
     rect: platform::PhysicalRect,
     work_area: platform::PhysicalRect,
