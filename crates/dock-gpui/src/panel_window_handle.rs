@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dock_core::FloatingGroupId;
-use gpui::{AnyWindowHandle, AppContext, Context, WindowHandle};
+use gpui::{AnyWindowHandle, Context, WindowHandle};
 
 use crate::{
     components::{FloatingHost, floating::FloatingPartHost},
