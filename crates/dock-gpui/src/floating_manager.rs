@@ -562,9 +562,9 @@ pub struct FloatingWindowManager {
     host_registry: CompositionHostRegistry,
     window_chains: WindowGridRegistry,
     /// Ordered permanent Column HWNDs belonging to each Core FloatingGroup.
-    part_members_by_group: HashMap<FloatingGroupId, Vec<WindowGridMember>>,
+    column_members_by_group: HashMap<FloatingGroupId, Vec<WindowGridMember>>,
     /// Temporary Column HWNDs opened from Main during a DockArea drag.
-    pending_main_drag_parts: HashMap<WindowGridMember, PanelWindowEntry>,
+    pending_main_drag_columns: HashMap<WindowGridMember, PanelWindowEntry>,
     /// Original Main DockArea screen origin used to move every temporary part together.
     pending_main_drag_origin: Option<PhysicalPoint>,
     pending_window_chain_alignment: HashSet<WindowGridMember>,
@@ -590,8 +590,8 @@ impl FloatingWindowManager {
             registry: PanelWindowRegistry::default(),
             host_registry: CompositionHostRegistry::default(),
             window_chains: WindowGridRegistry::default(),
-            part_members_by_group: HashMap::new(),
-            pending_main_drag_parts: HashMap::new(),
+            column_members_by_group: HashMap::new(),
+            pending_main_drag_columns: HashMap::new(),
             pending_main_drag_origin: None,
             pending_window_chain_alignment: HashSet::new(),
             pending_window_grid_reconnections: Vec::new(),
@@ -613,7 +613,7 @@ impl FloatingWindowManager {
         match member {
             WindowGridMember::FloatingComposition(group) => Some(group),
             WindowGridMember::Column(_) => self
-                .part_members_by_group
+                .column_members_by_group
                 .iter()
                 .find_map(|(group, members)| members.contains(&member).then_some(*group)),
         }
@@ -624,7 +624,7 @@ impl FloatingWindowManager {
         group: FloatingGroupId,
         side: WindowGridDirection,
     ) -> Option<WindowGridMember> {
-        let members = self.part_members_by_group.get(&group)?;
+        let members = self.column_members_by_group.get(&group)?;
         let candidates = members
             .iter()
             .filter(|member| matches!(member, WindowGridMember::Column(_)))
@@ -688,7 +688,7 @@ impl FloatingWindowManager {
         for anchor in pending_anchors {
             let migrated = match anchor {
                 WindowGridMember::FloatingComposition(group) => {
-                    self.part_members_by_group
+                    self.column_members_by_group
                         .contains_key(&group)
                         .then(|| self.grid_anchor_member_for_group(group))
                 }
@@ -703,7 +703,7 @@ impl FloatingWindowManager {
     }
 
     fn grid_anchor_member_for_group(&self, group: FloatingGroupId) -> WindowGridMember {
-        self.part_members_by_group
+        self.column_members_by_group
             .get(&group)
             .and_then(|members| members.first().copied())
             .unwrap_or_else(|| window_grid_member(group))
@@ -878,14 +878,10 @@ impl FloatingWindowManager {
     /// Resolves each typed WindowGrid identity to its matching permanent native host.
     ///
     /// Column members resolve directly from the Core-node registry. FloatingComposition
-    /// remains a temporary bridge and resolves to the first Group window in that composition.
+    /// remains a compatibility endpoint and resolves to the composition's first Column.
     fn panel_window_for_grid_member(&self, member: WindowGridMember) -> Option<&PanelWindowEntry> {
         match member {
-            WindowGridMember::Column(_) => self
-                .registry
-                .members
-                .get(&member)
-                .or_else(|| self.panel_window_for_group(member.floating_group()?)),
+            WindowGridMember::Column(_) => self.registry.members.get(&member),
             WindowGridMember::FloatingComposition(group) => self.panel_window_for_group(group),
         }
     }
@@ -896,7 +892,7 @@ impl FloatingWindowManager {
         {
             return Some(entry);
         }
-        let members = self.part_members_by_group.get(&group)?;
+        let members = self.column_members_by_group.get(&group)?;
         members.first().and_then(|member| self.registry.members.get(member))
     }
 
@@ -1063,7 +1059,7 @@ impl FloatingWindowManager {
                             // Updated metrics change every Column client rectangle.
                             // Queue one real member per connected WindowGrid.
                             let mut anchors = HashSet::new();
-                            for group in manager.part_members_by_group.keys().copied() {
+                            for group in manager.column_members_by_group.keys().copied() {
                                 let anchor = manager.grid_anchor_member_for_group(group);
                                 if manager.window_chains.members_for(anchor).len() > 1 {
                                     anchors.insert(anchor);
@@ -2887,12 +2883,12 @@ impl FloatingWindowManager {
 
     /// Creates one temporary native Column window for every Column in a Main DockArea.
     /// The Core tree remains in Main until the drag is released.
-    pub(crate) fn open_main_drag_parts(
+    pub(crate) fn open_main_drag_columns(
         &mut self,
         side: DockSide,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.pending_main_drag_parts.is_empty() || self.pending_main_drag_origin.is_some() {
+        if !self.pending_main_drag_columns.is_empty() || self.pending_main_drag_origin.is_some() {
             return false;
         }
 
@@ -2932,21 +2928,17 @@ impl FloatingWindowManager {
                 Size::new(right - left, bottom - top),
             );
 
-            let mut parts = Vec::with_capacity(columns.len());
+            let mut column_windows = Vec::with_capacity(columns.len());
             for column_rect in &columns {
-                parts.push((
-                    WindowGridMember::Column(column_rect.column),
-                    column_rect.column,
-                    column_rect.rect,
-                ));
+                column_windows.push((WindowGridMember::Column(column_rect.column), column_rect.rect));
             }
 
-            Some((area_bounds, parts))
+            Some((area_bounds, column_windows))
         });
-        let Some((area_bounds, parts)) = source else {
+        let Some((area_bounds, column_windows)) = source else {
             return false;
         };
-        if parts.iter().any(|(member, _, _)| self.registry.members.contains_key(member)) {
+        if column_windows.iter().any(|(member, _)| self.registry.members.contains_key(member)) {
             return false;
         }
         let Some(screen_area_bounds) = self.screen_bounds_from_main_local(area_bounds) else {
@@ -2958,7 +2950,7 @@ impl FloatingWindowManager {
         };
 
         let mut created: HashMap<WindowGridMember, PanelWindowEntry> = HashMap::new();
-        for (member, column, local_bounds) in parts {
+        for (member, local_bounds) in column_windows {
             let Some(bounds) = self.screen_bounds_from_main_local(local_bounds) else {
                 for entry in created.into_values() {
                     if let Some(native) = entry.native_window {
@@ -2971,7 +2963,6 @@ impl FloatingWindowManager {
             let spec = FloatingColumnWindowSnapshot {
                 member,
                 floating_group: None,
-                kind,
                 main_drag_side: Some(side),
                 bounds,
                 floating_origin: Point::ZERO,
@@ -2994,18 +2985,18 @@ impl FloatingWindowManager {
         if created.is_empty() {
             return false;
         }
-        self.pending_main_drag_parts = created;
+        self.pending_main_drag_columns = created;
         self.pending_main_drag_origin = Some(area_origin);
         true
     }
 
     /// Shows the temporary Main-origin Column windows after Main has detached
     /// every transferred PanelView.
-    pub(crate) fn show_main_drag_parts(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.pending_main_drag_parts.is_empty() {
+    pub(crate) fn show_main_drag_columns(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.pending_main_drag_columns.is_empty() {
             return false;
         }
-        for (member, entry) in &mut self.pending_main_drag_parts {
+        for (member, entry) in &mut self.pending_main_drag_columns {
             let Some(native_window) = entry.native_window else {
                 tracing::warn!(?member, "temporary Main drag part has no native HWND");
                 return false;
@@ -3024,7 +3015,7 @@ impl FloatingWindowManager {
 
     /// Moves the whole temporary DockArea by one cursor delta while preserving
     /// every Column window's original offset inside the composition.
-    pub(crate) fn move_main_drag_parts(
+    pub(crate) fn move_main_drag_columns(
         &self,
         cursor: PhysicalPoint,
         grab_offset: Point,
@@ -3032,7 +3023,7 @@ impl FloatingWindowManager {
         let Some(start_origin) = self.pending_main_drag_origin else {
             return false;
         };
-        let scale = self.pending_main_drag_parts.values()
+        let scale = self.pending_main_drag_columns.values()
             .filter_map(|entry| entry.native_window)
             .find_map(|native_window| {
                 self.native_ops.scale_factor(native_window).ok()
@@ -3056,7 +3047,7 @@ impl FloatingWindowManager {
         let dx = target_origin.x.saturating_sub(start_origin.x);
         let dy = target_origin.y.saturating_sub(start_origin.y);
 
-        for (member, entry) in &self.pending_main_drag_parts {
+        for (member, entry) in &self.pending_main_drag_columns {
             let Some(native_window) = entry.native_window else {
                 return false;
             };
@@ -3078,11 +3069,11 @@ impl FloatingWindowManager {
 
     /// Converts temporary Main-origin Column windows into permanent Floating members.
     /// The HWNDs and GPUI entities are retained; reconciliation only updates their bounds.
-    pub(crate) fn adopt_main_drag_parts(
+    pub(crate) fn adopt_main_drag_columns(
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.pending_main_drag_parts.is_empty() {
+        if self.pending_main_drag_columns.is_empty() {
             return false;
         }
 
@@ -3104,7 +3095,7 @@ impl FloatingWindowManager {
         // Every Core member must already have a permanent window or a temporary
         // window from this drag; reconciliation must never need to open a missing part.
         if desired.iter().any(|spec| {
-            let pending = self.pending_main_drag_parts.contains_key(&spec.member);
+            let pending = self.pending_main_drag_columns.contains_key(&spec.member);
             let existing = self.registry.members.get(&spec.member);
             match (pending, existing) {
                 (true, Some(_)) => true,
@@ -3120,7 +3111,7 @@ impl FloatingWindowManager {
 
         // Preflight every member before changing its host identity. This keeps
         // the pending set intact on failure, so the caller can close all windows.
-        let pending_members = self.pending_main_drag_parts.iter()
+        let pending_members = self.pending_main_drag_columns.iter()
             .map(|(member, entry)| {
                 let spec = desired_by_member.get(member).copied()?;
                 let native_window = entry.native_window?;
@@ -3132,7 +3123,7 @@ impl FloatingWindowManager {
             return false;
         };
 
-        let mut pending = std::mem::take(&mut self.pending_main_drag_parts);
+        let mut pending = std::mem::take(&mut self.pending_main_drag_columns);
         for (member, spec, native_window) in pending_members {
             let Some(mut entry) = pending.remove(&member) else {
                 continue;
@@ -3170,11 +3161,11 @@ impl FloatingWindowManager {
 
     /// Destroys temporary part windows when a Main DockArea drag is cancelled
     /// or released onto a non-Floating target.
-    pub(crate) fn close_main_drag_parts(
+    pub(crate) fn close_main_drag_columns(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let pending = std::mem::take(&mut self.pending_main_drag_parts);
+        let pending = std::mem::take(&mut self.pending_main_drag_columns);
         self.pending_main_drag_origin = None;
         for (member, entry) in pending {
             if let Some(native_window) = entry.native_window
@@ -3204,7 +3195,7 @@ impl FloatingWindowManager {
         let mut known_windows = Vec::with_capacity(
             self.registry.windows.len()
                 + self.registry.members.len()
-                + self.pending_main_drag_parts.len()
+                + self.pending_main_drag_columns.len()
                 + 1,
         );
 
@@ -3217,7 +3208,7 @@ impl FloatingWindowManager {
                 .then_some(entry.native_window)
                 .flatten()
         }));
-        let mut temporary_part_windows = self.pending_main_drag_parts.values()
+        let mut temporary_part_windows = self.pending_main_drag_columns.values()
             .filter(|entry| entry.visibility == PanelWindowVisibility::Visible)
             .filter_map(|entry| entry.native_window)
             .collect::<HashSet<_>>();
@@ -4251,7 +4242,7 @@ impl FloatingWindowManager {
             .unwrap_or_default();
         let mut member_z_orders = Vec::new();
         for group in groups {
-            if let Some(members) = self.part_members_by_group.get(&group.id) {
+            if let Some(members) = self.column_members_by_group.get(&group.id) {
                 member_z_orders.extend(members.iter().copied().map(|member| (member, group.z_order)));
             }
         }
@@ -4949,7 +4940,7 @@ impl FloatingWindowManager {
         foreground_at_release: Option<NativeWindowId>,
     ) -> bool {
         let native_window = self
-            .part_members_by_group
+            .column_members_by_group
             .get(&group)
             .into_iter()
             .flatten()
@@ -5338,10 +5329,10 @@ impl FloatingWindowManager {
     fn rebuild_floating_column_window_grid(
         &mut self,
         desired: &[FloatingColumnWindowSnapshot],
-        previous_part_members_by_group: &HashMap<FloatingGroupId, Vec<WindowGridMember>>,
+        previous_column_members_by_group: &HashMap<FloatingGroupId, Vec<WindowGridMember>>,
     ) -> bool {
         let previous_links = self.window_chains.all_links();
-        let previous_owners = previous_part_members_by_group
+        let previous_owners = previous_column_members_by_group
             .iter()
             .flat_map(|(group, members)| members.iter().map(move |member| (*member, *group)))
             .collect::<HashMap<_, _>>();
@@ -5463,8 +5454,8 @@ impl FloatingWindowManager {
                 .or_default()
                 .push(spec.member);
         }
-        let previous_part_members_by_group =
-            std::mem::replace(&mut self.part_members_by_group, members_by_group);
+        let previous_column_members_by_group =
+            std::mem::replace(&mut self.column_members_by_group, members_by_group);
 
         for spec in desired.iter().copied() {
             if !self.registry.members.contains_key(&spec.member) {
@@ -5686,7 +5677,7 @@ impl FloatingWindowManager {
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
         // those identities to the current Column boundary members.
-        if self.rebuild_floating_column_window_grid(&boundary_specs, &previous_part_members_by_group) {
+        if self.rebuild_floating_column_window_grid(&boundary_specs, &previous_column_members_by_group) {
             self.migrate_pending_window_grid_state();
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
@@ -7225,7 +7216,7 @@ mod floating_part_window_grid_rebuild_tests {
 }
 
 #[cfg(test)]
-mod floating_part_topology_tests {
+mod floating_column_topology_tests {
     use super::{
         FloatingColumnWindowSnapshot, floating_column_boundary_member,
         floating_part_internal_links,
@@ -7242,7 +7233,7 @@ mod floating_part_topology_tests {
         FloatingColumnWindowSnapshot {
             member: WindowGridMember::Column(column),
             floating_group: Some(floating_group),
-                        main_drag_side: None,
+            main_drag_side: None,
             bounds: Rect::new(Point::new(x, 0.0), Size::new(240.0, 420.0)),
             floating_origin: Point::new(100.0, 200.0),
             local_origin: Point::new(x, 0.0),
