@@ -4442,6 +4442,8 @@ impl FloatingWindowManager {
                 .unwrap_or_else(|| {
                     if native_window.is_some() { current_bounds } else { target_spec.bounds }
                 });
+            let core_width_changed =
+                (current_bounds.size.width - spec.bounds.size.width).abs() > 0.5;
             let resizing_this_member = self.native_resize.is_some_and(|session| {
                 session.group == spec.floating_group() && session.member == spec.member
             });
@@ -4482,14 +4484,23 @@ impl FloatingWindowManager {
                 }
             }
 
-            // Core-driven Column resizing changes the HWND outside GPUI's own
-            // window layout loop. Refresh GPUI's cached client bounds as well,
-            // otherwise the native window can grow while its rendered viewport
-            // remains at the previous height.
-            if core_height_changed
-                && let Some(window) = self.registry.members.get(&spec.member).map(|entry| entry.window)
-            {
-                window.refresh_bounds_later(cx);
+            // Core-driven resize changes the HWND outside GPUI's own window
+            // layout loop. Refresh GPUI's cached client bounds for either axis;
+            // otherwise the native window can change size while its rendered
+            // viewport keeps the previous client dimensions.
+            if core_width_changed || core_height_changed {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=refresh_gpui_bounds group={:?} member={:?} registry_width={:.1} core_width={:.1} width_changed={} height_changed={}",
+                    spec.floating_group(),
+                    spec.member,
+                    current_bounds.size.width,
+                    spec.bounds.size.width,
+                    core_width_changed,
+                    core_height_changed,
+                );
+                if let Some(window) = self.registry.members.get(&spec.member).map(|entry| entry.window) {
+                    window.refresh_bounds_later(cx);
+                }
             }
 
             let native_window = self
