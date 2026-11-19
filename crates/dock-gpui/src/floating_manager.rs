@@ -1622,6 +1622,22 @@ impl FloatingWindowManager {
             return;
         }
 
+        if width_changed {
+            tracing::info!(
+                target: "dock_gpui::floating_resize_diag",
+                event = "native_sample",
+                group = ?group,
+                column = ?column,
+                hwnd_client_width = native_column_bounds.size.width,
+                core_column_width = current_column_bounds.size.width,
+                core_composition_width = current_group_bounds.size.width,
+                requested_composition_width = target_group_bounds.size.width,
+                width_delta,
+                edge = ?edge,
+                "[FLOATING_RESIZE_DIAG]"
+            );
+        }
+
         if !state.transaction_started {
             state.transaction_started = self.controller.update(cx, |controller, _| {
                 controller.begin_native_resize_transaction()
@@ -1695,6 +1711,25 @@ impl FloatingWindowManager {
                             Size::new(bounds.size.width, native_column_bounds.size.height),
                         )
                     });
+
+                    if width_changed {
+                        let accepted_core_column_width =
+                            accepted_column_bounds.map(|bounds| bounds.size.width);
+                        let accepted_core_composition_width = controller
+                            .layout()
+                            .floating_group(group)
+                            .map(|floating| floating.bounds.size.width);
+                        tracing::info!(
+                            target: "dock_gpui::floating_resize_diag",
+                            event = "core_after_resize",
+                            group = ?group,
+                            column = ?column,
+                            hwnd_client_width = native_column_bounds.size.width,
+                            accepted_core_column_width = ?accepted_core_column_width,
+                            accepted_core_composition_width = ?accepted_core_composition_width,
+                            "[FLOATING_RESIZE_DIAG]"
+                        );
+                    }
 
                     if let (Some(accepted_column_bounds), Some((grid_bounds, grid_frames, owners))) =
                         (accepted_column_bounds, grid_geometry.as_ref())
@@ -4411,13 +4446,33 @@ impl FloatingWindowManager {
                 .unwrap_or_else(|| {
                     if native_window.is_some() { current_bounds } else { target_spec.bounds }
                 });
+            let resizing_this_member = self.native_resize.is_some_and(|session| {
+                session.group == spec.floating_group() && session.member == spec.member
+            });
+            let actual_native_client_width = native_window
+                .and_then(|native_window| self.core_bounds_from_native_window(native_window))
+                .map(|bounds| bounds.size.width);
+            if actual_native_client_width.is_some_and(|actual| {
+                (actual - target_bounds.size.width).abs() > 0.5
+            }) {
+                tracing::info!(
+                    target: "dock_gpui::floating_resize_diag",
+                    event = "reconcile_width_mismatch",
+                    group = ?spec.floating_group(),
+                    member = ?spec.member,
+                    hwnd_client_width = ?actual_native_client_width,
+                    core_column_width = spec.bounds.size.width,
+                    reconcile_target_width = target_bounds.size.width,
+                    registry_width = current_bounds.size.width,
+                    native_bounds_dirty,
+                    resizing_this_member,
+                    "[FLOATING_RESIZE_DIAG]"
+                );
+            }
             let scale_changed = current_scale.is_some_and(|scale| {
                 previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
             });
             if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
-                let resizing_this_member = self.native_resize.is_some_and(|session| {
-                    session.group == spec.floating_group() && session.member == spec.member
-                });
                 if !resizing_this_member
                     && let Some(native_window) = native_window
                 {
