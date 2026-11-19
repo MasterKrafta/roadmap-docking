@@ -27,7 +27,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DockWindowPart, DragHostManager, DragSourceHost,
-    components::{FloatingHost, floating::{floating_column_host_rect, floating_part_local_rect, FloatingColumnHost, FloatingPartKind}},
+    components::{FloatingHost, floating::{floating_column_host_rect, floating_part_local_rect, FloatingColumnHost}},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
@@ -63,8 +63,8 @@ mod native_move_window;
 mod native_move_session;
 #[path = "floating_group_snapshot.rs"]
 mod floating_group_snapshot;
-#[path = "floating_part_window_snapshot.rs"]
-mod floating_part_window_snapshot;
+#[path = "floating_column_window_snapshot.rs"]
+mod floating_column_window_snapshot;
 #[path = "native_resize_session.rs"]
 mod native_resize_session;
 
@@ -74,7 +74,7 @@ pub use panel_window_registry::PanelWindowRegistry;
 pub use panel_window_visibility::PanelWindowVisibility;
 pub(crate) use docking_window_at_point::DockingWindowAtPoint;
 use floating_group_snapshot::FloatingGroupSnapshot;
-use floating_part_window_snapshot::FloatingPartWindowSnapshot;
+use floating_column_window_snapshot::FloatingColumnWindowSnapshot;
 use native_move_session::NativeMoveSession;
 use native_move_target::NativeMoveTarget;
 use native_move_window::NativeMoveWindow;
@@ -253,28 +253,12 @@ fn floating_column_host_bounds(
     ))
 }
 
-fn floating_part_reference_group(
-    spec: FloatingPartWindowSnapshot,
-    desired: &[FloatingPartWindowSnapshot],
-) -> Option<NodeId> {
-    let FloatingPartKind::Header { column } = spec.kind else {
-        return None;
-    };
-    desired.iter().find_map(|candidate| match candidate.kind {
-        FloatingPartKind::Group {
-            column: group_column,
-            group,
-        } if group_column == column => Some(group),
-        _ => None,
-    })
-}
-
-fn collect_floating_part_windows(
+fn collect_floating_column_windows(
     layout: &dock_core::Layout,
     metrics: &dock_core::DockMetrics,
     scale_factor: f32,
     transferred_panels: &HashSet<PanelId>,
-) -> Vec<FloatingPartWindowSnapshot> {
+) -> Vec<FloatingColumnWindowSnapshot> {
     let mut result = Vec::new();
 
     for (floating_group, floating) in layout.floating_groups() {
@@ -314,12 +298,9 @@ fn collect_floating_part_windows(
                 continue;
             }
 
-            result.push(FloatingPartWindowSnapshot {
+            result.push(FloatingColumnWindowSnapshot {
                 member: WindowGridMember::Column(column_rect.column),
                 floating_group: Some(floating_group),
-                kind: FloatingPartKind::Column {
-                    column: column_rect.column,
-                },
                 main_drag_side: None,
                 bounds,
                 floating_origin: floating.bounds.origin,
@@ -333,7 +314,7 @@ fn collect_floating_part_windows(
 }
 
 fn floating_part_internal_links(
-    specs: &[FloatingPartWindowSnapshot],
+    specs: &[FloatingColumnWindowSnapshot],
 ) -> Vec<WindowGridLink> {
     let mut floating_groups = Vec::new();
     for spec in specs {
@@ -346,10 +327,7 @@ fn floating_part_internal_links(
     for floating_group in floating_groups {
         let mut columns = specs
             .iter()
-            .filter(|spec| {
-                spec.floating_group() == floating_group
-                    && matches!(spec.kind, FloatingPartKind::Column { .. })
-            })
+            .filter(|spec| spec.floating_group() == floating_group)
             .collect::<Vec<_>>();
         columns.sort_by(|left, right| left.local_origin.x.total_cmp(&right.local_origin.x));
 
@@ -399,16 +377,13 @@ fn floating_part_boundary_member_from_rects(
 }
 
 fn floating_part_boundary_member(
-    specs: &[FloatingPartWindowSnapshot],
+    specs: &[FloatingColumnWindowSnapshot],
     floating_group: FloatingGroupId,
     side: WindowGridDirection,
 ) -> Option<WindowGridMember> {
     let candidates = specs
         .iter()
-        .filter(|spec| {
-            spec.floating_group() == floating_group
-                && matches!(spec.kind, FloatingPartKind::Column { .. })
-        })
+        .filter(|spec| spec.floating_group() == floating_group)
         .map(|spec| {
             (
                 spec.member,
@@ -424,28 +399,13 @@ fn floating_part_boundary_member_from_members(
 ) -> Option<WindowGridMember> {
     let columns = members
         .iter()
-        .filter(|member| matches!(member, WindowGridMember::Column(_))
-            )
-        .copied()
-        .collect::<Vec<_>>();
-    let headers = members
-        .iter()
-        .filter(|member| matches!(member, WindowGridMember::Header(_)))
-        .copied()
-        .collect::<Vec<_>>();
-    let groups = members
-        .iter()
-        .filter(|member| matches!(member, WindowGridMember::Group(_)))
+        .filter(|member| matches!(member, WindowGridMember::Column(_)))
         .copied()
         .collect::<Vec<_>>();
 
     match side {
-        WindowGridDirection::Left | WindowGridDirection::Above => {
-            columns.first().or(headers.first()).or(groups.first()).copied()
-        }
-        WindowGridDirection::Right | WindowGridDirection::Below => {
-            columns.last().or(headers.last()).or(groups.last()).copied()
-        }
+        WindowGridDirection::Left | WindowGridDirection::Above => columns.first().copied(),
+        WindowGridDirection::Right | WindowGridDirection::Below => columns.last().copied(),
     }
 }
 
@@ -1034,7 +994,7 @@ impl FloatingWindowManager {
     /// The physical origin uses this HWND's own monitor scale and measured insets.
     fn part_outer_bounds_for_target(
         &self,
-        spec: FloatingPartWindowSnapshot,
+        spec: FloatingColumnWindowSnapshot,
         native_window: NativeWindowId,
         fallback_scale: Option<f32>,
         reference_group: Option<NodeId>,
@@ -1556,7 +1516,7 @@ impl FloatingWindowManager {
             .unwrap_or(1.0);
         let spec = self.controller.update(cx, |controller, _| {
             let transferred = HashSet::new();
-            collect_floating_part_windows(
+            collect_floating_column_windows(
                 controller.layout(),
                 &controller.metrics(),
                 scale,
@@ -3283,9 +3243,7 @@ impl FloatingWindowManager {
             for column_rect in &columns {
                 parts.push((
                     WindowGridMember::Column(column_rect.column),
-                    FloatingPartKind::Column {
-                        column: column_rect.column,
-                    },
+                    column_rect.column,
                     column_rect.rect,
                 ));
             }
@@ -3307,7 +3265,7 @@ impl FloatingWindowManager {
         };
 
         let mut created: HashMap<WindowGridMember, PanelWindowEntry> = HashMap::new();
-        for (member, kind, local_bounds) in parts {
+        for (member, column, local_bounds) in parts {
             let Some(bounds) = self.screen_bounds_from_main_local(local_bounds) else {
                 for entry in created.into_values() {
                     if let Some(native) = entry.native_window {
@@ -3317,7 +3275,7 @@ impl FloatingWindowManager {
                 }
                 return false;
             };
-            let spec = FloatingPartWindowSnapshot {
+            let spec = FloatingColumnWindowSnapshot {
                 member,
                 floating_group: None,
                 kind,
@@ -3327,7 +3285,7 @@ impl FloatingWindowManager {
                 local_origin: local_bounds.origin,
                 contains_transferred_panels: false,
             };
-            let Some(mut entry) = self.create_part_window(spec, None, cx) else {
+            let Some(mut entry) = self.create_column_window(spec, cx) else {
                 for entry in created.into_values() {
                     if let Some(native) = entry.native_window {
                         let _ = self.native_ops.hide(native);
@@ -3440,7 +3398,7 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let desired = self.controller.update(cx, |controller, _| {
-            collect_floating_part_windows(
+            collect_floating_column_windows(
                 controller.layout(),
                 &controller.metrics(),
                 scale,
@@ -4567,7 +4525,7 @@ impl FloatingWindowManager {
             });
 
         groups.sort_by_key(|group| group.z_order);
-        let prune_result = self.reconcile_part_windows(&transferred_panels, cx);
+        let prune_result = self.reconcile_column_windows(&transferred_panels, cx);
         let removed_chain_members = prune_result.removed_members;
         if removed_chain_members > 0 {
             tracing::debug!(removed_chain_members, "removed stale WindowGrid members");
@@ -5245,7 +5203,7 @@ impl FloatingWindowManager {
                 };
                 // Legacy PanelId-host path: a transferred composition stays hidden
                 // until DragHost has rendered its empty placeholder and released the
-                // cached AnyViews. Permanent typed Column hosts use reconcile_part_windows.
+                // cached AnyViews. Permanent typed Column hosts use reconcile_column_windows.
                 if entry.visibility == PanelWindowVisibility::Hidden
                     && group.panels.iter().any(|panel| transferred_panels.contains(panel))
                 {
@@ -5803,12 +5761,14 @@ impl FloatingWindowManager {
         }
     }
 
-    fn create_part_window(
+    fn create_column_window(
         &mut self,
-        spec: FloatingPartWindowSnapshot,
-        reference_group: Option<NodeId>,
+        spec: FloatingColumnWindowSnapshot,
         cx: &mut Context<Self>,
     ) -> Option<PanelWindowEntry> {
+        let WindowGridMember::Column(column) = spec.member else {
+            return None;
+        };
         let controller = self.controller.clone();
         let theme = self.theme;
         let manager = cx.entity().downgrade();
@@ -5828,48 +5788,16 @@ impl FloatingWindowManager {
             // Axis::X splitter input uses the shared Core interaction pipeline.
             is_movable: false,
             app_owns_titlebar_drag: false,
-            is_resizable: spec.main_drag_side.is_none()
-                && matches!(spec.kind, FloatingPartKind::Column { .. }),
+            is_resizable: spec.main_drag_side.is_none(),
             is_minimizable: false,
             ..Default::default()
         };
 
         let window = match cx.open_window(options, move |_, app| {
             let host = if let Some(side) = spec.main_drag_side {
-                FloatingColumnHost::new_main_drag(
-                    controller,
-                    side,
-                    spec.kind,
-                    theme,
-                    manager,
-                    host_close_button_visible.clone(),
-                )
+                FloatingColumnHost::new_main_drag(controller, side, column, theme, manager, host_close_button_visible.clone())
             } else {
-                match spec.kind {
-                    FloatingPartKind::Column { column } => FloatingColumnHost::new_column(
-                        controller,
-                        spec.floating_group(),
-                        column,
-                        theme,
-                        manager,
-                        host_close_button_visible.clone(),
-                    ),
-                    FloatingPartKind::Header { column } => FloatingColumnHost::new_header(
-                        controller,
-                        spec.floating_group(),
-                        column,
-                        theme,
-                        manager,
-                    ),
-                    FloatingPartKind::Group { column, group } => FloatingColumnHost::new_group(
-                        controller,
-                        spec.floating_group(),
-                        column,
-                        group,
-                        theme,
-                        manager,
-                    ),
-                }
+                FloatingColumnHost::new_column(controller, spec.floating_group(), column, theme, manager, host_close_button_visible.clone())
             };
             app.new(|_| host)
         }) {
@@ -5892,7 +5820,7 @@ impl FloatingWindowManager {
                 tracing::error!(
                     ?spec.member,
                     %error,
-                    "could not inspect the new Floating part window identifier"
+                    "could not inspect the new Floating Column window identifier"
                 );
                 let _ = window.update(cx, |_, window, _| window.remove_window());
                 return None;
@@ -5908,7 +5836,7 @@ impl FloatingWindowManager {
                 tracing::error!(
                     ?spec.member,
                     %error,
-                    "Floating part window has no native handle"
+                    "Floating Column window has no native handle"
                 );
                 let _ = window.update(cx, |_, window, _| window.remove_window());
                 return None;
@@ -5917,7 +5845,7 @@ impl FloatingWindowManager {
                 tracing::error!(
                     ?spec.member,
                     %error,
-                    "could not inspect a newly created Floating part window"
+                    "could not inspect a newly created Floating Column window"
                 );
                 let _ = window.update(cx, |_, window, _| window.remove_window());
                 return None;
@@ -5931,7 +5859,7 @@ impl FloatingWindowManager {
         let Some(owner) = self.main_native_window else {
             tracing::error!(
                 ?spec.member,
-                "could not create a Floating part window without the main native owner"
+                "could not create a Floating Column window without the main native owner"
             );
             let _ = window.update(cx, |_, window, _| window.remove_window());
             return None;
@@ -5948,7 +5876,7 @@ impl FloatingWindowManager {
         if !hide_from_taskbar(native_window) {
             tracing::warn!(
                 ?spec.member,
-                "could not hide a Floating part window from the taskbar"
+                "could not hide a Floating Column window from the taskbar"
             );
         }
 
@@ -5960,12 +5888,7 @@ impl FloatingWindowManager {
         let outer_bounds = if spec.main_drag_side.is_some() {
             spec.bounds
         } else {
-            self.part_outer_bounds_for_target(
-                spec,
-                native_window,
-                scale,
-                reference_group,
-            )
+            self.part_outer_bounds_for_target(spec, native_window, scale, None)
             .unwrap_or(spec.bounds)
         };
         self.sync_part_window_bounds(native_window, outer_bounds);
@@ -5993,8 +5916,7 @@ impl FloatingWindowManager {
                 Some(spec.floating_group())
             },
             visibility: PanelWindowVisibility::Hidden,
-            close_button_visible: matches!(spec.kind, FloatingPartKind::Column { .. })
-                .then_some(close_button_visible),
+            close_button_visible: Some(close_button_visible),
         })
     }
 
@@ -6051,9 +5973,9 @@ impl FloatingWindowManager {
     /// Detaches one selected Column stack from every previous WindowGrid neighbour.
     /// Rebuilds internal Column edges from Core and preserves only links
     /// that were external both before and after the current Layout transition.
-    fn rebuild_floating_part_window_grid(
+    fn rebuild_floating_column_window_grid(
         &mut self,
-        desired: &[FloatingPartWindowSnapshot],
+        desired: &[FloatingColumnWindowSnapshot],
         previous_part_members_by_group: &HashMap<FloatingGroupId, Vec<WindowGridMember>>,
     ) -> bool {
         let previous_links = self.window_chains.all_links();
@@ -6126,7 +6048,7 @@ impl FloatingWindowManager {
         }
     }
 
-    fn reconcile_part_windows(
+    fn reconcile_column_windows(
         &mut self,
         transferred_panels: &[PanelId],
         cx: &mut Context<Self>,
@@ -6138,7 +6060,7 @@ impl FloatingWindowManager {
             .unwrap_or(1.0);
         let transferred_panels = transferred_panels.iter().copied().collect::<HashSet<_>>();
         let desired = self.controller.update(cx, |controller, _| {
-            collect_floating_part_windows(
+            collect_floating_column_windows(
                 controller.layout(),
                 &controller.metrics(),
                 scale,
@@ -6183,9 +6105,8 @@ impl FloatingWindowManager {
             std::mem::replace(&mut self.part_members_by_group, members_by_group);
 
         for spec in desired.iter().copied() {
-            let reference_group = floating_part_reference_group(spec, &desired);
             if !self.registry.members.contains_key(&spec.member) {
-                if let Some(entry) = self.create_part_window(spec, reference_group, cx) {
+                if let Some(entry) = self.create_column_window(spec, cx) {
                     self.registry.members.insert(spec.member, entry);
                 } else {
                     continue;
@@ -6404,7 +6325,7 @@ impl FloatingWindowManager {
         // Pending requests may still carry legacy composition identities from
         // register_window_chain or a previous prune. Rebuild first, then migrate
         // those identities to the current Column boundary members.
-        if self.rebuild_floating_part_window_grid(&boundary_specs, &previous_part_members_by_group) {
+        if self.rebuild_floating_column_window_grid(&boundary_specs, &previous_part_members_by_group) {
             self.migrate_pending_window_grid_state();
             let rebuilt_links = self.window_chains.all_links().into_iter().collect::<HashSet<_>>();
             self.pending_window_grid_reconnections
@@ -7945,7 +7866,7 @@ mod floating_part_window_grid_rebuild_tests {
 #[cfg(test)]
 mod floating_part_topology_tests {
     use super::{
-        FloatingPartKind, FloatingPartWindowSnapshot, floating_part_boundary_member,
+        FloatingColumnWindowSnapshot, floating_part_boundary_member,
         floating_part_internal_links,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
@@ -7956,12 +7877,11 @@ mod floating_part_topology_tests {
         column: NodeId,
         floating_group: FloatingGroupId,
         x: f32,
-    ) -> FloatingPartWindowSnapshot {
-        FloatingPartWindowSnapshot {
+    ) -> FloatingColumnWindowSnapshot {
+        FloatingColumnWindowSnapshot {
             member: WindowGridMember::Column(column),
             floating_group: Some(floating_group),
-            kind: FloatingPartKind::Column { column },
-            main_drag_side: None,
+                        main_drag_side: None,
             bounds: Rect::new(Point::new(x, 0.0), Size::new(240.0, 420.0)),
             floating_origin: Point::new(100.0, 200.0),
             local_origin: Point::new(x, 0.0),
