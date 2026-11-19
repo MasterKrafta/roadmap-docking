@@ -634,12 +634,34 @@ impl DockController {
     /// Opens a single history transaction for one continuous native OS resize.
     /// The adapter streams ResizeFloatingBounds commands until WM_EXITSIZEMOVE.
     pub(crate) fn begin_native_resize_transaction(&mut self) -> bool {
-        if !self.native_resize_session_active
-            || self.native_window_move_transaction_active
-            || self.native_resize_transaction_active
-            || self.interaction.is_some()
-            || !self.history.begin_transaction(&self.layout)
-        {
+        if !self.native_resize_session_active {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_blocked reason=native_resize_session_inactive"
+            );
+            return false;
+        }
+        if self.native_window_move_transaction_active {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_blocked reason=native_window_move_transaction_active"
+            );
+            return false;
+        }
+        if self.native_resize_transaction_active {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_blocked reason=native_resize_transaction_already_active"
+            );
+            return false;
+        }
+        if self.interaction.is_some() {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_blocked reason=pointer_resize_interaction_active"
+            );
+            return false;
+        }
+        if !self.history.begin_transaction(&self.layout) {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_blocked reason=history_transaction_already_open"
+            );
             return false;
         }
         self.native_resize_transaction_active = true;
