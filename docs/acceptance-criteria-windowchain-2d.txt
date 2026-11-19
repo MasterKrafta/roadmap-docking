@@ -1,6 +1,9 @@
-ВИЗУАЛЬНАЯ ПРИЁМКА WINDOWCHAIN 2D
+ВИЗУАЛЬНАЯ ПРИЁМКА FLOATING COLUMN WINDOWGRID 2D
 Проект: MasterKrafta/roadmap-docking
-Основной план: docs/plan-peredelki-windowchain-2d.txt
+Актуальный архитектурный план: docs/План-перехода-на-модель-одно-окно-на-композицию.md
+
+Модель окон: Main — один HWND; Floating — один HWND на каждую Column.
+Несколько Column одного FloatingGroup могут соединяться в общую WindowGrid.
 
 Назначение: здесь оставлены только проверки, которые пользователь может
 выполнить непосредственно в приложении — по поведению окон и тому, что видно
