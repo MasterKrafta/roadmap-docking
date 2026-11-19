@@ -1,4 +1,6 @@
-ПЛАН ПЕРЕДЕЛКИ WINDOWCHAIN В ДВУМЕРНУЮ СЕТКУ FLOATING-ОКОН
+# [УСТАРЕЛО] План переделки WindowGrid в двумерную сетку Floating-окон
+
+> **СТАТУС: ПРЕДЫДУЩАЯ МОДЕЛЬ РЕЕСТРА, НЕ ТЕКУЩАЯ СПЕЦИФИКАЦИЯ.** Документ строился вокруг сопоставления FloatingGroup/PanelId с одним native HWND и старого CompositionHostRegistry. Эта модель удалена. Сейчас физический участник WindowGrid — **Column(NodeId) → HWND**; один FloatingGroup может содержать несколько Column HWND. Main остаётся одним HWND, Floating — одним HWND на каждую Column. Геометрические идеи направленной WindowGrid, DPI, Z-order и pruning могут быть исторически полезны, но старые registry/host assumptions и этапы реализации не применять. Текущий контракт: [План-перехода-на-модель-одно-окно-на-композицию.md](План-перехода-на-модель-одно-окно-на-композицию.md).
 
 Проект: MasterKrafta/roadmap-docking
 Ветка: main
