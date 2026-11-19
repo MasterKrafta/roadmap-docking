@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, DockMetrics, DragPreview, DropZoneRect, FloatingGroupRect,
+    ColumnDisplayItem, ColumnMode, DockMetrics, DragPreview, FloatingGroupRect,
     LayoutRects, NodeId,
 };
 
@@ -17,7 +17,6 @@ pub(super) struct FloatingColumnSnapshot {
     pub(super) rail_display_orders: HashMap<NodeId, Vec<ColumnDisplayItem>>,
     pub(super) metrics: DockMetrics,
     pub(super) drag_preview: Option<DragPreview>,
-    pub(super) drag_zones: Vec<DropZoneRect>,
     pub(super) active_drop_zone: Option<dock_core::DropZoneRect>,
     pub(super) resize_preview: Option<ResizePreview>,
 }
