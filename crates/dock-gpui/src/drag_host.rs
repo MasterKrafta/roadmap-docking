@@ -1,8 +1,5 @@
 //! Runtime identity and role types for dock-related native windows.
 
-#[path = "dock_window_part.rs"]
-
-mod dock_window_part;
 #[path = "dock_window_role.rs"]
 mod dock_window_role;
 #[path = "drag_host_id.rs"]
@@ -12,7 +9,6 @@ mod drag_host_session;
 #[path = "drag_source_host.rs"]
 mod drag_source_host;
 
-pub use dock_window_part::DockWindowPart;
 pub use dock_window_role::DockWindowRole;
 pub use drag_host_id::DragHostId;
 pub use drag_host_session::DragHostSession;
@@ -186,9 +182,9 @@ mod tests {
         );
         assert_ne!(
             dragging,
-            DockWindowRole::FloatingPart {
+            DockWindowRole::FloatingColumn {
                 group: FloatingGroupId::null(),
-                part: super::DockWindowPart::Group { group: dock_core::NodeId::null() },
+                column: dock_core::NodeId::null(),
             }
         );
     }
