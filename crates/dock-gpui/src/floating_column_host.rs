@@ -29,7 +29,7 @@ use crate::{
 use super::{
     floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_group_for_column, handle_floating_escape, observe_floating_focus_loss,
-    render_floating_pointer_input, FloatingHostOpenMenu, FloatingColumnSnapshot,
+    render_floating_pointer_input, FloatingColumnOpenMenu, FloatingColumnSnapshot,
     FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
 };
 use super::super::{
@@ -88,7 +88,7 @@ pub(crate) struct FloatingColumnHost {
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
     manager_observed: bool,
-    open_context_menu: Option<FloatingHostOpenMenu>,
+    open_context_menu: Option<FloatingColumnOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
@@ -762,7 +762,7 @@ impl FloatingColumnHost {
                     {
                         None
                     } else {
-                        Some(FloatingHostOpenMenu {
+                        Some(FloatingColumnOpenMenu {
                             target,
                             anchor,
                             open_submenu: None,
