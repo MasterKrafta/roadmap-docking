@@ -27,7 +27,7 @@ use crate::{
 };
 
 use super::{
-    floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
+    floating_dock_component_tab_zones, floating_column_snapshot, floating_column_local_rect,
     floating_group_for_column, handle_floating_escape, observe_floating_focus_loss,
     render_floating_pointer_input, FloatingColumnOpenMenu, FloatingColumnSnapshot,
     FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
@@ -270,18 +270,18 @@ impl Render for FloatingColumnHost {
                     origin_y_offset,
                 );
             }
-            floating_host_snapshot(controller, window_id, floating_group)
+            floating_column_snapshot(controller, window_id, floating_group)
         });
         let snapshot = match snapshot {
             Ok(Some(snapshot)) => snapshot,
-            Ok(None) => return div().id("empty-floating-part").size_full().into_any_element(),
+            Ok(None) => return div().id("empty-floating-column").size_full().into_any_element(),
             Err(error) => {
                 tracing::warn!(
                     column = ?self.column,
                     %error,
-                    "floating part host could not obtain Core geometry"
+                    "Floating Column host could not obtain Core geometry"
                 );
-                return div().id("invalid-floating-part").size_full().into_any_element();
+                return div().id("invalid-floating-column").size_full().into_any_element();
             }
         };
 
@@ -309,7 +309,7 @@ fn render_floating_drop_overlay(
         .map(|group| {
             GroupRect::new(
                 group.group,
-                floating_part_local_rect(group.rect, origin),
+                floating_column_local_rect(group.rect, origin),
             )
         })
         .collect::<Vec<_>>();
@@ -320,7 +320,7 @@ fn render_floating_drop_overlay(
         .map(|column| {
             ColumnRect::new(
                 column.column,
-                floating_part_local_rect(column.rect, origin),
+                floating_column_local_rect(column.rect, origin),
             )
         })
         .collect::<Vec<_>>();
@@ -333,7 +333,7 @@ fn render_floating_drop_overlay(
                 header.group,
                 header.panel,
                 header.index,
-                floating_part_local_rect(header.rect, origin),
+                floating_column_local_rect(header.rect, origin),
             )
         })
         .collect::<Vec<_>>();
@@ -344,7 +344,7 @@ fn render_floating_drop_overlay(
         .map(|strip| {
             TabStripRect::new(
                 strip.group,
-                floating_part_local_rect(strip.rect, origin),
+                floating_column_local_rect(strip.rect, origin),
             )
         })
         .collect::<Vec<_>>();
@@ -352,7 +352,7 @@ fn render_floating_drop_overlay(
         DropZoneRect::new(
             zone.target,
             zone.zone,
-            floating_part_local_rect(zone.rect, origin),
+            floating_column_local_rect(zone.rect, origin),
         )
     });
     let preview = snapshot.drag_preview.map(|preview| DragPreview {
@@ -362,7 +362,7 @@ fn render_floating_drop_overlay(
         ),
         ..preview
     });
-    let floating_bounds = floating_part_local_rect(snapshot.floating.rect, origin);
+    let floating_bounds = floating_column_local_rect(snapshot.floating.rect, origin);
 
     DropOverlay::render(
         resolved_zone,
