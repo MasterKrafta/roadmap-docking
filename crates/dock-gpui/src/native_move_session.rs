@@ -16,5 +16,5 @@ pub(super) struct NativeMoveSession {
     pub(super) high_resolution_timer: bool,
     pub(super) drop_target: Option<NativeMoveTarget>,
     /// Exact Floating Column HWND whose Header initiated a whole-WindowGrid move.
-    pub(super) source_column_host: Option<NodeId>,
+    pub(super) source_column_host: NodeId,
 }
