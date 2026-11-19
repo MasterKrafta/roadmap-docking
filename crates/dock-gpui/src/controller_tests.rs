@@ -291,6 +291,15 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
         .next()
         .map(|(id, _)| id)
         .expect("the dropped group should now belong to a FloatingHost");
+    let source_column = controller
+        .layout()
+        .nodes()
+        .find_map(|(id, node)| match node {
+            Node::Column(column) if column.groups.contains(&source_group) => Some(id),
+            _ => None,
+        })
+        .expect("the dragged group should belong to a Floating Column");
+
     controller
         .begin_content_drag_interaction(
             DragPayload::Group {
@@ -298,8 +307,9 @@ fn drag_host_drop_creates_one_undo_step_and_allows_a_follow_up_drag() {
             },
             DragHandle::GroupGrip,
             Point::new(40.0, 20.0),
-            DragSourceHost::Floating {
+            DragSourceHost::FloatingColumn {
                 group: floating_group,
+                column: source_column,
             },
             WindowId::from(102),
         )
