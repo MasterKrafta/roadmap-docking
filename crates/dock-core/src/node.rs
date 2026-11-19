@@ -55,6 +55,7 @@ mod tests {
             mode: ColumnMode::Expanded,
             groups: vec![second, first],
             group_ratios: vec![0.75, 0.25],
+            floating_height: None,
             last_expanded_width: Some(280.0),
         });
 
@@ -98,6 +99,7 @@ mod tests {
             mode: ColumnMode::Expanded,
             groups: vec![group],
             group_ratios: vec![1.0],
+            floating_height: None,
             last_expanded_width: Some(280.0),
         });
         assert!(matches!(column, Node::Column(_)));
