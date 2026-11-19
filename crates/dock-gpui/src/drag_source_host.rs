@@ -5,7 +5,7 @@ use dock_core::{FloatingGroupId, NodeId};
 pub enum DragSourceHost {
     /// Content originated in the persistent main dock window.
     Main,
-    /// Content originated in a legacy composition host.
+    /// Content originated in one permanent Floating Column HWND.
     FloatingColumn {
         /// Core identity of the containing floating composition.
         group: FloatingGroupId,
