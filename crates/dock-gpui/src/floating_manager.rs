@@ -1632,36 +1632,6 @@ impl FloatingWindowManager {
     /// Samples the native client bounds of one Floating Column after GPUI reports
     /// a window-bounds change. The manager translates that rectangle to the
     /// containing Floating composition before dispatching a Core resize command.
-    pub(crate) fn sync_native_column_resize_bounds(
-        &mut self,
-        column: NodeId,
-        group: FloatingGroupId,
-        window_id: WindowId,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.ensure_native_column_resize_session(column, group, window_id, cx) {
-            return;
-        }
-        let member = WindowGridMember::Column(column);
-        let Some(native_window) = self
-            .registry
-            .members
-            .get(&member)
-            .filter(|entry| entry.window_id == window_id && entry.host_group == Some(group))
-            .and_then(|entry| entry.native_window)
-        else {
-            return;
-        };
-        let Some(bounds) = self.core_bounds_from_native_window(native_window) else {
-            return;
-        };
-        let Some(mut state) = self.native_resize.filter(|state| {
-            state.member == member && state.group == group && state.window_id == window_id
-        }) else {
-            return;
-        };
-        self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
-    }
     /// Samples current native bounds after the GPUI window-bounds observer fires.
     /// All geometry components are read from the HWND at deferred execution time.
     pub(crate) fn sync_native_resize_bounds(
@@ -1895,8 +1865,8 @@ impl FloatingWindowManager {
             return false;
         };
 
-        // The bounds observer is the fast path. Polling remains necessary because
-        // Windows can coalesce several WM_SIZE notifications inside its modal loop.
+        // Poll the native HWND directly because Windows can coalesce several
+        // WM_SIZE notifications inside its modal resize loop.
         if self.native_ops.is_resizing(native_window).unwrap_or(false) {
             if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
                 self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
