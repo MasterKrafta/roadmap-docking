@@ -1649,7 +1649,7 @@ mod floating_tab_drag_zone_tests {
     };
     use slotmap::SlotMap;
 
-    use crate::dock_components::{GroupPresentation, TabPresentation};
+    use crate::dock_components::{DockTab, GroupPresentation, TabPresentation};
 
     use super::{FloatingColumnSnapshot, floating_dock_component_tab_zones};
 
