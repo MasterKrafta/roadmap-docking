@@ -57,10 +57,6 @@ use floating_host_snapshot::FloatingHostSnapshot;
 mod floating_column_host;
 pub(crate) use floating_column_host::FloatingColumnHost;
 
-#[path = "floating_host.rs"]
-mod floating_host;
-pub use floating_host::FloatingHost;
-
 #[path = "floating_window_content.rs"]
 mod floating_window_content;
 use floating_window_content::FloatingWindowContent;
