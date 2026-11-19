@@ -572,7 +572,7 @@ impl DragHostManager {
         if let Some(side) = dock_area {
             let opened = self.floating_manager.as_ref().is_some_and(|manager| {
                 manager.update(cx, |manager, manager_cx| {
-                    manager.open_main_drag_parts(side, manager_cx)
+                    manager.open_main_drag_columns(side, manager_cx)
                 })
             });
             if !opened {
