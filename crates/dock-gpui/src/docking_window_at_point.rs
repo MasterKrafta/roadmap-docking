@@ -17,7 +17,7 @@ pub(crate) enum DockingWindowAtPoint {
         window_id: WindowId,
         column: NodeId,
         point: Point,
-    }
+    },
 }
 
 impl DockingWindowAtPoint {
