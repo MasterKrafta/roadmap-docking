@@ -591,6 +591,7 @@ mod input_validation_tests {
                 mode: ColumnMode::Expanded,
                 groups: vec![group],
                 group_ratios: vec![1.0],
+                floating_height: None,
                 last_expanded_width: Some(280.0),
             })
         };
