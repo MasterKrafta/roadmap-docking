@@ -3482,7 +3482,9 @@ impl FloatingWindowManager {
             match (pending, existing) {
                 (true, Some(_)) => true,
                 (true, None) => false,
-                (false, Some(entry)) => !entry.window.is_available(cx),
+                (false, Some(entry)) => entry
+                    .native_window
+                    .is_none_or(|window| self.native_ops.window_rect(window).is_err()),
                 (false, None) => true,
             }
         }) {
@@ -3495,39 +3497,13 @@ impl FloatingWindowManager {
             .map(|(member, entry)| {
                 let spec = desired_by_member.get(member).copied()?;
                 let native_window = entry.native_window?;
-                let available = match entry.window {
-                    PanelWindowHandle::Part(window) => {
-                        window.update(cx, |_, _, _| ()).is_ok()
-                    }
-                    _ => false,
-                };
+                let available = self.native_ops.window_rect(native_window).is_ok();
                 available.then_some((*member, spec, native_window))
             })
             .collect::<Option<Vec<_>>>();
         let Some(pending_members) = pending_members else {
             return false;
         };
-
-        // Switch all existing GPUI entities from Main-source geometry to their
-        // new Core FloatingGroup before moving the entries into the permanent map.
-        for (_, spec, _) in &pending_members {
-            let Some(entry) = self.pending_main_drag_parts.get(&spec.member) else {
-                return false;
-            };
-            let adopted = match entry.window {
-                PanelWindowHandle::Part(window) => window.update(cx, |host, _, host_cx| {
-                    let adopted = host.adopt_main_drag_part(spec.floating_group());
-                    if adopted {
-                        host_cx.notify();
-                    }
-                    adopted
-                }).unwrap_or(false),
-                _ => false,
-            };
-            if !adopted {
-                return false;
-            }
-        }
 
         let mut pending = std::mem::take(&mut self.pending_main_drag_parts);
         for (member, spec, native_window) in pending_members {
@@ -6195,7 +6171,12 @@ impl FloatingWindowManager {
             .registry
             .members
             .iter()
-            .filter_map(|(member, entry)| (!entry.window.is_available(cx)).then_some(*member))
+            .filter_map(|(member, entry)| {
+                let native_available = entry
+                    .native_window
+                    .is_some_and(|window| self.native_ops.window_rect(window).is_ok());
+                (!native_available).then_some(*member)
+            })
             .collect::<Vec<_>>();
         let stale_members = self
             .registry
@@ -6468,30 +6449,6 @@ impl FloatingWindowManager {
                 self.sync_native_column_resize(&mut entry, group, column, cx);
             }
             self.registry.members.insert(member, entry);
-        }
-
-        // Cache the single close-button owner on the rightmost Column host.
-        // Render must not re-enter FloatingWindowManager to inspect WindowGrid.
-        let column_windows = self
-            .registry
-            .members
-            .iter()
-            .filter_map(|(member, entry)| {
-                let WindowGridMember::Column(column) = member else {
-                    return None;
-                };
-                Some((*column, entry.window))
-            })
-            .collect::<Vec<_>>();
-        for (column, window) in column_windows {
-            let show_close_button = self.is_rightmost_column(column);
-            if let Err(error) = window.set_column_close_button(show_close_button, cx) {
-                tracing::debug!(
-                    ?column,
-                    %error,
-                    "could not update the Floating Column close-button owner"
-                );
-            }
         }
 
         prune_result
