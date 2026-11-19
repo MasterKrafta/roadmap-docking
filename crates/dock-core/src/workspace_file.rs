@@ -562,6 +562,7 @@ fn restore_node(
                 mode: *mode,
                 groups: group_ids,
                 group_ratios: group_ratios.clone(),
+                floating_height: None,
                 last_expanded_width: *last_expanded_width,
             })
         }
