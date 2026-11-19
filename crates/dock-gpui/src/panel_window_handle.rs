@@ -68,6 +68,24 @@ impl PanelWindowHandle {
         }
     }
 
+    /// Refreshes GPUI's cached client bounds after the native HWND was resized.
+    pub(super) fn refresh_bounds(
+        &self,
+        cx: &mut Context<FloatingWindowManager>,
+    ) -> Result<(), String> {
+        match self {
+            Self::Floating(window) => window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string()),
+            Self::Part(window) => window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string()),
+            Self::DragHost(window) => window
+                .update(cx, |_, window, app| window.bounds_changed(app))
+                .map_err(|error| error.to_string()),
+        }
+    }
+
     /// Requests a redraw from the exact GPUI window that owns this host.
     pub(super) fn notify_host(&self, cx: &mut Context<FloatingWindowManager>) -> Result<(), String> {
         match self {
