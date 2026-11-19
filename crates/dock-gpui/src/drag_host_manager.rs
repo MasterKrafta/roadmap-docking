@@ -13,7 +13,7 @@ use gpui::{
 use platform::{NativeError, NativeKey, NativeWindowId, NativeWindowOps, SystemNativeWindowOps};
 
 use dock_core::{
-    ColumnRect, CommandValue, DockSide, DragDropAction, DragHandle, DragPayload,
+    CommandValue, DockSide, DragDropAction, DragHandle, DragPayload,
     DragState, DropTarget, FloatingGroupId, Node, NodeId, PanelId, Point, Rect, Size,
 };
 
@@ -49,10 +49,6 @@ pub(crate) use drag_host_surface::DragHostSurface;
 #[path = "drag_group_presentation.rs"]
 mod drag_group_presentation;
 use drag_group_presentation::DragGroupPresentation;
-
-#[path = "drag_dock_area_presentation.rs"]
-mod drag_dock_area_presentation;
-use drag_dock_area_presentation::DragDockAreaPresentation;
 
 
 fn source_layout_rects(
@@ -2218,35 +2214,6 @@ impl DragHostManager {
 
 
 
-
-
-
-fn dock_area_bounds(columns: &[ColumnRect]) -> Option<Rect> {
-    let first = columns.first()?.rect;
-    let mut left = first.origin.x;
-    let mut top = first.origin.y;
-    let mut right = first.origin.x + first.size.width;
-    let mut bottom = first.origin.y + first.size.height;
-
-    for column in columns.iter().skip(1) {
-        left = left.min(column.rect.origin.x);
-        top = top.min(column.rect.origin.y);
-        right = right.max(column.rect.origin.x + column.rect.size.width);
-        bottom = bottom.max(column.rect.origin.y + column.rect.size.height);
-    }
-
-    Some(Rect::new(
-        Point::new(left, top),
-        Size::new(right - left, bottom - top),
-    ))
-}
-
-fn translate_rect(rect: Rect, origin: Point) -> Rect {
-    Rect::new(
-        Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
-        rect.size,
-    )
-}
 
 
 
