@@ -103,6 +103,10 @@ pub(crate) struct FloatingPartHost {
 }
 
 impl FloatingPartHost {
+    pub(crate) fn set_show_close_button(&mut self, show: bool) -> bool {
+        self.close_button_visible.replace(show) != show
+    }
+
     pub(crate) fn new_column(
         controller: Entity<DockController>,
         floating_group: FloatingGroupId,
