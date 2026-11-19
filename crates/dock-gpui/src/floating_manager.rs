@@ -6443,13 +6443,25 @@ impl FloatingWindowManager {
                 let WindowGridMember::Column(column) = member else {
                     return None;
                 };
-                Some((*column, entry.window, entry.close_button_visible.clone()))
+                Some((
+                    *member,
+                    *column,
+                    entry.window,
+                    entry.close_button_visible.clone(),
+                ))
             })
             .collect::<Vec<_>>();
-        for (column, window, close_button_visible) in column_windows {
+        for (member, column, window, close_button_visible) in column_windows {
             let show_close_button = self.is_rightmost_column(column);
-            if let Some(close_button_visible) = close_button_visible {
-                close_button_visible.set(show_close_button);
+            let state_changed = close_button_visible
+                .is_some_and(|state| state.replace(show_close_button) != show_close_button);
+            if state_changed {
+                // Refresh without leasing FloatingPartHost; it may be handling the
+                // same drag/resize event that caused this reconciliation.
+                if let Err(error) = window.notify_host(cx) {
+                    tracing::debug!(?column, %error, "could not refresh the close-button owner");
+                }
+                self.request_member_redraw(member);
             }
             if let Err(error) = window.set_column_close_button(show_close_button, cx) {
                 tracing::debug!(
