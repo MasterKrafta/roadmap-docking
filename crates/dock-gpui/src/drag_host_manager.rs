@@ -1201,7 +1201,13 @@ impl DragHostManager {
         };
         let (finished, created_groups) = self.controller.update(cx, |controller, controller_cx| {
             let Some(preview) = controller.drag().session().preview() else {
-                let _ = controller.cancel_pointer_interaction();
+                if let Err(error) = controller.cancel_pointer_interaction() {
+                    tracing::debug!(
+                        ?id,
+                        %error,
+                        "could not cancel stale DragHost pointer interaction"
+                    );
+                }
                 let _ = controller.drag_mut().session_mut().reset();
                 controller.drag_mut().clear_resolver();
                 controller.drag_mut().clear_layout_version();
