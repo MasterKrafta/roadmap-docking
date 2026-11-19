@@ -431,15 +431,6 @@ impl DockController {
         self.finish_native_window_move_commands(std::iter::once(command), cx)
     }
 
-    /// Commits a native move of one existing Floating node inside the open history transaction.
-    ///
-    /// A node that already owns the complete Floating area only updates its bounds.
-    /// Otherwise the same Core node is floated into a new area, then its captured
-    /// bounds are restored so the native Group/Column keeps its current size.
-    /// Commits a GroupGrip drop resolved by the shared Core drop resolver.
-    ///
-    /// A GroupTabs target always appends the complete source Group after the
-    /// target's existing tabs. The returned bool is false for an explicit Core no-op.
     /// Returns every Column in a moved Floating WindowChain to one Main DockArea.
     ///
     /// The Core command is applied inside the native-move history transaction,
@@ -691,7 +682,6 @@ impl DockController {
     pub(crate) fn replace_layout(&mut self, layout: dock_core::Layout) {
         let before_panels = self.panel_keys();
         self.layout = layout;
-        self.initial_monitor_recovery_pending = self.layout.floating_groups().next().is_some();
         let after_panels = self.panel_keys();
 
         for (panel, key) in &before_panels {
