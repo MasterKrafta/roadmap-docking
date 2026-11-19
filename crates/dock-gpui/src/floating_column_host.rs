@@ -29,7 +29,7 @@ use crate::{
 use super::{
     floating_dock_component_tab_zones, floating_host_snapshot, floating_part_local_rect,
     floating_group_for_column, handle_floating_escape, observe_floating_focus_loss,
-    render_floating_pointer_input, FloatingHostOpenMenu, FloatingHostSnapshot,
+    render_floating_pointer_input, FloatingHostOpenMenu, FloatingColumnSnapshot,
     FloatingTabPress, FloatingGroupPress, FloatingWindowContent,
 };
 use super::super::{
@@ -298,7 +298,7 @@ impl Render for FloatingColumnHost {
 }
 
 fn render_floating_drop_overlay(
-    snapshot: &FloatingHostSnapshot,
+    snapshot: &FloatingColumnSnapshot,
     origin: Point,
     theme: Theme,
 ) -> impl IntoElement + use<> {
@@ -568,7 +568,7 @@ impl FloatingColumnHost {
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-        snapshot: &FloatingHostSnapshot,
+        snapshot: &FloatingColumnSnapshot,
         column_id: NodeId,
     ) -> impl IntoElement {
         let window_id = window.window_handle().window_id();
