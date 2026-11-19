@@ -1339,7 +1339,7 @@ impl FloatingWindowManager {
         let Some(bounds) = bounds else {
             return false;
         };
-        self.sync_column_window_bounds(native_window, bounds);
+        self.sync_column_window_bounds(native_window, bounds, "promote_drag_host");
         if let Err(error) = window.update(cx, |_, window, app| window.bounds_changed(app)) {
             tracing::warn!(
                 ?member,
@@ -2774,7 +2774,7 @@ impl FloatingWindowManager {
             let target_bounds = self
                 .column_outer_bounds_for_target(spec, native_window, current_scale)
                 .unwrap_or(spec.bounds);
-            self.sync_column_window_bounds(native_window, target_bounds);
+            self.sync_column_window_bounds(native_window, target_bounds, "adopt_main_drag_column");
             entry.bounds = target_bounds;
             entry.native_scale_factor = current_scale;
             entry.native_bounds_dirty = false;
@@ -4296,7 +4296,7 @@ impl FloatingWindowManager {
             self.column_outer_bounds_for_target(spec, native_window, scale)
             .unwrap_or(spec.bounds)
         };
-        self.sync_column_window_bounds(native_window, outer_bounds);
+        self.sync_column_window_bounds(native_window, outer_bounds, "create_column_window");
 
         Some(PanelWindowEntry {
             window: PanelWindowHandle::Column(window),
@@ -4325,8 +4325,17 @@ impl FloatingWindowManager {
         })
     }
 
-    fn sync_column_window_bounds(&self, native_window: NativeWindowId, bounds: Rect) {
+    fn sync_column_window_bounds(
+        &self,
+        native_window: NativeWindowId,
+        bounds: Rect,
+        reason: &'static str,
+    ) {
         let Some(position) = self.physical_origin_for_bounds(bounds) else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=native_bounds_write_skipped reason=invalid_origin source={} hwnd={:?} target_bounds={:?}",
+                reason, native_window, bounds,
+            );
             return;
         };
         let scale = self
@@ -4336,14 +4345,36 @@ impl FloatingWindowManager {
             .filter(|scale| scale.is_finite() && *scale > 0.0)
             .unwrap_or(1.0);
         let Some(size) = DockGeometry::physical_size_from_logical(bounds.size, scale) else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=native_bounds_write_skipped reason=invalid_size source={} hwnd={:?} target_bounds={:?} scale={:.3}",
+                reason, native_window, bounds, scale,
+            );
             return;
         };
-        if let Err(error) = self.native_ops.set_window_bounds(native_window, position, size) {
-            tracing::debug!(
-                ?native_window,
-                %error,
-                "could not synchronize Floating Column native bounds"
-            );
+        let before = self.core_bounds_from_native_window(native_window);
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=native_bounds_write_begin source={} hwnd={:?} before={:?} target_bounds={:?} physical_position={:?} physical_size={:?} scale={:.3}",
+            reason, native_window, before, bounds, position, size, scale,
+        );
+        match self.native_ops.set_window_bounds(native_window, position, size) {
+            Ok(()) => {
+                let after = self.core_bounds_from_native_window(native_window);
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=native_bounds_write_end source={} hwnd={:?} after={:?}",
+                    reason, native_window, after,
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=native_bounds_write_failed source={} hwnd={:?} error={}",
+                    reason, native_window, error,
+                );
+                tracing::debug!(
+                    ?native_window,
+                    %error,
+                    "could not synchronize Floating Column native bounds"
+                );
+            }
         }
     }
 
@@ -4748,7 +4779,11 @@ impl FloatingWindowManager {
                 if !resizing_this_member
                     && let Some(native_window) = native_window
                 {
-                    self.sync_column_window_bounds(native_window, target_bounds);
+                    self.sync_column_window_bounds(
+                        native_window,
+                        target_bounds,
+                        "reconcile_column_windows",
+                    );
                 }
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
                     entry.bounds = target_bounds;
