@@ -91,7 +91,6 @@ pub(crate) struct FloatingPartHost {
     manager: WeakEntity<FloatingWindowManager>,
     controller_observed: bool,
     manager_observed: bool,
-    show_close_button: bool,
     open_context_menu: Option<FloatingHostOpenMenu>,
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
@@ -99,17 +98,19 @@ pub(crate) struct FloatingPartHost {
     column_scroll_handles: HashMap<NodeId, ScrollHandle>,
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
-    native_bounds_observed: bool,
     native_resize_observation_pending: bool,
 }
 
 impl FloatingPartHost {
-    pub(crate) fn set_show_close_button(&mut self, show: bool) -> bool {
-        if self.show_close_button == show {
-            return false;
-        }
-        self.show_close_button = show;
-        true
+    fn should_show_close_button(&self, column: NodeId, cx: &Context<Self>) -> bool {
+        self.manager
+            .upgrade()
+            .and_then(|manager| {
+                manager
+                    .read(cx, |manager, _| manager.is_rightmost_column(column))
+                    .ok()
+            })
+            .unwrap_or(true)
     }
 
     pub(crate) fn new_column(
@@ -203,7 +204,6 @@ impl FloatingPartHost {
             manager,
             controller_observed: false,
             manager_observed: false,
-            show_close_button: false,
             open_context_menu: None,
             tab_press: Rc::new(Cell::new(None)),
             group_press: Rc::new(Cell::new(None)),
@@ -211,7 +211,6 @@ impl FloatingPartHost {
             column_scroll_handles: HashMap::new(),
             root_focus_handle: None,
             focus_observed: false,
-            native_bounds_observed: false,
             native_resize_observation_pending: false,
         }
     }
@@ -225,16 +224,13 @@ impl Render for FloatingPartHost {
             self.controller_observed = true;
         }
 
-        if let Some(side) = self.main_drag_side {
-            return self.render_main_drag_part(window, cx, side);
-        }
-
-        // A persistent Column HWND or preserved Group HWND can survive a Core
-        // ownership transfer. Resolve the current FloatingGroup and Column from Layout
-        // so geometry, hit-testing and native resize callbacks follow the unchanged HWND.
+        // A Main-origin drag part becomes a permanent Floating part as soon as
+        // its Core node is committed into a FloatingGroup. Resolve that ownership
+        // from Layout during render instead of mutating the root Entity from the manager.
         if let Some((current_group, current_column)) = self.controller.update(cx, |controller, _| {
             floating_part_owner_and_column(controller.layout(), self.part)
         }) {
+            self.main_drag_side = None;
             self.floating_group = Some(current_group);
             self.part = match self.part {
                 FloatingPartKind::Column { .. } => FloatingPartKind::Column {
@@ -250,49 +246,15 @@ impl Render for FloatingPartHost {
             };
         }
 
+        if let Some(side) = self.main_drag_side {
+            return self.render_main_drag_part(window, cx, side);
+        }
+
         let window_id = window.window_handle().window_id();
 
         if let (Some(group), FloatingPartKind::Column { column }) =
             (self.floating_group, self.part)
         {
-            if !self.native_bounds_observed {
-                cx.observe_window_bounds(window, |host, window, host_cx| {
-                    let (Some(group), FloatingPartKind::Column { column }) =
-                        (host.floating_group, host.part)
-                    else {
-                        return;
-                    };
-                    let window_id = window.window_handle().window_id();
-
-                    // bounds_changed() may run while the manager is reconciling
-                    // this HWND. Wait until that update has fully unwound before
-                    // syncing the native resize sample back into the manager.
-                    host_cx.defer_in(window, move |host, _, deferred_cx| {
-                        if host.floating_group != Some(group)
-                            || !matches!(
-                                host.part,
-                                FloatingPartKind::Column { column: current } if current == column
-                            )
-                        {
-                            return;
-                        }
-                        schedule_manager_update(
-                            deferred_cx,
-                            host.manager.clone(),
-                            move |manager, manager_cx| {
-                                manager.sync_native_column_resize_bounds(
-                                    column,
-                                    group,
-                                    window_id,
-                                    manager_cx,
-                                );
-                            },
-                        );
-                    });
-                })
-                .detach();
-                self.native_bounds_observed = true;
-            }
 
             if !self.native_resize_observation_pending {
                 self.native_resize_observation_pending = true;
@@ -424,7 +386,7 @@ impl Render for FloatingPartHost {
                     ),
                 );
                 let local_column = ColumnRect::new(column, header_rect);
-                let show_close_button = self.show_close_button;
+                let show_close_button = self.should_show_close_button(column, cx);
                 let pointer_header_rect = Rect::new(
                     column_rect.rect.origin,
                     dock_core::Size::new(
@@ -1075,7 +1037,7 @@ impl FloatingPartHost {
             self.column_scroll_handles.entry(column_id).or_default();
         }
 
-        let show_close_button = self.show_close_button;
+        let show_close_button = self.should_show_close_button(column_id, cx);
         let close_action = if show_close_button {
             let close_group = snapshot.floating.group;
             let manager_for_close = self.manager.clone();
