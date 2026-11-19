@@ -131,15 +131,12 @@ pub fn run(_options: RunOptions) {
 pub use app_shell::AppShell;
 pub use components::{
     CanvasSlot, ContextMenu, ContextMenuEntry, ContextMenuItem, DropOverlay,
-    FloatingHost, FlyoutView, MainDockView, PanelHost, RailView, SplitterView, TabOverflow,
+    FlyoutView, MainDockView, PanelHost, RailView, SplitterView, TabOverflow,
 };
 pub use dock_host::DockHost;
 pub use drag_host::{DockWindowRole, DragHostId, DragHostSession, DragSourceHost};
 pub use drag_host_manager::{DragHostError, DragHostManager};
-pub use floating_manager::{
-    CompositionHostRegistry, FloatingWindowManager, PanelLayoutLocation, PanelWindowRegistry,
-    PanelWindowVisibility,
-};
+pub use floating_manager::{FloatingWindowManager, PanelWindowRegistry, PanelWindowVisibility};
 pub use missing_panel::MissingPanelPlaceholder;
 pub use theme::{DockTheme, dock_metrics_from_theme};
 
