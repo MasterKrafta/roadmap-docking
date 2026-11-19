@@ -1409,7 +1409,7 @@ impl FloatingWindowManager {
         let Some(bounds) = bounds else {
             return false;
         };
-        self.sync_part_window_bounds(native_window, bounds);
+        self.sync_column_window_bounds(native_window, bounds);
         if let Err(error) = window.update(cx, |_, window, app| window.bounds_changed(app)) {
             tracing::warn!(
                 ?member,
@@ -3137,7 +3137,7 @@ impl FloatingWindowManager {
                 current_scale,
                 None,
             ).unwrap_or(spec.bounds);
-            self.sync_part_window_bounds(native_window, target_bounds);
+            self.sync_column_window_bounds(native_window, target_bounds);
             entry.bounds = target_bounds;
             entry.native_scale_factor = current_scale;
             entry.native_bounds_dirty = false;
@@ -5244,10 +5244,10 @@ impl FloatingWindowManager {
             self.column_outer_bounds_for_target(spec, native_window, scale)
             .unwrap_or(spec.bounds)
         };
-        self.sync_part_window_bounds(native_window, outer_bounds);
+        self.sync_column_window_bounds(native_window, outer_bounds);
 
         Some(PanelWindowEntry {
-            window: PanelWindowHandle::Part(window),
+            window: PanelWindowHandle::Column(window),
             window_id,
             native_window: Some(native_window),
             bounds: outer_bounds,
@@ -5273,7 +5273,7 @@ impl FloatingWindowManager {
         })
     }
 
-    fn sync_part_window_bounds(&self, native_window: NativeWindowId, bounds: Rect) {
+    fn sync_column_window_bounds(&self, native_window: NativeWindowId, bounds: Rect) {
         let Some(position) = self.physical_origin_for_bounds(bounds) else {
             return;
         };
@@ -5561,7 +5561,7 @@ impl FloatingWindowManager {
                 if !resizing_this_member
                     && let Some(native_window) = native_window
                 {
-                    self.sync_part_window_bounds(native_window, target_bounds);
+                    self.sync_column_window_bounds(native_window, target_bounds);
                 }
                 if let Some(entry) = self.registry.members.get_mut(&spec.member) {
                     entry.bounds = target_bounds;
