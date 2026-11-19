@@ -1415,7 +1415,12 @@ impl FloatingWindowManager {
         let Some(native_window) = entry.native_window else {
             return false;
         };
-        if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
+        let resize_state = self.native_ops.is_resizing(native_window);
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=resize_observer_state group={:?} column={:?} result={:?}",
+            group, column, resize_state,
+        );
+        if !resize_state.unwrap_or(false) {
             return false;
         }
         // Protect metric updates from the moment Windows enters its modal sizing
@@ -1432,6 +1437,10 @@ impl FloatingWindowManager {
             window_id,
             transaction_started: false,
         });
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=resize_session_started group={:?} column={:?} window={:?}",
+            group, column, window_id,
+        );
         if let Some(entry) = self.registry.members.get_mut(&member) {
             // Keep Core authoritative for every sibling Column, but do not let
             // reconciliation overwrite the HWND currently inside WM_SIZING.
@@ -1449,17 +1458,43 @@ impl FloatingWindowManager {
     ) {
         let manager = cx.entity().downgrade();
         cx.spawn(async move |_, app| {
+            let mut tick_count = 0_u64;
+            let mut previous_tick = std::time::Instant::now();
             loop {
                 app.background_executor().timer(Duration::from_millis(8)).await;
-                let Ok(keep_polling) = manager.update(app, |manager, manager_cx| {
+                tick_count += 1;
+                let interval_ms = previous_tick.elapsed().as_secs_f32() * 1000.0;
+                previous_tick = std::time::Instant::now();
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=poll_tick group={:?} window={:?} tick={} interval_ms={:.1}",
+                    group, window_id, tick_count, interval_ms,
+                );
+
+                match manager.update(app, |manager, manager_cx| {
                     manager.tick_native_resize(group, window_id, manager_cx)
-                }) else {
-                    break;
-                };
-                if !keep_polling {
-                    break;
+                }) {
+                    Ok(keep_polling) => {
+                        eprintln!(
+                            "[FLOATING_RESIZE_DIAG] event=poll_result group={:?} window={:?} tick={} keep_polling={}",
+                            group, window_id, tick_count, keep_polling,
+                        );
+                        if !keep_polling {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[FLOATING_RESIZE_DIAG] event=poll_update_failed group={:?} window={:?} tick={} error={:?}",
+                            group, window_id, tick_count, error,
+                        );
+                        break;
+                    }
                 }
             }
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=poll_loop_stopped group={:?} window={:?} ticks={}",
+                group, window_id, tick_count,
+            );
         })
         .detach();
     }
@@ -1473,9 +1508,21 @@ impl FloatingWindowManager {
         let Some(state) = self.native_resize.filter(|state| {
             state.group == group && state.window_id == window_id
         }) else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=poll_session_missing group={:?} window={:?}",
+                group, window_id,
+            );
             return false;
         };
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=poll_session_active group={:?} window={:?} member={:?} transaction_started={}",
+            group, window_id, state.member, state.transaction_started,
+        );
         let WindowGridMember::Column(column) = state.member else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=poll_stopped reason=unsupported_member group={:?} window={:?} member={:?}",
+                group, window_id, state.member,
+            );
             self.finish_native_resize_transaction(state, cx);
             return false;
         };
@@ -1497,24 +1544,57 @@ impl FloatingWindowManager {
                 .flatten()
         });
         let Some(native_window) = native_window else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=poll_stopped reason=native_window_missing group={:?} column={:?} window={:?}",
+                group, column, window_id,
+            );
             self.finish_native_resize_transaction(state, cx);
             return false;
         };
 
         // Poll the native HWND directly because Windows can coalesce several
         // WM_SIZE notifications inside its modal resize loop.
-        if self.native_ops.is_resizing(native_window).unwrap_or(false) {
-            if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
-                self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+        let resize_state = self.native_ops.is_resizing(native_window);
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=native_resize_state group={:?} column={:?} window={:?} result={:?}",
+            group, column, window_id, resize_state,
+        );
+        if resize_state.unwrap_or(false) {
+            match self.core_bounds_from_native_window(native_window) {
+                Some(bounds) => {
+                    eprintln!(
+                        "[FLOATING_RESIZE_DIAG] event=native_bounds_sample group={:?} column={:?} resizing=true bounds={:?}",
+                        group, column, bounds,
+                    );
+                    self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+                }
+                None => eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=native_bounds_unavailable group={:?} column={:?} resizing=true",
+                    group, column,
+                ),
             }
             self.sync_native_column_resize_constraints(column, group, window_id, cx);
             self.native_resize = Some(state);
             return true;
         }
 
-        if let Some(bounds) = self.core_bounds_from_native_window(native_window) {
-            self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+        match self.core_bounds_from_native_window(native_window) {
+            Some(bounds) => {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=native_bounds_sample group={:?} column={:?} resizing=false bounds={:?}",
+                    group, column, bounds,
+                );
+                self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
+            }
+            None => eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=native_bounds_unavailable group={:?} column={:?} resizing=false",
+                group, column,
+            ),
         }
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=poll_stopped reason=native_resize_finished group={:?} column={:?} window={:?}",
+            group, column, window_id,
+        );
         self.finish_native_resize_transaction(state, cx);
         false
     }
@@ -1546,6 +1626,10 @@ impl FloatingWindowManager {
                 scale_factor,
             )
         }) else {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=sample_ignored reason=core_column_bounds_unavailable group={:?} column={:?} native_bounds={:?}",
+                group, column, native_column_bounds,
+            );
             return;
         };
         let mut current_column_bounds = base_column_bounds;
@@ -1609,6 +1693,17 @@ impl FloatingWindowManager {
         // A vertical-only drag is local to this Column HWND. Its layout is
         // recomputed from the native viewport; it must not resize sibling Columns.
         if edge.is_none() {
+            if width_changed || vertical_bounds_changed {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=sample_ignored reason=no_horizontal_edge group={:?} column={:?} native_bounds={:?} core_bounds={:?} width_delta={:.1} vertical_bounds_changed={}",
+                    group,
+                    column,
+                    native_column_bounds,
+                    current_column_bounds,
+                    width_delta,
+                    vertical_bounds_changed,
+                );
+            }
             return;
         }
 
@@ -1619,6 +1714,16 @@ impl FloatingWindowManager {
             width_delta,
         );
         if target_group_bounds == current_group_bounds {
+            if width_changed {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=sample_ignored reason=target_unchanged group={:?} column={:?} native_width={:.1} core_width={:.1} group_bounds={:?}",
+                    group,
+                    column,
+                    native_column_bounds.size.width,
+                    current_column_bounds.size.width,
+                    current_group_bounds,
+                );
+            }
             return;
         }
 
@@ -1649,6 +1754,10 @@ impl FloatingWindowManager {
         }
         self.native_resize = Some(*state);
         if !state.transaction_started {
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=sample_ignored reason=core_transaction_not_started group={:?} column={:?} native_bounds={:?}",
+                group, column, native_column_bounds,
+            );
             return;
         }
 
@@ -1907,6 +2016,10 @@ impl FloatingWindowManager {
         state: NativeResizeSession,
         cx: &mut Context<Self>,
     ) {
+        eprintln!(
+            "[FLOATING_RESIZE_DIAG] event=resize_session_finished group={:?} member={:?} window={:?} transaction_started={}",
+            state.group, state.member, state.window_id, state.transaction_started,
+        );
         self.native_resize = None;
         self.controller.update(cx, |controller, controller_cx| {
             if state.transaction_started {
