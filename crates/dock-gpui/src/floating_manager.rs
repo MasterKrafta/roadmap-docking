@@ -1651,13 +1651,7 @@ impl FloatingWindowManager {
         let grid_bounds = if grid_links.is_empty() || !grid_has_only_columns {
             None
         } else {
-            grid_members
-                .iter()
-                .map(|grid_member| {
-                    self.panel_window_for_grid_member(*grid_member)
-                        .map(|entry| (*grid_member, entry.bounds))
-                })
-                .collect::<Option<Vec<_>>>()
+            self.native_bounds_for_grid_members(&grid_members)
         };
         let grid_frames = grid_bounds
             .as_ref()
