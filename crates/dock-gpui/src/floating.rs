@@ -32,7 +32,7 @@ use crate::{
         },
         resize_preview_for_interaction,
     },
-    DockController, DockWindowPart, DragSourceHost, FloatingWindowManager,
+    DockController, DragSourceHost, FloatingWindowManager,
 };
 
 use super::drop_overlay::DropOverlay;
@@ -122,10 +122,10 @@ pub(crate) fn floating_column_host_rect(
 
 fn floating_drag_source(
     group: FloatingGroupId,
-    part: Option<DockWindowPart>,
+    column: Option<NodeId>,
 ) -> DragSourceHost {
-    match part {
-        Some(part) => DragSourceHost::FloatingPart { group, part },
+    match column {
+        Some(column) => DragSourceHost::FloatingColumn { group, column },
         None => DragSourceHost::Floating { group },
     }
 }
@@ -146,13 +146,10 @@ fn render_floating_pointer_input(
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
-    source_part: Option<DockWindowPart>,
+    source_column: Option<NodeId>,
     point_origin: Point,
 ) -> impl IntoElement {
-    let floating_column_for_resize = match source_part.as_ref() {
-        Some(DockWindowPart::Column { column }) => Some((group, *column)),
-        _ => None,
-    };
+    let floating_column_for_resize = source_column.map(|column| (group, column));
     let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_up = dock_component_tab_zones;
@@ -290,11 +287,10 @@ fn render_floating_pointer_input(
                                 && let Some(manager) = manager_for_down.upgrade()
                             {
                                 manager.update(app, |manager, manager_cx| {
-                                    match source_part {
-                                        Some(DockWindowPart::Column { column })
-                                        | Some(DockWindowPart::Header { column }) => manager
-                                            .begin_existing_window_grid_move(group, column, point, manager_cx),
-                                        _ => manager.begin_existing_window_move(group, point, manager_cx),
+                                    if let Some(column) = source_column {
+                                        manager.begin_existing_window_grid_move(group, column, point, manager_cx)
+                                    } else {
+                                        manager.begin_existing_window_move(group, point, manager_cx)
                                     }
                                 });
                             }
@@ -331,36 +327,6 @@ fn render_floating_pointer_input(
                                 .then_some((dock_group, controller.layout().version()))
                         });
                         if let Some((dock_group, layout_version)) = group_candidate {
-                            // A typed Floating Group owns a permanent HWND. Move that HWND
-                            // directly; do not start DragHost or transfer its cached PanelViews.
-                            let is_source_group_window = matches!(
-                                source_part,
-                                Some(DockWindowPart::Group { group: source_group })
-                                    if source_group == dock_group
-                            );
-                            if is_source_group_window {
-                                let started = manager_for_down.upgrade().is_some_and(|manager| {
-                                    manager.update(app, |manager, manager_cx| {
-                                        manager.begin_existing_floating_group_move(
-                                            group,
-                                            dock_group,
-                                            point,
-                                            manager_cx,
-                                        )
-                                    })
-                                });
-                                if !started {
-                                    tracing::debug!(
-                                        ?dock_group,
-                                        "could not start direct native move for Floating GroupGrip"
-                                    );
-                                }
-                                // A typed Group HWND must never fall back to DragHost:
-                                // doing so would transfer the cached PanelViews.
-                                app.stop_propagation();
-                                return;
-                            }
-
                             let is_single_tab_floating = controller_for_down.update(
                                 app,
                                 |controller, _| {
@@ -390,7 +356,7 @@ fn render_floating_pointer_input(
                                 dock_core::DragPayload::Group { group: dock_group },
                                 dock_core::DragHandle::GroupGrip,
                                 point,
-                                floating_drag_source(group, source_part),
+                                floating_drag_source(group, source_column),
                                 input_window_id,
                                 app,
                             );
@@ -644,7 +610,7 @@ fn render_floating_pointer_input(
                                 let over_other_window =
                                     manager_entity.as_ref().is_some_and(|manager| {
                                         manager.update(app, |manager, _| {
-                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_column)
                                         })
                                     });
                                 if leaves_source || over_other_window {
@@ -729,7 +695,7 @@ fn render_floating_pointer_input(
                         let drag = FloatingTabDrag {
                             source_window_id: input_window_id,
                             source_group: group,
-                            source_part,
+                            source_column,
                             panel: press.panel,
                             press_origin: press.origin,
                             layout_version: press.layout_version,
@@ -796,7 +762,7 @@ fn render_floating_pointer_input(
                         let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
                             manager
                                 .update(app, |manager, _| {
-                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_column)
                                 })
                                 
                         });
@@ -1019,7 +985,7 @@ fn render_floating_pointer_input(
                                 let over_other_window =
                                     manager_entity.as_ref().is_some_and(|manager| {
                                         manager.update(app, |manager, _| {
-                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                            manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_column)
                                         })
                                     });
                                 if leaves_source || over_other_window {
@@ -1085,7 +1051,7 @@ fn render_floating_pointer_input(
                         let drag = FloatingTabDrag {
                             source_window_id: input_window_id,
                             source_group: group,
-                            source_part,
+                            source_column,
                             panel: press.panel,
                             press_origin: press.origin,
                             layout_version: press.layout_version,
@@ -1125,7 +1091,7 @@ fn render_floating_pointer_input(
                             let manager_entity = manager_for_up.upgrade();
                             let over_other_window = manager_entity.as_ref().is_some_and(|manager| {
                                 manager.update(app, |manager, _| {
-                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_part)
+                                    manager.cursor_over_other_docking_window_from_source(group, input_window_id, source_column)
                                 })
                             });
                             if floating_tab_drag_host_required(leaves_source, over_other_window)
