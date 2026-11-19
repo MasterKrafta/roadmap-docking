@@ -1640,6 +1640,12 @@ impl FloatingWindowManager {
             state.transaction_started = self.controller.update(cx, |controller, _| {
                 controller.begin_native_resize_transaction()
             });
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=core_transaction_start group={:?} column={:?} started={}",
+                group,
+                column,
+                state.transaction_started,
+            );
         }
         self.native_resize = Some(*state);
         if !state.transaction_started {
@@ -1876,12 +1882,20 @@ impl FloatingWindowManager {
                         }
                     }
                 }
-                Err(error) => tracing::warn!(
-                    ?group,
-                    ?column,
-                    %error,
-                    "could not synchronize Floating Column native bounds with Core"
-                ),
+                Err(error) => {
+                    eprintln!(
+                        "[FLOATING_RESIZE_DIAG] event=core_command_rejected group={:?} column={:?} error={}",
+                        group,
+                        column,
+                        error,
+                    );
+                    tracing::warn!(
+                        ?group,
+                        ?column,
+                        %error,
+                        "could not synchronize Floating Column native bounds with Core"
+                    );
+                }
             }
             controller.flush_events(controller_cx);
             controller_cx.notify();
