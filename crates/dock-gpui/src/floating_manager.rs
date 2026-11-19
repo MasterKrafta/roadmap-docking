@@ -6343,13 +6343,8 @@ impl FloatingWindowManager {
             // remains at the previous height.
             if core_height_changed
                 && let Some(window) = self.registry.members.get(&spec.member).map(|entry| entry.window)
-                && let Err(error) = window.refresh_bounds(cx)
             {
-                tracing::debug!(
-                    ?spec.member,
-                    %error,
-                    "could not refresh a Floating Column's GPUI bounds after Core resize"
-                );
+                window.refresh_bounds_later(cx);
             }
 
             let native_window = self
