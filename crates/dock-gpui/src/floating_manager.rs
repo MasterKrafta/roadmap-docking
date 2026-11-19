@@ -27,7 +27,7 @@ use platform::{
 
 use crate::{
     DockController, DockEvent, DockTheme, DragHostManager, DragSourceHost,
-    components::floating::{floating_column_host_rect, floating_part_local_rect, FloatingColumnHost},
+    components::floating::{floating_column_host_rect, floating_column_local_rect, FloatingColumnHost},
     geometry::DockGeometry,
     window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry},
     window_chain_geometry::{
@@ -37,7 +37,7 @@ use crate::{
         floating_grid_members_in_native_front_to_back,
         window_grid_members_in_native_z_order as grid_window_members_in_native_z_order,
         native_resize_right_edge_delta, native_resize_bottom_edge_delta,
-        shift_window_grid_after_resize, floating_part_outer_bounds,
+        shift_window_grid_after_resize, floating_column_outer_bounds,
     },
 };
 
@@ -96,7 +96,7 @@ fn floating_member_drag_point(
     ))
 }
 
-fn floating_part_screen_bounds(
+fn floating_column_screen_bounds(
     floating_bounds: Rect,
     local_bounds: Rect,
     scale_factor: f32,
@@ -243,7 +243,7 @@ fn floating_column_host_bounds(
     );
     Some((
         floating.bounds,
-        floating_part_screen_bounds(floating.bounds, host_rect, scale_factor),
+        floating_column_screen_bounds(floating.bounds, host_rect, scale_factor),
     ))
 }
 
@@ -283,7 +283,7 @@ fn collect_floating_column_windows(
                 &root_splitters,
                 metrics.splitter_thickness,
             );
-            let bounds = floating_part_screen_bounds(
+            let bounds = floating_column_screen_bounds(
                 floating.bounds,
                 host_rect,
                 scale_factor,
@@ -307,7 +307,7 @@ fn collect_floating_column_windows(
     result
 }
 
-fn floating_part_internal_links(
+fn floating_column_internal_links(
     specs: &[FloatingColumnWindowSnapshot],
 ) -> Vec<WindowGridLink> {
     let mut floating_groups = Vec::new();
@@ -927,7 +927,7 @@ impl FloatingWindowManager {
     /// The physical origin uses this HWND's own monitor scale and measured insets.
     fn column_outer_bounds_for_target(&self, spec: FloatingColumnWindowSnapshot, native_window: NativeWindowId, fallback_scale: Option<f32>) -> Option<Rect> {
         let frame = self.native_frame_geometry(native_window, fallback_scale)?;
-        floating_part_outer_bounds(spec.floating_origin, spec.local_origin, spec.bounds.size, frame)
+        floating_column_outer_bounds(spec.floating_origin, spec.local_origin, spec.bounds.size, frame)
     }
 
     /// Returns each member's measured native frame using its own HWND and DPI.
@@ -1093,7 +1093,7 @@ impl FloatingWindowManager {
             let rects = controller.floating_geometry(window_id, source_group).ok()?;
             rects.columns.iter().find(|rect| rect.column == column).map(|rect| rect.rect.origin)
         })?;
-        self.screen_bounds_from_floating_native_window(native_window, floating_part_local_rect(bounds, column_origin))
+        self.screen_bounds_from_floating_native_window(native_window, floating_column_local_rect(bounds, column_origin))
     }
 
     fn screen_bounds_from_floating_native_window(
@@ -4241,7 +4241,7 @@ impl FloatingWindowManager {
             owners.insert(spec.member, spec.floating_group());
         }
 
-        let mut links = floating_part_internal_links(desired);
+        let mut links = floating_column_internal_links(desired);
         for previous in previous_links {
             if !previous_window_grid_link_is_external(previous, &previous_owners, &owners) {
                 // Internal Column edges are regenerated from the current
@@ -5444,7 +5444,7 @@ mod floating_chain_drop_target_tests {
 }
 
 #[cfg(test)]
-mod floating_part_window_grid_rebuild_tests {
+mod floating_column_window_grid_rebuild_tests {
     use super::previous_window_grid_link_is_external;
     use crate::window_chain::{WindowGridLink, WindowGridMember, WindowGridDirection};
     use dock_core::{FloatingGroupId, NodeId};
@@ -5526,7 +5526,7 @@ mod floating_part_window_grid_rebuild_tests {
 mod floating_column_topology_tests {
     use super::{
         FloatingColumnWindowSnapshot, floating_column_boundary_member,
-        floating_part_internal_links,
+        floating_column_internal_links,
     };
     use crate::window_chain::{WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridRegistry};
     use dock_core::{FloatingGroupId, NodeId, Point, Rect, Size};
@@ -5563,7 +5563,7 @@ mod floating_column_topology_tests {
             column(column_b, floating, 244.0),
         ];
 
-        let links = floating_part_internal_links(&specs);
+        let links = floating_column_internal_links(&specs);
         assert_eq!(
             links,
             vec![WindowGridLink {
@@ -5597,7 +5597,7 @@ mod floating_column_topology_tests {
             column(column_c, floating_b, 0.0),
         ];
 
-        let mut links = floating_part_internal_links(&specs);
+        let mut links = floating_column_internal_links(&specs);
         let migrated = WindowGridLink {
             from: floating_column_boundary_member(&specs, floating_a, WindowGridDirection::Right)
                 .expect("right boundary of the first composition"),
