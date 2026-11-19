@@ -23,7 +23,7 @@ use crate::{
         PanelTransferPresentation,
     },
     dock_host::{build_context_menu_entries, context_menu_target_exists},
-    DockController, DockWindowPart, FloatingWindowManager,
+    DockController, FloatingWindowManager,
 };
 
 use super::{
@@ -714,7 +714,7 @@ impl FloatingColumnHost {
             self.tab_press.clone(),
             self.group_press.clone(),
             self.pointer_capture.clone(),
-            Some(DockWindowPart::Column { column: column_id }),
+            Some(column_id),
             column_rect.rect.origin,
         );
 
