@@ -2747,6 +2747,7 @@ impl FloatingWindowManager {
             return Some(DockingWindowAtPoint::FloatingColumn { group, window_id: entry.window_id, column, point });
         }
 
+        Some(DockingWindowAtPoint::ForeignWindow)
     }
 
     /// Returns true when the cursor is over a managed Floating Column or legacy host.
