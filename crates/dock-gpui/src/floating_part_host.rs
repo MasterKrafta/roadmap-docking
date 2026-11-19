@@ -99,26 +99,17 @@ pub(crate) struct FloatingPartHost {
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
     native_resize_observation_pending: bool,
+    close_button_visible: Rc<Cell<bool>>,
 }
 
 impl FloatingPartHost {
-    fn should_show_close_button(&self, column: NodeId, cx: &Context<Self>) -> bool {
-        self.manager
-            .upgrade()
-            .and_then(|manager| {
-                manager
-                    .read(cx, |manager, _| manager.is_rightmost_column(column))
-                    .ok()
-            })
-            .unwrap_or(true)
-    }
-
     pub(crate) fn new_column(
         controller: Entity<DockController>,
         floating_group: FloatingGroupId,
         column: NodeId,
         theme: Theme,
         manager: WeakEntity<FloatingWindowManager>,
+        close_button_visible: Rc<Cell<bool>>,
     ) -> Self {
         Self::new(
             controller,
@@ -126,6 +117,7 @@ impl FloatingPartHost {
             FloatingPartKind::Column { column },
             theme,
             manager,
+            close_button_visible,
         )
     }
 
@@ -142,6 +134,7 @@ impl FloatingPartHost {
             FloatingPartKind::Header { column },
             theme,
             manager,
+            Rc::new(Cell::new(false)),
         )
     }
 
@@ -159,6 +152,7 @@ impl FloatingPartHost {
             FloatingPartKind::Group { column, group },
             theme,
             manager,
+            Rc::new(Cell::new(false)),
         )
     }
 
@@ -168,6 +162,7 @@ impl FloatingPartHost {
         part: FloatingPartKind,
         theme: Theme,
         manager: WeakEntity<FloatingWindowManager>,
+        close_button_visible: Rc<Cell<bool>>,
     ) -> Self {
         let mut host = Self::new(
             controller,
@@ -175,6 +170,7 @@ impl FloatingPartHost {
             part,
             theme,
             manager,
+            close_button_visible,
         );
         host.main_drag_side = Some(side);
         host
@@ -186,6 +182,7 @@ impl FloatingPartHost {
         part: FloatingPartKind,
         theme: Theme,
         manager: WeakEntity<FloatingWindowManager>,
+        close_button_visible: Rc<Cell<bool>>,
     ) -> Self {
         Self {
             controller,
@@ -204,6 +201,7 @@ impl FloatingPartHost {
             root_focus_handle: None,
             focus_observed: false,
             native_resize_observation_pending: false,
+            close_button_visible,
         }
     }
 }
@@ -378,7 +376,7 @@ impl Render for FloatingPartHost {
                     ),
                 );
                 let local_column = ColumnRect::new(column, header_rect);
-                let show_close_button = self.should_show_close_button(column, cx);
+                let show_close_button = self.close_button_visible.get();
                 let pointer_header_rect = Rect::new(
                     column_rect.rect.origin,
                     dock_core::Size::new(
@@ -1029,7 +1027,7 @@ impl FloatingPartHost {
             self.column_scroll_handles.entry(column_id).or_default();
         }
 
-        let show_close_button = self.should_show_close_button(column_id, cx);
+        let show_close_button = self.close_button_visible.get();
         let close_action = if show_close_button {
             let close_group = snapshot.floating.group;
             let manager_for_close = self.manager.clone();
