@@ -405,6 +405,7 @@ impl Layout {
                     mode: ColumnMode::Expanded,
                     groups: vec![group],
                     group_ratios: vec![1.0],
+                    floating_height: None,
                     last_expanded_width: Some(metrics.default_column_width),
                 }));
                 self.insert_existing_column_at(side, index, column, None, metrics)
