@@ -1623,18 +1623,16 @@ impl FloatingWindowManager {
         }
 
         if width_changed {
-            tracing::info!(
-                target: "dock_gpui::floating_resize_diag",
-                event = "native_sample",
-                group = ?group,
-                column = ?column,
-                hwnd_client_width = native_column_bounds.size.width,
-                core_column_width = current_column_bounds.size.width,
-                core_composition_width = current_group_bounds.size.width,
-                requested_composition_width = target_group_bounds.size.width,
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=native_sample group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1} core_composition_width={:.1} requested_composition_width={:.1} width_delta={:.1} edge={:?}",
+                group,
+                column,
+                native_column_bounds.size.width,
+                current_column_bounds.size.width,
+                current_group_bounds.size.width,
+                target_group_bounds.size.width,
                 width_delta,
-                edge = ?edge,
-                "[FLOATING_RESIZE_DIAG]"
+                edge,
             );
         }
 
@@ -1719,15 +1717,13 @@ impl FloatingWindowManager {
                             .layout()
                             .floating_group(group)
                             .map(|floating| floating.bounds.size.width);
-                        tracing::info!(
-                            target: "dock_gpui::floating_resize_diag",
-                            event = "core_after_resize",
-                            group = ?group,
-                            column = ?column,
-                            hwnd_client_width = native_column_bounds.size.width,
-                            accepted_core_column_width = ?accepted_core_column_width,
-                            accepted_core_composition_width = ?accepted_core_composition_width,
-                            "[FLOATING_RESIZE_DIAG]"
+                        eprintln!(
+                            "[FLOATING_RESIZE_DIAG] event=core_after_resize group={:?} column={:?} hwnd_client_width={:.1} accepted_core_column_width={:?} accepted_core_composition_width={:?}",
+                            group,
+                            column,
+                            native_column_bounds.size.width,
+                            accepted_core_column_width,
+                            accepted_core_composition_width,
                         );
                     }
 
@@ -4455,18 +4451,16 @@ impl FloatingWindowManager {
             if actual_native_client_width.is_some_and(|actual| {
                 (actual - target_bounds.size.width).abs() > 0.5
             }) {
-                tracing::info!(
-                    target: "dock_gpui::floating_resize_diag",
-                    event = "reconcile_width_mismatch",
-                    group = ?spec.floating_group(),
-                    member = ?spec.member,
-                    hwnd_client_width = ?actual_native_client_width,
-                    core_column_width = spec.bounds.size.width,
-                    reconcile_target_width = target_bounds.size.width,
-                    registry_width = current_bounds.size.width,
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=reconcile_width_mismatch group={:?} member={:?} hwnd_client_width={:?} core_column_width={:.1} reconcile_target_width={:.1} registry_width={:.1} native_bounds_dirty={} resizing_this_member={}",
+                    spec.floating_group(),
+                    spec.member,
+                    actual_native_client_width,
+                    spec.bounds.size.width,
+                    target_bounds.size.width,
+                    current_bounds.size.width,
                     native_bounds_dirty,
                     resizing_this_member,
-                    "[FLOATING_RESIZE_DIAG]"
                 );
             }
             let scale_changed = current_scale.is_some_and(|scale| {
