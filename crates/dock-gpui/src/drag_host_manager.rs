@@ -869,8 +869,13 @@ impl DragHostManager {
                     }
                 });
             if should_log {
-                eprintln!(
-                    "Main DockArea drag tracking started: id={id:?}, handle={handle:?}, source_host={source_host:?}, source_window_id={source_window_id:?}, payload={payload:?}"
+                tracing::trace!(
+                    ?id,
+                    ?handle,
+                    ?source_host,
+                    ?source_window_id,
+                    ?payload,
+                    "Main DockArea drag tracking started"
                 );
             }
         }
@@ -1092,8 +1097,15 @@ impl DragHostManager {
                     first || changed
                 });
             if should_log {
-                eprintln!(
-                    "Main docking drag target: handle={handle:?}, cursor={cursor:?}, target_window={target_window:?}, target={target:?}, target_role={target_role:?}, resolved_zone={resolved_zone:?}, floating_edge_zones={floating_edge_zones:?}"
+                tracing::trace!(
+                    ?handle,
+                    ?cursor,
+                    ?target_window,
+                    ?target,
+                    ?target_role,
+                    ?resolved_zone,
+                    ?floating_edge_zones,
+                    "Main docking drag target"
                 );
             }
         }
