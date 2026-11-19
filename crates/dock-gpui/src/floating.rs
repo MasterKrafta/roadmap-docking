@@ -1611,7 +1611,7 @@ pub(crate) fn floating_group_and_column_for_group(
     Some((floating_group, column))
 }
 
-pub(crate) fn floating_part_local_rect(rect: Rect, origin: Point) -> Rect {
+pub(crate) fn floating_column_local_rect(rect: Rect, origin: Point) -> Rect {
     Rect::new(
         Point::new(rect.origin.x - origin.x, rect.origin.y - origin.y),
         rect.size,
@@ -1859,8 +1859,8 @@ mod floating_dock_area_header_hit_tests {
 }
 
 #[cfg(test)]
-mod floating_part_host_geometry_tests {
-    use super::{floating_local_point_to_core, floating_part_local_rect};
+mod floating_column_host_geometry_tests {
+    use super::{floating_local_point_to_core, floating_column_local_rect};
     use dock_core::{Point, Rect, Size};
 
     #[test]
@@ -1876,7 +1876,7 @@ mod floating_part_host_geometry_tests {
 
     #[test]
     fn detached_group_geometry_is_rebased_to_the_window_origin() {
-        let local = floating_part_local_rect(
+        let local = floating_column_local_rect(
             Rect::new(Point::new(180.0, 96.0), Size::new(420.0, 260.0)),
             Point::new(180.0, 96.0),
         );
