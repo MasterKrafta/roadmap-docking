@@ -1,4 +1,4 @@
-use dock_core::{HitResult, Point, Rect};
+use dock_core::{FloatingGroupId, HitResult, NodeId, Point, Rect};
 use gpui::WindowId;
 
 /// The target, pointer origin, and source geometry captured at pointer-down.
@@ -6,6 +6,8 @@ use gpui::WindowId;
 pub struct ResizeInteraction {
     /// The native GPUI window that owns this pointer gesture.
     pub window_id: WindowId,
+    /// Present only when the splitter belongs to a permanent Floating Column HWND.
+    pub floating_column: Option<(FloatingGroupId, NodeId)>,
     pub hit: HitResult,
     pub origin: Point,
     /// Latest pointer position used only to render a visual preview.

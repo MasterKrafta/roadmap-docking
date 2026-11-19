@@ -118,6 +118,24 @@ pub enum DockCommand {
         delta: f32,
         available_height: f32,
     },
+    /// Resize only the Group above one splitter in a Floating Column.
+    ///
+    /// The Column viewport grows or shrinks by the accepted delta. Every other
+    /// Group keeps its current height and only changes its vertical position.
+    ResizeFloatingGroups {
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        boundary_index: usize,
+        delta: f32,
+        available_height: f32,
+    },
+    /// Synchronize a Floating Column's current native client height before a
+    /// splitter gesture. This is transient and is not an Undo/Redo revision.
+    SetFloatingColumnHeight {
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        height: f32,
+    },
     /// Set a column's requested width in logical pixels at the canvas-facing
     /// outer edge of a main dock. Interior main columns use ResizeColumnBoundary.
     ResizeColumn { column: NodeId, width: f32 },
@@ -149,6 +167,12 @@ pub enum DockCommand {
     ///
     /// Interactive resizing should use ResizeGroups or ResetColumnRatios.
     RestoreGroupRatios { column: NodeId, ratios: Vec<f32> },
+    /// Restore the group ratios and client height of a Floating Column.
+    RestoreFloatingColumnGroupLayout {
+        column: NodeId,
+        ratios: Vec<f32>,
+        floating_height: f32,
+    },
     /// Detach a Panel, Tabs group, Column, or complete horizontal DockArea composition.
     ///
     /// In the Photoshop profile, Panel and Tabs roots are wrapped in a single-group

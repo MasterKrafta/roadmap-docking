@@ -1,5 +1,5 @@
 use dock_core::{
-    Axis, DockCommand, DockSide, HitResult, LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
+    Axis, DockCommand, DockSide, FloatingGroupId, HitResult, LayoutRects, Node, NodeId, OUTER_COLUMN_EDGE_BOUNDARY_INDEX, Point,
     Rect, ResizeEdge, Size,
 };
 use gpui::{App, Entity, WindowId};
@@ -36,10 +36,26 @@ pub(crate) fn begin_resize_hit_with_rects(
     hit: HitResult,
     point: Point,
     rects: &LayoutRects,
+    floating_column: Option<(FloatingGroupId, NodeId)>,
     app: &mut App,
 ) {
-    if let Err(error) = controller.update(app, |controller, _| {
-        controller.begin_resize_interaction_with_rects(window_id, hit, point, Some(rects))
+    if let Err(error) = controller.update(app, |controller, _| match floating_column {
+        Some((floating_group, column)) => {
+            controller.begin_floating_column_resize_interaction_with_rects(
+                window_id,
+                hit,
+                point,
+                floating_group,
+                column,
+                Some(rects),
+            )
+        }
+        None => controller.begin_resize_interaction_with_rects(
+            window_id,
+            hit,
+            point,
+            Some(rects),
+        ),
     }) {
         tracing::debug!(%error, "could not begin floating dock resize");
     }
@@ -168,12 +184,29 @@ fn command_for_pointer(
                 if dy == 0.0 {
                     return None;
                 }
-                Some(DockCommand::ResizeGroups {
-                    column: owner,
-                    boundary_index,
-                    delta: dy,
-                    available_height: available_group_height(controller, owner, rects)?,
-                })
+                if let Some((floating_group, floating_column)) = interaction.floating_column {
+                    if floating_column != owner {
+                        return None;
+                    }
+                    Some(DockCommand::ResizeFloatingGroups {
+                        floating_group,
+                        column: owner,
+                        boundary_index,
+                        delta: dy,
+                        available_height: available_floating_group_height(
+                            controller,
+                            owner,
+                            rects,
+                        )?,
+                    })
+                } else {
+                    Some(DockCommand::ResizeGroups {
+                        column: owner,
+                        boundary_index,
+                        delta: dy,
+                        available_height: available_group_height(controller, owner, rects)?,
+                    })
+                }
             }
             Axis::X if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX => {
                 let side = main_edge_side(controller.layout(), owner)?;
@@ -235,7 +268,11 @@ fn reset_command_for_interaction(
     match axis {
         Axis::Y => Some(DockCommand::ResetColumnRatios {
             column: owner,
-            available_height: available_group_height(controller, owner, rects)?,
+            available_height: if interaction.floating_column.is_some() {
+                available_floating_group_height(controller, owner, rects)?
+            } else {
+                available_group_height(controller, owner, rects)?
+            },
         }),
         Axis::X => {
             let side = if boundary_index == OUTER_COLUMN_EDGE_BOUNDARY_INDEX {
@@ -310,6 +347,34 @@ fn available_group_height(
     }
     let gaps = metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
     let available = total_height - gaps;
+    (available.is_finite() && available > 0.0).then_some(available)
+}
+
+fn available_floating_group_height(
+    controller: &DockController,
+    column: NodeId,
+    host_rects: Option<&LayoutRects>,
+) -> Option<f32> {
+    let metrics = controller.metrics();
+    let rects = host_rects?;
+    let column_height = rects
+        .columns
+        .iter()
+        .find(|rect| rect.column == column)?
+        .rect
+        .size
+        .height;
+    let (group_count, is_rail) = match controller.layout().node(column)? {
+        Node::Column(value) => (value.groups.len(), value.mode.is_rail()),
+        _ => return None,
+    };
+    if group_count < 2 || is_rail {
+        return None;
+    }
+
+    let splitter_gaps =
+        metrics.splitter_thickness * group_count.saturating_sub(1) as f32;
+    let available = column_height - metrics.column_header_height - splitter_gaps;
     (available.is_finite() && available > 0.0).then_some(available)
 }
 

@@ -24,6 +24,38 @@ impl Layout {
                 available_height,
                 metrics,
             ),
+            DockCommand::ResizeFloatingGroups {
+                floating_group,
+                column,
+                boundary_index,
+                delta,
+                available_height,
+            } => self.apply_resize_floating_groups_command(
+                floating_group,
+                column,
+                boundary_index,
+                delta,
+                available_height,
+                metrics,
+            ),
+            DockCommand::SetFloatingColumnHeight {
+                floating_group,
+                column,
+                height,
+            } => self.apply_set_floating_column_height(
+                floating_group,
+                column,
+                height,
+            ),
+            DockCommand::RestoreFloatingColumnGroupLayout {
+                column,
+                ratios,
+                floating_height,
+            } => self.apply_restore_floating_column_group_layout(
+                column,
+                ratios,
+                floating_height,
+            ),
             DockCommand::ResetColumnRatios {
                 column,
                 available_height,
@@ -173,6 +205,246 @@ impl Layout {
             inverse: Some(DockCommand::RestoreGroupRatios {
                 column: *column,
                 ratios: current.group_ratios,
+            }),
+            persistent: true,
+        })
+    }
+
+    fn floating_group_owns_column(
+        &self,
+        floating_group: crate::FloatingGroupId,
+        column: NodeId,
+    ) -> bool {
+        let Some(root) = self
+            .floating_group(floating_group)
+            .and_then(|floating| self.dock_area(floating.area).map(|area| area.root))
+        else {
+            return false;
+        };
+        match self.nodes.get(root) {
+            Some(Node::Column(_)) => root == column,
+            Some(Node::Split(split)) if split.axis == Axis::X => {
+                split.children.contains(&column)
+            }
+            _ => false,
+        }
+    }
+
+    pub(super) fn apply_set_floating_column_height(
+        &mut self,
+        floating_group: &crate::FloatingGroupId,
+        column: &NodeId,
+        height: &f32,
+    ) -> Result<CommandApplication, CommandError> {
+        if !height.is_finite() || *height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "height",
+                reason: "Floating Column height must be finite and positive",
+            });
+        }
+        if !self.floating_group_owns_column(*floating_group, *column) {
+            return Err(CommandError::InvalidTarget {
+                reason: "Floating group does not own the target Column",
+            });
+        }
+        let current_height = match self.nodes.get(*column) {
+            Some(Node::Column(value)) => value.floating_height,
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "SetFloatingColumnHeight target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *column }),
+        };
+        if current_height.is_some_and(|current| {
+            (current - *height).abs() <= PIXEL_TOLERANCE
+        }) {
+            return Ok(CommandApplication::transient());
+        }
+        if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+            value.floating_height = Some(*height);
+        }
+        Ok(CommandApplication::transient())
+    }
+
+    pub(super) fn apply_resize_floating_groups_command(
+        &mut self,
+        floating_group: &crate::FloatingGroupId,
+        column: &NodeId,
+        boundary_index: &usize,
+        delta: &f32,
+        available_height: &f32,
+        metrics: &DockMetrics,
+    ) -> Result<CommandApplication, CommandError> {
+        if !delta.is_finite() {
+            return Err(CommandError::InvalidValue {
+                field: "delta",
+                reason: "group boundary delta must be finite",
+            });
+        }
+        if !available_height.is_finite() || *available_height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "available group height must be finite and positive",
+            });
+        }
+        if !self.floating_group_owns_column(*floating_group, *column) {
+            return Err(CommandError::InvalidTarget {
+                reason: "Floating group does not own the target Column",
+            });
+        }
+
+        let current = match self.nodes.get(*column) {
+            Some(Node::Column(value)) => value.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "ResizeFloatingGroups target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *column }),
+        };
+        if current.mode.is_rail() {
+            return Err(CommandError::InvalidTarget {
+                reason: "Floating Group resize requires an expanded Column",
+            });
+        }
+        if *boundary_index >= current.groups.len().saturating_sub(1) {
+            return Err(CommandError::InvalidTarget {
+                reason: "group boundary index does not identify adjacent groups",
+            });
+        }
+
+        let heights =
+            self.group_heights_for_available_height(*column, *available_height, metrics)?;
+        let minimums = self.group_minimum_heights(*column, metrics)?;
+        let required_height = minimums.iter().sum::<f32>();
+        if !required_height.is_finite() || *available_height < required_height {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "available height is below the sum of group minimum heights",
+            });
+        }
+        if current.groups.iter().enumerate().any(|(index, group)| {
+            !self.group_is_collapsed(*group)
+                && heights[index] + PIXEL_TOLERANCE < minimums[index]
+        }) {
+            return Err(CommandError::InvalidValue {
+                field: "available_height",
+                reason: "current group ratios place an expanded group below its minimum; reset ratios before resizing",
+            });
+        }
+
+        let selected_index = *boundary_index;
+        let selected_group = current.groups[selected_index];
+        if self.group_is_collapsed(selected_group) {
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
+                inverse: None,
+                persistent: true,
+            });
+        }
+
+        // Only the Group above this splitter receives the size delta. Every
+        // following Group keeps its height; the Column's viewport changes by
+        // exactly the same accepted amount.
+        let minimum_delta = minimums[selected_index] - heights[selected_index];
+        let actual_delta = (*delta).max(minimum_delta);
+        if actual_delta == 0.0 {
+            return Ok(CommandApplication {
+                actual_value: Some(CommandValue::GroupBoundaryDelta(0.0)),
+                inverse: None,
+                persistent: true,
+            });
+        }
+
+        let gap_total = metrics.splitter_thickness
+            * current.groups.len().saturating_sub(1) as f32;
+        let previous_column_height =
+            *available_height + metrics.column_header_height + gap_total;
+        let new_column_height = previous_column_height + actual_delta;
+        let new_available_height = *available_height + actual_delta;
+        if !previous_column_height.is_finite()
+            || !new_column_height.is_finite()
+            || new_column_height <= 0.0
+            || !new_available_height.is_finite()
+            || new_available_height < required_height
+        {
+            return Err(CommandError::InvalidValue {
+                field: "delta",
+                reason: "Floating Column resize produced an invalid height",
+            });
+        }
+
+        let mut new_heights = heights;
+        new_heights[selected_index] += actual_delta;
+        let new_ratios = self.group_ratios_from_heights(*column, &new_heights)?;
+        if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+            value.group_ratios = new_ratios;
+            value.floating_height = Some(new_column_height);
+        }
+
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::GroupBoundaryDelta(actual_delta)),
+            inverse: Some(DockCommand::RestoreFloatingColumnGroupLayout {
+                column: *column,
+                ratios: current.group_ratios,
+                floating_height: previous_column_height,
+            }),
+            persistent: true,
+        })
+    }
+
+    pub(super) fn apply_restore_floating_column_group_layout(
+        &mut self,
+        column: &NodeId,
+        ratios: &Vec<f32>,
+        floating_height: &f32,
+    ) -> Result<CommandApplication, CommandError> {
+        if !floating_height.is_finite() || *floating_height <= 0.0 {
+            return Err(CommandError::InvalidValue {
+                field: "floating_height",
+                reason: "Floating Column height must be finite and positive",
+            });
+        }
+        let current = match self.nodes.get(*column) {
+            Some(Node::Column(value)) => value.clone(),
+            Some(_) => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "RestoreFloatingColumnGroupLayout target must be a Column node",
+                });
+            }
+            None => return Err(CommandError::MissingNode { node: *column }),
+        };
+        if ratios.len() != current.groups.len() {
+            return Err(CommandError::InvalidValue {
+                field: "ratios",
+                reason: "ratio count must match group count",
+            });
+        }
+        if let Some(reason) = ratio_issues(ratios, current.groups.len()).first() {
+            return Err(CommandError::InvalidValue {
+                field: "ratios",
+                reason: reason.as_str(),
+            });
+        }
+        if current.group_ratios == *ratios
+            && current
+                .floating_height
+                .is_some_and(|height| (height - *floating_height).abs() <= PIXEL_TOLERANCE)
+        {
+            return Ok(CommandApplication::persistent());
+        }
+
+        if let Some(Node::Column(value)) = self.nodes.get_mut(*column) {
+            value.group_ratios = ratios.clone();
+            value.floating_height = Some(*floating_height);
+        }
+        Ok(CommandApplication {
+            actual_value: Some(CommandValue::GroupRatios(ratios.clone())),
+            inverse: Some(DockCommand::RestoreFloatingColumnGroupLayout {
+                column: *column,
+                ratios: current.group_ratios,
+                floating_height: current.floating_height.unwrap_or(*floating_height),
             }),
             persistent: true,
         })

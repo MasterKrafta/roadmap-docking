@@ -126,6 +126,7 @@ impl Layout {
             mode: ColumnMode::Expanded,
             groups: vec![group],
             group_ratios: vec![1.0],
+            floating_height: None,
             last_expanded_width: Some(width),
         })))
     }
@@ -876,6 +877,7 @@ impl Layout {
             mode: ColumnMode::Expanded,
             groups: split.children,
             group_ratios: normalized_ratios(split.ratios.into_iter().map(Some).collect()),
+            floating_height: None,
             last_expanded_width: Some(metrics.default_column_width),
         }));
         self.insert_existing_column_at(side, index, column, None, metrics)
@@ -922,7 +924,8 @@ impl Layout {
                         mode: ColumnMode::Expanded,
                         groups: vec![group],
                         group_ratios: vec![1.0],
-                        last_expanded_width: Some(metrics.default_column_width),
+                        floating_height: None,
+            last_expanded_width: Some(metrics.default_column_width),
                     }))
                 }
                 None => return Err(CommandError::MissingNode { node: child }),

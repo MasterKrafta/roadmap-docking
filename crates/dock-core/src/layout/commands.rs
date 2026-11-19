@@ -140,6 +140,9 @@ impl Layout {
                 self.apply_group_command(command, metrics)
             }
             DockCommand::ResizeGroups { .. }
+            | DockCommand::ResizeFloatingGroups { .. }
+            | DockCommand::SetFloatingColumnHeight { .. }
+            | DockCommand::RestoreFloatingColumnGroupLayout { .. }
             | DockCommand::ResetColumnRatios { .. }
             | DockCommand::RestoreGroupRatios { .. } => {
                 self.apply_group_resize_command(command, metrics)

@@ -11,6 +11,12 @@ pub struct Column {
     pub mode: ColumnMode,
     pub groups: Vec<NodeId>,
     pub group_ratios: Vec<f32>,
+    /// Preferred client height for this Column when it is hosted in Floating.
+    ///
+    /// Main layout ignores this value. Floating Columns use it to preserve their
+    /// independently resized vertical viewport across Core recomputations.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub floating_height: Option<f32>,
     /// Last user-selected width while expanded; rail width is presentation-only.
     #[cfg_attr(feature = "serde", serde(default))]
     pub last_expanded_width: Option<f32>,

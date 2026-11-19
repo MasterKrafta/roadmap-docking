@@ -484,7 +484,8 @@ impl Layout {
                     mode: ColumnMode::Expanded,
                     groups: vec![new_group],
                     group_ratios: vec![1.0],
-                    last_expanded_width: Some(metrics.default_column_width),
+                    floating_height: None,
+            last_expanded_width: Some(metrics.default_column_width),
                 }));
                 self.insert_column_adjacent_to_target(
                     column,
@@ -676,6 +677,7 @@ impl Layout {
             mode: ColumnMode::Expanded,
             groups: vec![group],
             group_ratios: vec![1.0],
+            floating_height: None,
             last_expanded_width: Some(metrics.default_column_width),
         }));
         self.insert_existing_column_at(side, index, new_column, None, metrics)?;

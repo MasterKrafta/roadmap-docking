@@ -153,6 +153,10 @@ fn render_floating_pointer_input(
     source_part: Option<DockWindowPart>,
     point_origin: Point,
 ) -> impl IntoElement {
+    let floating_column_for_resize = match source_part.as_ref() {
+        Some(DockWindowPart::Column { column }) => Some((group, *column)),
+        _ => None,
+    };
     let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_up = dock_component_tab_zones;
@@ -239,6 +243,7 @@ fn render_floating_pointer_input(
                                     resize_hit,
                                     point,
                                     &rects,
+                                    floating_column_for_resize,
                                     app,
                                 );
                                 let resize_started = controller_for_down

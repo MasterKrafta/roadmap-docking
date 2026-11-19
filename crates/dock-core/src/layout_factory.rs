@@ -152,6 +152,7 @@ pub fn create_initial_layout(
         mode: ColumnMode::Expanded,
         groups: vec![appearance_group, information_group],
         group_ratios: vec![0.5, 0.5],
+        floating_height: None,
         last_expanded_width: Some(column_width),
     }));
 

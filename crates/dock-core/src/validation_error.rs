@@ -29,6 +29,8 @@ pub enum ValidationReason {
     IconsOnlyWidthMustEqualRailWidth,
     /// The remembered expanded width must be finite and positive.
     LastExpandedWidthMustBeFiniteAndPositive,
+    /// A Floating Column's preferred client height must be finite and positive.
+    FloatingHeightMustBeFiniteAndPositive,
     /// A Column must contain a group before normalization.
     ColumnMustContainAtLeastOneGroupBeforeNormalization,
     /// Photoshop Column groups may contain only Tabs nodes.
@@ -67,6 +69,9 @@ impl ValidationReason {
             Self::IconsOnlyWidthMustEqualRailWidth => "IconsOnly width must equal rail_width",
             Self::LastExpandedWidthMustBeFiniteAndPositive => {
                 "last_expanded_width must be finite and positive"
+            },
+            Self::FloatingHeightMustBeFiniteAndPositive => {
+                "floating_height must be finite and positive"
             }
             Self::ColumnMustContainAtLeastOneGroupBeforeNormalization => {
                 "must contain at least one group before normalization"

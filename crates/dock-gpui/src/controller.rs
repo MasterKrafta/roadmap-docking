@@ -783,6 +783,82 @@ impl DockController {
         origin: Point,
         rects: Option<&LayoutRects>,
     ) -> Result<(), ResizeInteractionError> {
+        self.begin_resize_interaction_in_context(window_id, hit, origin, rects, None)
+    }
+
+    pub(crate) fn begin_floating_column_resize_interaction_with_rects(
+        &mut self,
+        window_id: WindowId,
+        hit: HitResult,
+        origin: Point,
+        floating_group: FloatingGroupId,
+        column: NodeId,
+        rects: Option<&LayoutRects>,
+    ) -> Result<(), ResizeInteractionError> {
+        if matches!(&hit, HitResult::Splitter { axis: Axis::Y, .. }) {
+            let column_height = rects
+                .and_then(|rects| {
+                    rects
+                        .columns
+                        .iter()
+                        .find(|rect| rect.column == column)
+                        .map(|rect| rect.rect.size.height)
+                })
+                .filter(|height| height.is_finite() && *height > 0.0)
+                .ok_or(ResizeInteractionError::NotResizeHandle)?;
+
+            // Persist the current native viewport as transient Core state before
+            // opening the history transaction. Undo then restores the true height
+            // that the user had before dragging this Group splitter.
+            self.history
+                .apply(
+                    &mut self.layout,
+                    DockCommand::SetFloatingColumnHeight {
+                        floating_group,
+                        column,
+                        height: column_height,
+                    },
+                    &self.metrics,
+                )
+                .map_err(|error| {
+                    tracing::debug!(%error, ?column, "could not synchronize Floating Column height before resize");
+                    ResizeInteractionError::NotResizeHandle
+                })?;
+
+            let origin_y_offset = self
+                .floating_column_viewports
+                .get(&window_id)
+                .filter(|(group, current_column, _, _)| {
+                    *group == floating_group && *current_column == column
+                })
+                .map(|(_, _, _, origin)| *origin)
+                .unwrap_or(0.0);
+            self.set_floating_column_viewport(
+                window_id,
+                floating_group,
+                column,
+                column_height,
+                origin_y_offset,
+            );
+        }
+
+        self.begin_resize_interaction_in_context(
+            window_id,
+            hit,
+            origin,
+            rects,
+            Some((floating_group, column)),
+        )
+    }
+
+    fn begin_resize_interaction_in_context(
+        &mut self,
+        window_id: WindowId,
+        hit: HitResult,
+        origin: Point,
+        rects: Option<&LayoutRects>,
+        floating_column: Option<(FloatingGroupId, NodeId)>,
+    ) -> Result<(), ResizeInteractionError> {
         if self.has_active_pointer_interaction() {
             return Err(ResizeInteractionError::AlreadyActive);
         }
@@ -853,6 +929,7 @@ impl DockController {
         self.drag.clear_resolver();
         self.interaction = Some(ResizeInteraction {
             window_id,
+            floating_column,
             hit,
             origin,
             preview_point: None,

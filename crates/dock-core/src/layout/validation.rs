@@ -308,6 +308,14 @@ impl Layout {
                             reason: ValidationReason::LastExpandedWidthMustBeFiniteAndPositive,
                         });
                     }
+                    if let Some(height) = column.floating_height
+                        && (!height.is_finite() || height <= 0.0)
+                    {
+                        errors.push(ValidationError::InvalidColumn {
+                            node: node_id,
+                            reason: ValidationReason::FloatingHeightMustBeFiniteAndPositive,
+                        });
+                    }
 
                     if column.groups.is_empty() {
                         errors.push(ValidationError::InvalidColumn {
@@ -924,6 +932,7 @@ impl Layout {
                 mode: ColumnMode::Expanded,
                 groups,
                 group_ratios,
+                floating_height: None,
                 last_expanded_width: Some(width),
             };
 

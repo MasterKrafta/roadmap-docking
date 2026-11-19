@@ -110,7 +110,26 @@ pub(super) fn layout_floating_root(
         );
     }
 
-    layout_node(layout, id, rect, metrics, Some(id), minimum_sizes, output)
+    let root_rect = match layout.node(id) {
+        Some(crate::Node::Column(column)) => Rect::new(
+            rect.origin,
+            Size::new(
+                rect.size.width,
+                column.floating_height.unwrap_or(rect.size.height),
+            ),
+        ),
+        _ => rect,
+    };
+
+    layout_node(
+        layout,
+        id,
+        root_rect,
+        metrics,
+        Some(id),
+        minimum_sizes,
+        output,
+    )
 }
 
 struct SplitLayoutContext<'a> {
@@ -232,9 +251,19 @@ fn layout_split_inner(
 
             let mut x = rect.origin.x;
             for (index, child) in split.children.iter().enumerate() {
+                let child_height = if floating_root.is_some() {
+                    match layout.node(*child) {
+                        Some(crate::Node::Column(column)) => {
+                            column.floating_height.unwrap_or(rect.size.height)
+                        }
+                        _ => rect.size.height,
+                    }
+                } else {
+                    rect.size.height
+                };
                 let child_rect = Rect::new(
                     Point::new(x, rect.origin.y),
-                    Size::new(widths[index], rect.size.height),
+                    Size::new(widths[index], child_height),
                 );
                 layout_node(
                     layout,

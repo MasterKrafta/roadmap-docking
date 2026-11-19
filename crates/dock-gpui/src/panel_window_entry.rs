@@ -23,6 +23,9 @@ pub(super) struct PanelWindowEntry {
     /// Stored in physical pixels because native bounds use desktop coordinates.
     pub(super) native_vertical_origin_offset: f32,
     pub(super) native_vertical_height: Option<f32>,
+    /// Last client height produced by Core geometry; distinguishes model changes
+    /// (including Undo/Redo) from a temporary native resize override.
+    pub(super) core_vertical_height: f32,
     pub(super) resize_enabled: bool,
     pub(super) host_group: Option<FloatingGroupId>,
     pub(super) visibility: PanelWindowVisibility,

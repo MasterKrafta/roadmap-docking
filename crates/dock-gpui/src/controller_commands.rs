@@ -840,6 +840,7 @@ fn is_resize_command(command: &DockCommand) -> bool {
     matches!(
         command,
         DockCommand::ResizeGroups { .. }
+            | DockCommand::ResizeFloatingGroups { .. }
             | DockCommand::ResizeColumn { .. }
             | DockCommand::ResizeColumnBoundary { .. }
             | DockCommand::ResizeSplitColumnBoundary { .. }

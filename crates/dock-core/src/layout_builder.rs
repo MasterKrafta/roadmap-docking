@@ -104,6 +104,7 @@ impl LayoutBuilder {
             mode,
             groups,
             group_ratios,
+            floating_height: None,
             last_expanded_width: (mode == ColumnMode::Expanded).then_some(width),
         }))
     }
@@ -166,7 +167,8 @@ impl LayoutBuilder {
                         mode: ColumnMode::Expanded,
                         groups: split.children,
                         group_ratios: split.ratios,
-                        last_expanded_width: Some(width),
+                        floating_height: None,
+            last_expanded_width: Some(width),
                     });
                 }
                 root

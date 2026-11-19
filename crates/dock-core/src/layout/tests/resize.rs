@@ -97,6 +97,102 @@ fn c45_resize_groups_changes_only_adjacent_pair_and_reports_minimum_clamp() {
 }
 
 #[test]
+fn floating_group_resize_keeps_following_groups_fixed_and_grows_column() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let constraints = |min_height: f32| {
+        PanelConstraints::new(
+            Size::new(120.0, min_height),
+            Size::new(200.0, min_height.max(140.0)),
+            None,
+            false,
+        )
+    };
+    let (_, panel_a) = builder.panel(
+        PanelKey::new("floating-resize-a").unwrap(),
+        constraints(80.0),
+    );
+    let (_, panel_b) = builder.panel(
+        PanelKey::new("floating-resize-b").unwrap(),
+        constraints(90.0),
+    );
+    let (_, panel_c) = builder.panel(
+        PanelKey::new("floating-resize-c").unwrap(),
+        constraints(100.0),
+    );
+    let group_a = builder.tabs(vec![panel_a], 0, false);
+    let group_b = builder.tabs(vec![panel_b], 0, false);
+    let group_c = builder.tabs(vec![panel_c], 0, false);
+    let column = builder.column(
+        metrics.default_column_width,
+        crate::ColumnMode::Expanded,
+        vec![group_a, group_b, group_c],
+        vec![1.0 / 3.0; 3],
+    );
+    let floating = builder.floating_group(
+        column,
+        Rect::new(Point::new(80.0, 60.0), Size::new(320.0, 900.0)),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let before = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let before_column_height = before
+        .columns
+        .iter()
+        .find(|rect| rect.column == column)
+        .unwrap()
+        .rect
+        .size
+        .height;
+    let before_a = before.groups.iter().find(|rect| rect.group == group_a).unwrap().rect;
+    let before_b = before.groups.iter().find(|rect| rect.group == group_b).unwrap().rect;
+    let before_c = before.groups.iter().find(|rect| rect.group == group_c).unwrap().rect;
+    let available_height = before_column_height
+        - metrics.column_header_height
+        - metrics.splitter_thickness * 2.0;
+
+    let grow = layout
+        .apply(
+            DockCommand::ResizeFloatingGroups {
+                floating_group: floating,
+                column,
+                boundary_index: 0,
+                delta: 80.0,
+                available_height,
+            },
+            &metrics,
+        )
+        .unwrap();
+    assert_eq!(
+        grow.actual_value,
+        Some(CommandValue::GroupBoundaryDelta(80.0))
+    );
+
+    let after = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let after_column_height = after
+        .columns
+        .iter()
+        .find(|rect| rect.column == column)
+        .unwrap()
+        .rect
+        .size
+        .height;
+    let after_a = after.groups.iter().find(|rect| rect.group == group_a).unwrap().rect;
+    let after_b = after.groups.iter().find(|rect| rect.group == group_b).unwrap().rect;
+    let after_c = after.groups.iter().find(|rect| rect.group == group_c).unwrap().rect;
+
+    assert!((after_column_height - before_column_height - 80.0).abs() < 1.0e-3);
+    assert!((after_a.size.height - before_a.size.height - 80.0).abs() < 1.0e-3);
+    assert!((after_b.size.height - before_b.size.height).abs() < 1.0e-3);
+    assert!((after_c.size.height - before_c.size.height).abs() < 1.0e-3);
+    assert!((after_b.origin.y - before_b.origin.y - 80.0).abs() < 1.0e-3);
+    assert!((after_c.origin.y - before_c.origin.y - 80.0).abs() < 1.0e-3);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn c45_resize_groups_cannot_shrink_below_tab_chrome_and_panel_minimum() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);

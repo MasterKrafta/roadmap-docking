@@ -1603,6 +1603,7 @@ impl FloatingWindowManager {
                 native_bounds_dirty: false,
                 native_vertical_origin_offset: 0.0,
                 native_vertical_height: None,
+                core_vertical_height: bounds.size.height,
                 resize_enabled,
                 host_group: Some(floating_group),
                 visibility: PanelWindowVisibility::Visible,
@@ -6028,6 +6029,7 @@ impl FloatingWindowManager {
             native_bounds_dirty: false,
             native_vertical_origin_offset: 0.0,
             native_vertical_height: None,
+            core_vertical_height: spec.bounds.size.height,
             resize_enabled: false,
             host_group: if spec.main_drag_side.is_some() {
                 None
@@ -6234,6 +6236,27 @@ impl FloatingWindowManager {
                 entry.host_group = Some(spec.floating_group());
             }
 
+            // Persistent Core height changes (Group splitter, Undo, or Redo)
+            // replace a previous native resize override for permanent Columns.
+            let core_height_changed = if spec.main_drag_side.is_none()
+                && matches!(spec.member, WindowGridMember::Column(_))
+            {
+                if let Some(entry) = self.registry.members.get_mut(&spec.member) {
+                    if (entry.core_vertical_height - spec.bounds.size.height).abs() > 0.5 {
+                        entry.core_vertical_height = spec.bounds.size.height;
+                        entry.native_vertical_height = Some(spec.bounds.size.height);
+                        entry.native_bounds_dirty = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
             let current = self.registry.members.get(&spec.member).map(|entry| {
                 (entry.bounds, entry.native_bounds_dirty, entry.native_window, entry.native_scale_factor)
             });
@@ -6244,6 +6267,29 @@ impl FloatingWindowManager {
                 .and_then(|native_window| self.native_ops.scale_factor(native_window).ok())
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .or(previous_scale);
+            if core_height_changed
+                && let WindowGridMember::Column(column) = spec.member
+            {
+                let viewport = self.registry.members.get(&spec.member).map(|entry| {
+                    (
+                        entry.window_id,
+                        entry.native_vertical_origin_offset,
+                    )
+                });
+                if let Some((window_id, origin_y_offset)) = viewport {
+                    let scale = current_scale.unwrap_or(1.0);
+                    self.controller.update(cx, |controller, controller_cx| {
+                        controller.set_floating_column_viewport(
+                            window_id,
+                            spec.floating_group(),
+                            column,
+                            spec.bounds.size.height,
+                            origin_y_offset / scale,
+                        );
+                        controller_cx.notify();
+                    });
+                }
+            }
             let mut target_spec = spec;
             let mut target_vertical_origin_offset = None;
             if let Some(entry) = self.registry.members.get(&spec.member)
@@ -6686,6 +6732,7 @@ impl FloatingWindowManager {
             native_bounds_dirty: false,
             native_vertical_origin_offset: 0.0,
             native_vertical_height: None,
+            core_vertical_height: bounds.size.height,
             resize_enabled: false,
             host_group: None,
             visibility: PanelWindowVisibility::Hidden,
