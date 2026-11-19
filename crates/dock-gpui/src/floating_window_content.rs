@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dock_core::{
-    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, FlyoutState, GroupRect, NodeId,
+    ColumnDisplayItem, ColumnMode, ColumnRect, DockMetrics, FlyoutState, FloatingGroupRect, GroupRect, NodeId,
     PanelRect, Point, SplitterRect,
     TabHeaderRect, TabOverflowRect, TabStripRect, VerticalOverflow,
 };
@@ -16,14 +16,11 @@ use crate::{
     dock_components::{
         CompositionHeader, DockGroupView, GroupPresentation,
     },
-    DockController, FloatingWindowManager,
+    DockController,
 };
 use super::super::context_menu::GroupMenuToggle;
 
-/// Shared Floating presentation helpers.
-///
-/// `render` remains the legacy whole-composition path. `render_column` is used
-/// by permanent Floating Column hosts and shares the Main Column/Group renderers.
+/// Shared presentation helpers for a complete Floating Column.
 pub(super) struct FloatingWindowContent;
 
 impl FloatingWindowContent {
