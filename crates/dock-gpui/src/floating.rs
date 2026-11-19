@@ -49,9 +49,9 @@ use floating_tab_press::FloatingTabPress;
 mod floating_group_press;
 use floating_group_press::FloatingGroupPress;
 
-#[path = "floating_host_snapshot.rs"]
-mod floating_host_snapshot;
-use floating_host_snapshot::FloatingHostSnapshot;
+#[path = "floating_column_snapshot.rs"]
+mod floating_column_snapshot;
+use floating_column_snapshot::FloatingColumnSnapshot;
 
 #[path = "floating_column_host.rs"]
 mod floating_column_host;
@@ -1432,7 +1432,7 @@ fn floating_dock_area_title_pointer_region(
     ))
 }
 
-fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap<PanelId, Rect> {
+fn floating_dock_component_tab_zones(snapshot: &FloatingColumnSnapshot) -> HashMap<PanelId, Rect> {
     let mut zones = HashMap::new();
     for group_ids in snapshot.column_groups.values() {
         for group_id in group_ids {
@@ -1461,11 +1461,11 @@ fn floating_dock_component_tab_zones(snapshot: &FloatingHostSnapshot) -> HashMap
     zones
 }
 
-fn floating_host_snapshot(
+fn floating_column_snapshot(
     controller: &mut DockController,
     window_id: WindowId,
     group: FloatingGroupId,
-) -> Result<Option<FloatingHostSnapshot>, ComputeRectsError> {
+) -> Result<Option<FloatingColumnSnapshot>, ComputeRectsError> {
     let metrics = controller.metrics();
     let rects = controller.floating_geometry(window_id, group)?.clone();
     let layout = controller.layout();
@@ -1521,7 +1521,7 @@ fn floating_host_snapshot(
         .resize_interaction_for_window(window_id)
         .and_then(|interaction| resize_preview_for_interaction(interaction, window_id));
 
-    Ok(Some(FloatingHostSnapshot {
+    Ok(Some(FloatingColumnSnapshot {
         rects,
         floating,
         column_ids,
@@ -1650,7 +1650,7 @@ mod floating_tab_drag_zone_tests {
 
     use crate::dock_components::{GroupPresentation, TabPresentation};
 
-    use super::{FloatingHostSnapshot, floating_dock_component_tab_zones};
+    use super::{FloatingColumnSnapshot, floating_dock_component_tab_zones};
 
     #[test]
     fn every_single_tab_group_in_a_multi_group_column_gets_its_own_drag_zone() {
@@ -1667,7 +1667,7 @@ mod floating_tab_drag_zone_tests {
         let first_group_rect = Rect::new(Point::new(0.0, 40.0), Size::new(420.0, 220.0));
         let second_group_rect = Rect::new(Point::new(0.0, 270.0), Size::new(420.0, 220.0));
         let metrics = DockMetrics::default();
-        let snapshot = FloatingHostSnapshot {
+        let snapshot = FloatingColumnSnapshot {
             rects: LayoutRects {
                 columns: vec![ColumnRect::new(
                     column,
