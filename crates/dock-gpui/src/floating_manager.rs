@@ -2617,12 +2617,9 @@ impl FloatingWindowManager {
             let current_scale = self.native_ops.scale_factor(native_window).ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .or(entry.native_scale_factor);
-            let target_bounds = self.column_outer_bounds_for_target(
-                spec,
-                native_window,
-                current_scale,
-                None,
-            ).unwrap_or(spec.bounds);
+            let target_bounds = self
+                .column_outer_bounds_for_target(spec, native_window, current_scale)
+                .unwrap_or(spec.bounds);
             self.sync_column_window_bounds(native_window, target_bounds);
             entry.bounds = target_bounds;
             entry.native_scale_factor = current_scale;
