@@ -3284,6 +3284,7 @@ impl FloatingWindowManager {
             return;
         }
         self.reconciling = true;
+        self.adopt_untracked_native_column_resize(cx);
 
         let (groups, transferred_panels) = self.controller.update(cx, |controller, _| {
             let transferred_panels = controller
@@ -4303,6 +4304,121 @@ impl FloatingWindowManager {
                 "could not rebuild WindowGrid from the current Floating Column topology"
             );
             false
+        }
+    }
+
+    /// Adopts a completed native resize when GPUI delivers its final bounds after
+    /// the OS modal sizing loop has already ended and the polling session was missed.
+    /// Core remains authoritative when the registry itself is stale; only a native
+    /// width that diverged while the registry already matched Core is considered.
+    fn adopt_untracked_native_column_resize(&mut self, cx: &mut Context<Self>) {
+        if self.native_resize.is_some() || self.native_move.is_some() {
+            return;
+        }
+
+        let candidates = self
+            .registry
+            .members
+            .iter()
+            .filter_map(|(member, entry)| {
+                let WindowGridMember::Column(column) = *member else {
+                    return None;
+                };
+                if entry.native_bounds_dirty
+                    || entry.visibility != PanelWindowVisibility::Visible
+                    || !entry.resize_enabled
+                {
+                    return None;
+                }
+                Some((
+                    column,
+                    entry.host_group?,
+                    entry.window_id,
+                    entry.native_window?,
+                    entry.bounds.size.width,
+                ))
+            })
+            .collect::<Vec<_>>();
+
+        for (column, group, window_id, native_window, registry_width) in candidates {
+            let scale_factor = self
+                .native_ops
+                .scale_factor(native_window)
+                .ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .unwrap_or(1.0);
+            let core_column_bounds = self.controller.update(cx, |controller, _| {
+                floating_column_host_bounds(
+                    controller.layout(),
+                    &controller.metrics(),
+                    group,
+                    column,
+                    scale_factor,
+                )
+                .map(|(_, bounds)| bounds)
+            });
+            let Some(core_column_bounds) = core_column_bounds else {
+                continue;
+            };
+
+            // A registry/Core difference is a pending Core-driven update. Let the
+            // normal reconciliation path apply it instead of treating it as input.
+            if (registry_width - core_column_bounds.size.width).abs() > 0.5 {
+                continue;
+            }
+
+            let Some(native_bounds) = self.core_bounds_from_native_window(native_window) else {
+                continue;
+            };
+            let width_delta = native_bounds.size.width - core_column_bounds.size.width;
+            if width_delta.abs() <= 0.5 {
+                continue;
+            }
+
+            if self.native_ops.is_resizing(native_window).unwrap_or(false) {
+                self.ensure_native_column_resize_session(column, group, window_id, cx);
+                return;
+            }
+
+            let session_started = self.controller.update(cx, |controller, _| {
+                controller.begin_native_resize_session()
+            });
+            if !session_started {
+                return;
+            }
+
+            if let Some(entry) = self
+                .registry
+                .members
+                .get_mut(&WindowGridMember::Column(column))
+            {
+                entry.native_bounds_dirty = true;
+            }
+
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=late_native_resize_adopted group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1} width_delta={:.1}",
+                group,
+                column,
+                native_bounds.size.width,
+                core_column_bounds.size.width,
+                width_delta,
+            );
+
+            let mut state = NativeResizeSession {
+                group,
+                member: WindowGridMember::Column(column),
+                window_id,
+                transaction_started: false,
+            };
+            self.apply_native_column_resize_bounds(
+                column,
+                group,
+                native_bounds,
+                &mut state,
+                cx,
+            );
+            self.finish_native_resize_transaction(state, cx);
+            return;
         }
     }
 
