@@ -251,10 +251,11 @@ impl Render for FloatingColumnHost {
         let floating_group = self.floating_group();
         let column_viewport = Some((
             self.column,
+            f32::from(window.bounds().size.width),
             f32::from(window.bounds().size.height),
         ));
         let snapshot = self.controller.update(cx, |controller, _| {
-            if let Some((column, height)) = column_viewport {
+            if let Some((column, width, height)) = column_viewport {
                 let origin_y_offset = controller
                     .floating_column_viewport_origin_y_offset(
                         window_id,
@@ -266,6 +267,7 @@ impl Render for FloatingColumnHost {
                     window_id,
                     floating_group,
                     column,
+                    width,
                     height,
                     origin_y_offset,
                 );
