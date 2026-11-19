@@ -4,7 +4,7 @@ use dock_core::FloatingGroupId;
 use gpui::{AnyWindowHandle, Context, WindowHandle};
 
 use crate::{
-    components::{FloatingHost, floating::FloatingPartHost},
+    components::{FloatingHost, floating::FloatingColumnHost},
     drag_host_manager::DragHostSurface,
 };
 
@@ -13,7 +13,7 @@ use super::FloatingWindowManager;
 #[derive(Clone, Copy)]
 pub(super) enum PanelWindowHandle {
     Floating(WindowHandle<FloatingHost>),
-    Part(WindowHandle<FloatingPartHost>),
+    Part(WindowHandle<FloatingColumnHost>),
     DragHost(WindowHandle<DragHostSurface>),
 }
 
@@ -21,7 +21,7 @@ impl PanelWindowHandle {
     pub(super) fn is_available(&self, cx: &mut Context<FloatingWindowManager>) -> bool {
         match self {
             Self::Floating(window) => window.update(cx, |_, _, _| ()).is_ok(),
-            // A FloatingPartHost can be inside its own GPUI update while the
+            // A FloatingColumnHost can be inside its own GPUI update while the
             // manager reconciles it. Its native HWND is checked by the manager;
             // never probe the root Entity through WindowHandle::update here.
             Self::Part(_) => true,
@@ -29,7 +29,7 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Updates close-button ownership without mutating a permanent FloatingPartHost.
+    /// Updates close-button ownership without mutating a permanent FloatingColumnHost.
     /// Its presentation state is shared with the manager through PanelWindowEntry.
     pub(super) fn set_column_close_button(
         &self,
@@ -66,7 +66,7 @@ impl PanelWindowHandle {
 
     /// Refreshes cached native client bounds without updating the root Host Entity.
     ///
-    /// A FloatingPartHost may be handling pointer input or rendering when the
+    /// A FloatingColumnHost may be handling pointer input or rendering when the
     /// manager reconciles a resize. AnyWindowHandle updates the Window directly,
     /// avoiding a re-entrant update of the root entity. Retry while GPUI has the
     /// native Window temporarily taken for its current event/update cycle.
