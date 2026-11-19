@@ -6463,9 +6463,9 @@ impl FloatingWindowManager {
             self.registry.members.insert(member, entry);
         }
 
-        // Update the shared presentation state directly. The Host reads this
-        // Cell during its next render; reconciliation never re-enters its Entity.
-        let close_button_states = self
+        // Permanent Column hosts share their close-button state with the manager,
+        // so changing the owner never updates a FloatingPartHost Entity.
+        let column_windows = self
             .registry
             .members
             .iter()
@@ -6473,11 +6473,21 @@ impl FloatingWindowManager {
                 let WindowGridMember::Column(column) = member else {
                     return None;
                 };
-                Some((*column, entry.close_button_visible.clone()?))
+                Some((*column, entry.window, entry.close_button_visible.clone()))
             })
             .collect::<Vec<_>>();
-        for (column, state) in close_button_states {
-            state.set(self.is_rightmost_column(column));
+        for (column, window, close_button_visible) in column_windows {
+            let show_close_button = self.is_rightmost_column(column);
+            if let Some(close_button_visible) = close_button_visible {
+                close_button_visible.set(show_close_button);
+            }
+            if let Err(error) = window.set_column_close_button(show_close_button, cx) {
+                tracing::debug!(
+                    ?column,
+                    %error,
+                    "could not update a promoted DragHost close-button owner"
+                );
+            }
         }
 
         prune_result
