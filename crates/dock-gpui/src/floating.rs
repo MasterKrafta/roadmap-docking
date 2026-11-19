@@ -53,13 +53,9 @@ use floating_group_press::FloatingGroupPress;
 mod floating_host_snapshot;
 use floating_host_snapshot::FloatingHostSnapshot;
 
-#[path = "floating_part_kind.rs"]
-mod floating_part_kind;
-pub(crate) use floating_part_kind::FloatingPartKind;
-
-#[path = "floating_part_host.rs"]
-mod floating_part_host;
-pub(crate) use floating_part_host::FloatingPartHost;
+#[path = "floating_column_host.rs"]
+mod floating_column_host;
+pub(crate) use floating_column_host::FloatingColumnHost;
 
 #[path = "floating_host.rs"]
 mod floating_host;
@@ -1591,6 +1587,45 @@ fn floating_host_snapshot(
 }
 
 
+fn floating_layout_contains_node(
+    layout: &dock_core::Layout,
+    root: NodeId,
+    target: NodeId,
+) -> bool {
+    if root == target {
+        return true;
+    }
+    match layout.node(root) {
+        Some(Node::Split(split)) => split
+            .children
+            .iter()
+            .any(|child| floating_layout_contains_node(layout, *child, target)),
+        Some(Node::Column(column)) => column
+            .groups
+            .iter()
+            .any(|group| floating_layout_contains_node(layout, *group, target)),
+        Some(Node::Tabs(tabs)) => tabs
+            .children
+            .iter()
+            .any(|child| floating_layout_contains_node(layout, *child, target)),
+        Some(Node::Panel(_)) | None => false,
+    }
+}
+
+pub(crate) fn floating_group_for_column(
+    layout: &dock_core::Layout,
+    column: NodeId,
+) -> Option<FloatingGroupId> {
+    if !matches!(layout.node(column), Some(Node::Column(_))) {
+        return None;
+    }
+
+    layout.floating_groups().find_map(|(group, floating)| {
+        let area = layout.dock_area(floating.area)?;
+        floating_layout_contains_node(layout, area.root, column).then_some(group)
+    })
+}
+
 pub(crate) fn floating_group_column_for_panel(
     layout: &dock_core::Layout,
     panel: PanelId,
@@ -1609,13 +1644,7 @@ pub(crate) fn floating_group_column_for_panel(
             })
             .then_some(group)
     })?;
-    let (floating_group, column) = floating_part_owner_and_column(
-        layout,
-        FloatingPartKind::Group {
-            column: group,
-            group,
-        },
-    )?;
+    let (floating_group, column) = floating_group_and_column_for_group(layout, group)?;
     Some((floating_group, column, group))
 }
 
@@ -1623,63 +1652,12 @@ pub(crate) fn floating_group_and_column_for_group(
     layout: &dock_core::Layout,
     group: NodeId,
 ) -> Option<(FloatingGroupId, NodeId)> {
-    // The column field is not read for the Group variant; the shared resolver
-    // derives the actual owner Column from the current Layout tree.
-    floating_part_owner_and_column(
-        layout,
-        FloatingPartKind::Group {
-            column: group,
-            group,
-        },
-    )
-}
-
-fn floating_part_owner_and_column(
-    layout: &dock_core::Layout,
-    part: FloatingPartKind,
-) -> Option<(FloatingGroupId, NodeId)> {
-    fn contains(layout: &dock_core::Layout, root: NodeId, target: NodeId) -> bool {
-        if root == target {
-            return true;
-        }
-        match layout.node(root) {
-            Some(Node::Split(split)) => split
-                .children
-                .iter()
-                .any(|child| contains(layout, *child, target)),
-            Some(Node::Column(column)) => column
-                .groups
-                .iter()
-                .any(|group| contains(layout, *group, target)),
-            Some(Node::Tabs(tabs)) => tabs
-                .children
-                .iter()
-                .any(|child| contains(layout, *child, target)),
-            Some(Node::Panel(_)) | None => false,
-        }
-    }
-
-    let part_node = match part {
-        FloatingPartKind::Column { column } | FloatingPartKind::Header { column } => column,
-        FloatingPartKind::Group { group, .. } => group,
-    };
-
-    layout.floating_groups().find_map(|(floating_group, floating)| {
-        let area = layout.dock_area(floating.area)?;
-        if !contains(layout, area.root, part_node) {
-            return None;
-        }
-
-        let column = match part {
-            FloatingPartKind::Column { column } | FloatingPartKind::Header { column } => column,
-            FloatingPartKind::Group { group, .. } => layout.nodes().find_map(|(column_id, node)| {
-                matches!(node, Node::Column(column) if column.groups.contains(&group))
-                    .then_some(column_id)
-                    .filter(|column_id| contains(layout, area.root, *column_id))
-            })?,
-        };
-        Some((floating_group, column))
-    })
+    let column = layout.nodes().find_map(|(column_id, node)| {
+        matches!(node, Node::Column(column) if column.groups.contains(&group))
+            .then_some(column_id)
+    })?;
+    let floating_group = floating_group_for_column(layout, column)?;
+    Some((floating_group, column))
 }
 
 pub(crate) fn floating_part_local_rect(rect: Rect, origin: Point) -> Rect {
