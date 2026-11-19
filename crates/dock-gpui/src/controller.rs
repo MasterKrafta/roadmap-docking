@@ -81,9 +81,6 @@ pub struct DockController {
     native_resize_session_active: bool,
     /// A separate native OS resize loop also owns an open Core history transaction.
     native_resize_transaction_active: bool,
-    /// The native adapter must place restored floating windows on available monitors.
-    /// Initial native bounds may come from a caller-provided Layout and need monitor recovery.
-    initial_monitor_recovery_pending: bool,
     registry: PanelRegistry,
     /// One persistent AnyView per open runtime PanelId. Transfers and tab
     /// activation only change which host receives a clone; they never replace
@@ -108,8 +105,6 @@ impl DockController {
         layout
             .validate(&metrics)
             .map_err(DockControllerConfigError::InvalidLayout)?;
-        let initial_monitor_recovery_pending = layout.floating_groups().next().is_some();
-
         Ok(Self {
             layout,
             history: dock_core::UndoRedoHistory::new(),
@@ -127,7 +122,6 @@ impl DockController {
             native_window_move_transaction_active: false,
             native_resize_session_active: false,
             native_resize_transaction_active: false,
-            initial_monitor_recovery_pending,
             registry,
             panel_views: PanelViewCache::default(),
             last_error: None,
@@ -605,15 +599,6 @@ impl DockController {
         }
     }
 
-    /// Returns and clears the initial monitor-recovery flag for caller-provided layouts.
-    pub(crate) fn take_initial_monitor_recovery_pending(&mut self) -> bool {
-        std::mem::take(&mut self.initial_monitor_recovery_pending)
-    }
-
-    /// Applies initial monitor-recovery bounds before the layout enters normal use.
-    ///
-    /// These are environment repairs, not user edits. The controller is freshly
-    /// constructed for this layout, so the correction must not become an Undo step.
     /// Opens one history transaction while an existing FloatingHost moves natively.
     pub(crate) fn begin_native_window_move_transaction(&mut self) -> bool {
         if self.native_window_move_transaction_active
