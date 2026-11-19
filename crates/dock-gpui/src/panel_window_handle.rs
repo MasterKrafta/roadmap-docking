@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use dock_core::FloatingGroupId;
-use gpui::{Context, WindowHandle};
+use gpui::{AppContext, Context, WindowHandle};
 
 use crate::{
     components::{FloatingHost, floating::FloatingPartHost},
@@ -68,22 +70,34 @@ impl PanelWindowHandle {
         }
     }
 
-    /// Refreshes GPUI's cached client bounds after the native HWND was resized.
-    pub(super) fn refresh_bounds(
+    /// Refreshes GPUI's cached client bounds after the current entity update unwinds.
+    ///
+    /// Native bounds can change while the destination FloatingPartHost is still
+    /// handling a resize event. Updating its WindowHandle synchronously here
+    /// would re-enter the same host Entity.
+    pub(super) fn refresh_bounds_later(
         &self,
         cx: &mut Context<FloatingWindowManager>,
-    ) -> Result<(), String> {
-        match self {
-            Self::Floating(window) => window
-                .update(cx, |_, window, app| window.bounds_changed(app))
-                .map_err(|error| error.to_string()),
-            Self::Part(window) => window
-                .update(cx, |_, window, app| window.bounds_changed(app))
-                .map_err(|error| error.to_string()),
-            Self::DragHost(window) => window
-                .update(cx, |_, window, app| window.bounds_changed(app))
-                .map_err(|error| error.to_string()),
-        }
+    ) {
+        let window = *self;
+        cx.spawn(async move |_, app| {
+            app.background_executor()
+                .timer(Duration::from_millis(1))
+                .await;
+
+            match window {
+                Self::Floating(window) => {
+                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
+                }
+                Self::Part(window) => {
+                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
+                }
+                Self::DragHost(window) => {
+                    let _ = window.update(app, |_, window, app| window.bounds_changed(app));
+                }
+            }
+        })
+        .detach();
     }
 
     /// Requests a redraw from the exact GPUI window that owns this host.
