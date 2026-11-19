@@ -106,7 +106,20 @@ impl PanelWindowHandle {
             }
             Self::Part(window) => {
                 let window: AnyWindowHandle = (*window).into();
-                let _ = window.update(cx, |_, window, _| window.remove_window());
+                cx.spawn(async move |_, app| {
+                    for _ in 0..16 {
+                        if window
+                            .update(app, |_, window, _| window.remove_window())
+                            .is_ok()
+                        {
+                            break;
+                        }
+                        app.background_executor()
+                            .timer(Duration::from_millis(8))
+                            .await;
+                    }
+                })
+                .detach();
             }
             Self::DragHost(window) => {
                 let _ = window.update(cx, |_, window, _| window.remove_window());
