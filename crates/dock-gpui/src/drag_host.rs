@@ -49,27 +49,28 @@ mod tests {
 
     #[test]
     fn drag_host_session_keeps_original_payload_and_source_separate_from_transport() {
-        use dock_core::{DragHandle, DragPayload, PanelId};
+        use dock_core::{DragHandle, DragPayload, FloatingGroupId, NodeId, PanelId};
 
         let mut panel_ids = slotmap::SlotMap::<PanelId, ()>::with_key();
         let panel = panel_ids.insert(());
         let other_panel = panel_ids.insert(());
-        let source_group = dock_core::FloatingGroupId::null();
+        let source_group = FloatingGroupId::null();
         let source_column = NodeId::null();
+        let source = super::DragSourceHost::FloatingColumn {
+            group: source_group,
+            column: source_column,
+        };
         let mut session = super::DragHostSession::new(
             DragPayload::Panel { panel },
             DragHandle::PanelTab,
-            super::DragSourceHost::FloatingColumn { group: source_group, column: source_column },
+            source,
             None,
         );
         let drag_host = DragHostId::from_raw(11);
 
         assert_eq!(session.payload(), DragPayload::Panel { panel });
         assert_eq!(session.handle(), DragHandle::PanelTab);
-        assert_eq!(
-            session.source_host(),
-            super::DragSourceHost::Floating { group: source_group }
-        );
+        assert_eq!(session.source_host(), source);
         assert_eq!(session.source_window_id(), None);
         assert_eq!(session.transport_host(), None);
         assert_eq!(session.transferred_panel(), None);
@@ -90,10 +91,7 @@ mod tests {
         assert!(!session.panel_view_source_detached(panel));
         assert!(!session.begin_panel_view_transfer(panel));
         assert_eq!(session.payload(), DragPayload::Panel { panel });
-        assert_eq!(
-            session.source_host(),
-            super::DragSourceHost::Floating { group: source_group }
-        );
+        assert_eq!(session.source_host(), source);
 
         assert!(!session.finish_panel_view_transfer(other_panel));
         assert!(session.finish_panel_view_transfer(panel));
@@ -169,18 +167,15 @@ mod tests {
     }
 
     #[test]
-    fn dock_window_roles_keep_dragging_separate_from_floating_groups() {
+    fn dock_window_roles_keep_dragging_separate_from_floating_columns() {
         let drag_id = DragHostId::from_raw(7);
         let dragging = DockWindowRole::Dragging { id: drag_id };
 
         assert_eq!(dragging, DockWindowRole::Dragging { id: drag_id });
         assert_ne!(
             dragging,
-        );
-        assert_ne!(
-            dragging,
             DockWindowRole::FloatingColumn {
-                group: FloatingGroupId::null(),
+                group: dock_core::FloatingGroupId::null(),
                 column: dock_core::NodeId::null(),
             }
         );
