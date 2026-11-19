@@ -1421,6 +1421,38 @@ impl FloatingWindowManager {
             group, column, resize_state,
         );
         if !resize_state.unwrap_or(false) {
+            let native_bounds = self.core_bounds_from_native_window(native_window);
+            let scale_factor = self
+                .native_ops
+                .scale_factor(native_window)
+                .ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .unwrap_or(1.0);
+            let core_column_width = self.controller.update(cx, |controller, _| {
+                floating_column_host_bounds(
+                    controller.layout(),
+                    &controller.metrics(),
+                    group,
+                    column,
+                    scale_factor,
+                )
+                .map(|(_, bounds)| bounds.size.width)
+            });
+            if let (Some(native_bounds), Some(core_column_width)) =
+                (native_bounds, core_column_width)
+                && ((native_bounds.size.width - core_column_width).abs() > 0.5
+                    || (registry_width - core_column_width).abs() > 0.5)
+            {
+                eprintln!(
+                    "[FLOATING_RESIZE_DIAG] event=observer_final_bounds_mismatch group={:?} column={:?} hwnd_client_width={:.1} core_column_width={:.1} registry_width={:.1} hwnd_bounds={:?}",
+                    group,
+                    column,
+                    native_bounds.size.width,
+                    core_column_width,
+                    registry_width,
+                    native_bounds,
+                );
+            }
             return false;
         }
         // Protect metric updates from the moment Windows enters its modal sizing
