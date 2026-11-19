@@ -364,6 +364,40 @@ fn floating_single_group_column_starts_at_its_own_header() {
 }
 
 #[test]
+fn floating_column_geometry_uses_native_width_without_mutating_core_bounds() {
+    let metrics = DockMetrics::default();
+    let mut builder = LayoutBuilder::new(Profile::Generic);
+    let (_, panel_node) = builder.panel(key("floating-native-width"), constraints());
+    let group = builder.tabs(vec![panel_node], 0, false);
+    let column = builder.column(300.0, ColumnMode::Expanded, vec![group], vec![1.0]);
+    let model_bounds = Rect::new(Point::new(40.0, 50.0), Size::new(300.0, 400.0));
+    let floating = builder.floating_group(column, model_bounds, 1);
+    let layout = builder.build();
+
+    let native_width = 460.0;
+    let native_height = 520.0;
+    let rects = layout
+        .compute_floating_column_rects(
+            floating,
+            column,
+            native_width,
+            native_height,
+            12.0,
+            &metrics,
+        )
+        .unwrap();
+
+    assert_eq!(rects.columns.len(), 1);
+    assert_eq!(
+        rects.columns[0].rect,
+        Rect::new(Point::new(0.0, 12.0), Size::new(native_width, native_height))
+    );
+    assert_eq!(rects.panels.len(), 1);
+    assert_eq!(rects.panels[0].rect.size.width, native_width);
+    assert_eq!(layout.floating_group(floating).unwrap().bounds, model_bounds);
+}
+
+#[test]
 fn floating_column_uses_its_own_header_before_allocating_a_collapsed_first_group() {
     let metrics = DockMetrics {
         header_height: 32.0,
