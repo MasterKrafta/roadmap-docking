@@ -37,9 +37,9 @@ use crate::{
 
 use super::drop_overlay::DropOverlay;
 
-#[path = "floating_host_open_menu.rs"]
-mod floating_host_open_menu;
-use floating_host_open_menu::FloatingHostOpenMenu;
+#[path = "floating_column_open_menu.rs"]
+mod floating_column_open_menu;
+use floating_column_open_menu::FloatingColumnOpenMenu;
 
 #[path = "floating_tab_press.rs"]
 mod floating_tab_press;
