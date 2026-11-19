@@ -395,6 +395,7 @@ fn render_floating_pointer_input(
                                 && manager.update(app, |manager, manager_cx| {
                                     manager.begin_single_tab_window_move(
                                         group,
+                                        source_column,
                                         point,
                                         manager_cx,
                                     )
