@@ -1513,9 +1513,6 @@ fn floating_column_snapshot(
         .collect::<HashMap<NodeId, Vec<ColumnDisplayItem>>>();
     let drag_preview = controller.floating_window_drag_preview(window_id, group);
     let drag_resolver = controller.floating_window_drop_resolver(window_id, group);
-    let drag_zones = drag_resolver
-        .map(|resolver| resolver.zones().to_vec())
-        .unwrap_or_default();
     let active_drop_zone =
         DropOverlay::resolve_active_zone(drag_resolver, drag_preview);
     let resize_preview = controller
@@ -1532,7 +1529,6 @@ fn floating_column_snapshot(
         rail_display_orders,
         metrics,
         drag_preview,
-        drag_zones,
         active_drop_zone,
         resize_preview,
     }))
