@@ -307,15 +307,13 @@ impl Render for FloatingColumnHost {
             core_composition_width,
         );
         if self.last_resize_diagnostic != Some(diagnostic_widths) {
-            tracing::info!(
-                target: "dock_gpui::floating_resize_diag",
-                event = "gpui_render",
-                group = ?floating_group,
-                column = ?self.column,
+            eprintln!(
+                "[FLOATING_RESIZE_DIAG] event=gpui_render group={:?} column={:?} gpui_client_width={:.1} core_column_rect_width={:.1} core_composition_width={:.1}",
+                floating_group,
+                self.column,
                 gpui_client_width,
                 core_column_rect_width,
                 core_composition_width,
-                "[FLOATING_RESIZE_DIAG]"
             );
             self.last_resize_diagnostic = Some(diagnostic_widths);
         }
