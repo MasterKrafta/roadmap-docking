@@ -34,7 +34,6 @@ use crate::{
         NativeFrameGeometry,
         arrange_window_grid_bounds_with_preserved_offsets as arrange_grid_geometry_bounds,
         match_moving_window_width_to_target,
-        floating_grid_members_in_native_front_to_back,
         window_grid_members_in_native_z_order as grid_window_members_in_native_z_order,
         native_resize_right_edge_delta, native_resize_bottom_edge_delta,
         shift_window_grid_after_resize, floating_column_outer_bounds,
@@ -1421,12 +1420,6 @@ impl FloatingWindowManager {
         if !self.native_ops.is_resizing(native_window).unwrap_or(false) {
             return false;
         }
-        let Some(start_bounds) = self.controller.update(cx, |controller, _| {
-            controller.layout().floating_group(group).map(|floating| floating.bounds)
-        }) else {
-            return false;
-        };
-
         // Protect metric updates from the moment Windows enters its modal sizing
         // loop, even before the first size delta opens the Core history transaction.
         let session_started = self.controller.update(cx, |controller, _| {
@@ -1439,7 +1432,6 @@ impl FloatingWindowManager {
             group,
             member,
             window_id,
-            start_bounds,
             transaction_started: false,
         });
         if let Some(entry) = self.registry.members.get_mut(&member) {
@@ -3246,9 +3238,6 @@ impl FloatingWindowManager {
         self.reconciling = true;
 
         let (groups, transferred_panels) = self.controller.update(cx, |controller, _| {
-            // Initial monitor recovery belonged to the retired whole-composition
-            // host. Every permanent Floating HWND now follows a Core Column rect.
-            let _ = controller.take_initial_monitor_recovery_pending();
             let transferred_panels = controller
                 .drag()
                 .host_session()
