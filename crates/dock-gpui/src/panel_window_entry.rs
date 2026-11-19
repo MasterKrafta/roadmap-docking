@@ -1,3 +1,5 @@
+use std::{cell::Cell, rc::Rc};
+
 use dock_core::{FloatingGroupId, Rect};
 use gpui::WindowId;
 use platform::{NativeWindowId, PhysicalSize};
@@ -29,4 +31,5 @@ pub(super) struct PanelWindowEntry {
     pub(super) resize_enabled: bool,
     pub(super) host_group: Option<FloatingGroupId>,
     pub(super) visibility: PanelWindowVisibility,
+    pub(super) close_button_visible: Option<Rc<Cell<bool>>>,
 }
