@@ -4,7 +4,7 @@ use gpui::{AnyWindowHandle, Context, WindowHandle};
 
 use crate::{
     floating_manager::FloatingWindowManager,
-    floating::FloatingColumnHost,
+    components::floating::FloatingColumnHost,
     drag_host_manager::DragHostSurface,
 };
 
