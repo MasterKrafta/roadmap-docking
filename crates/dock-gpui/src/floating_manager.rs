@@ -2820,6 +2820,9 @@ impl FloatingWindowManager {
     ) -> Option<Rect> {
         match source_host {
             DragSourceHost::Main => self.screen_bounds_from_main_local(bounds),
+            DragSourceHost::FloatingColumn { group, column } => {
+                self.screen_bounds_from_floating_column(group, column, bounds, cx)
+            }
         }
     }
 
@@ -3975,8 +3978,6 @@ impl FloatingWindowManager {
         None
     }
 
-    }
-
     /// Called after one destination host has rendered the transferred active
     /// PanelViews belonging to its Column or Group subtree. DragHostManager closes
     /// only after every required host across all detached FloatingGroups has rendered.
@@ -4010,8 +4011,6 @@ impl FloatingWindowManager {
             return;
         };
         self.request_member_redraw(member);
-    }
-
     }
 
     fn create_column_window(
