@@ -263,6 +263,17 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
+    /// Sets the windows that follow this HWND when its right resize edge moves.
+    ///
+    /// The Windows adapter captures their origins at WM_ENTERSIZEMOVE and
+    /// repositions them directly from each WM_SIZING proposal.
+    fn set_window_resize_followers(
+        &self,
+        _window: NativeWindowId,
+        _followers: &[NativeWindowId],
+    ) -> Result<(), NativeError> {
+        Ok(())
+    }
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
     /// Sets the minimum client-content size in physical pixels. The native
@@ -340,8 +351,12 @@ fn is_desktop_shell_class_name(class_name: &str) -> bool {
 }
 
 #[cfg(windows)]
+mod resize_loop_state;
+
+#[cfg(windows)]
 mod windows_impl {
     use super::*;
+    use super::resize_loop_state::ResizeLoopState;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::mem::size_of;
     use windows::core::BOOL;
@@ -591,18 +606,6 @@ mod windows_impl {
         unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16) & 0x8000 != 0 }
     }
 
-    struct ResizeLoopState {
-        active: bool,
-        horizontal_edge: Option<NativeHorizontalResizeEdge>,
-        left_resize_enabled: bool,
-        right_resize_enabled: bool,
-        top_resize_enabled: bool,
-        bottom_resize_enabled: bool,
-        chain_z_order: Vec<HWND>,
-        left_min_client_width: i32,
-        right_min_client_width: i32,
-    }
-
     std::thread_local! {
         static WINDOWPOS_CALL_SOURCE: std::cell::Cell<&'static str> =
             const { std::cell::Cell::new("untracked") };
@@ -847,10 +850,35 @@ mod windows_impl {
 
         let state = reference_data as *mut ResizeLoopState;
         if message == WM_ENTERSIZEMOVE {
+            let mut initial_window_rect = RECT::default();
+            let resize_start_right =
+                if unsafe { GetWindowRect(window, &mut initial_window_rect) }.is_ok() {
+                    Some(initial_window_rect.right)
+                } else {
+                    None
+                };
+            let configured_followers = unsafe { (*state).resize_followers.clone() };
+            let mut resize_follower_origins =
+                Vec::with_capacity(configured_followers.len());
+            for follower in configured_followers {
+                let mut follower_rect = RECT::default();
+                if unsafe { GetWindowRect(follower, &mut follower_rect) }.is_ok() {
+                    resize_follower_origins.push((
+                        follower,
+                        POINT {
+                            x: follower_rect.left,
+                            y: follower_rect.top,
+                        },
+                    ));
+                }
+            }
+
             // SAFETY: The subclass owns this live state allocation.
             unsafe {
                 (*state).active = true;
                 (*state).horizontal_edge = None;
+                (*state).resize_start_right = resize_start_right;
+                (*state).resize_follower_origins = resize_follower_origins;
             };
         }
         if message == WM_SIZING {
@@ -930,11 +958,56 @@ mod windows_impl {
                 clamp_native_sizing_rect(window, wparam.0 as u32, lparam, &*state)
             };
 
+        if message == WM_SIZING
+            && horizontal_resize_edge_from_sizing_code(wparam.0 as u32)
+                == Some(NativeHorizontalResizeEdge::Right)
+            && lparam.0 != 0
+        {
+            // WM_SIZING supplies the final proposed outer RECT after downstream
+            // handlers and our minimum-width clamp. Move followers from their
+            // WM_ENTERSIZEMOVE origins, never from their previous sampled positions.
+            let proposed = unsafe { &*(lparam.0 as *const RECT) };
+            let (resize_start_right, follower_origins) = unsafe {
+                let state = &*state;
+                (
+                    state.resize_start_right,
+                    state.resize_follower_origins.clone(),
+                )
+            };
+            if let Some(resize_start_right) = resize_start_right {
+                let delta_x = proposed.right.saturating_sub(resize_start_right);
+                for (follower, origin) in follower_origins {
+                    let result = unsafe {
+                        SetWindowPos(
+                            follower,
+                            None,
+                            origin.x.saturating_add(delta_x),
+                            origin.y,
+                            0,
+                            0,
+                            SWP_NOSIZE
+                                | SWP_NOZORDER
+                                | SWP_NOACTIVATE
+                                | SWP_NOOWNERZORDER,
+                        )
+                    };
+                    if let Err(error) = result {
+                        eprintln!(
+                            "[NATIVE_RESIZE_FOLLOWER] hwnd={:?} delta_x={} error={}",
+                            follower, delta_x, error,
+                        );
+                    }
+                }
+            }
+        }
+
         if message == WM_EXITSIZEMOVE {
             // SAFETY: The subclass owns this live state allocation.
             unsafe {
                 (*state).active = false;
                 (*state).horizontal_edge = None;
+                (*state).resize_start_right = None;
+                (*state).resize_follower_origins.clear();
             };
         }
         if message == WM_NCDESTROY {
@@ -1451,6 +1524,9 @@ mod windows_impl {
                     top_resize_enabled: true,
                     bottom_resize_enabled: true,
                     chain_z_order: Vec::new(),
+                    resize_followers: Vec::new(),
+                    resize_follower_origins: Vec::new(),
+                    resize_start_right: None,
                     left_min_client_width: 0,
                     right_min_client_width: 0,
                 }));
@@ -1795,6 +1871,39 @@ mod windows_impl {
             // SAFETY: The state belongs to this live HWND subclass.
             unsafe {
                 (*(reference_data as *mut ResizeLoopState)).chain_z_order = native_members;
+            }
+            Ok(())
+        }
+
+        fn set_window_resize_followers(
+            &self,
+            window: NativeWindowId,
+            followers: &[NativeWindowId],
+        ) -> Result<(), NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed on this HWND.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Err(NativeError::Unsupported);
+            }
+
+            let native_followers = followers
+                .iter()
+                .copied()
+                .map(hwnd)
+                .filter(|follower| *follower != hwnd(window))
+                .collect();
+            // SAFETY: The state belongs to this live HWND subclass.
+            unsafe {
+                (*(reference_data as *mut ResizeLoopState)).resize_followers = native_followers;
             }
             Ok(())
         }

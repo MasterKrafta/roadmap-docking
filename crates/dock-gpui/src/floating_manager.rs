@@ -2106,9 +2106,6 @@ impl FloatingWindowManager {
             controller_cx.notify();
         });
 
-        if width_changed {
-            self.sync_native_sibling_column_windows(group, member, cx);
-        }
     }
 
     fn finish_native_resize_transaction(
@@ -4392,104 +4389,6 @@ impl FloatingWindowManager {
         })
     }
 
-    fn sync_native_sibling_column_windows(
-        &mut self,
-        group: FloatingGroupId,
-        resized_member: WindowGridMember,
-        cx: &mut Context<Self>,
-    ) {
-        let scale = self
-            .main_native_window
-            .and_then(|main| self.native_ops.scale_factor(main).ok())
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(1.0);
-        let desired = self.controller.update(cx, |controller, _| {
-            let transferred_panels = controller
-                .drag()
-                .host_session()
-                .map(|session| session.transferred_panels().iter().copied().collect())
-                .unwrap_or_default();
-            collect_floating_column_windows(
-                controller.layout(),
-                &controller.metrics(),
-                scale,
-                &transferred_panels,
-            )
-        });
-
-        for spec in desired {
-            if spec.floating_group() != group
-                || spec.member == resized_member
-                || spec.contains_transferred_panels
-            {
-                continue;
-            }
-            let Some((
-                current_bounds,
-                native_bounds_dirty,
-                Some(native_window),
-                previous_scale,
-                native_vertical_origin_offset,
-                native_vertical_height,
-                visibility,
-                window,
-            )) = self.registry.members.get(&spec.member).map(|entry| {
-                (
-                    entry.bounds,
-                    entry.native_bounds_dirty,
-                    entry.native_window,
-                    entry.native_scale_factor,
-                    entry.native_vertical_origin_offset,
-                    entry.native_vertical_height,
-                    entry.visibility,
-                    entry.window,
-                )
-            }) else {
-                continue;
-            };
-            if visibility != PanelWindowVisibility::Visible {
-                continue;
-            }
-
-            let (target_bounds, target_vertical_origin_offset, current_scale) =
-                self.column_window_target_bounds(
-                    spec,
-                    Some(native_window),
-                    previous_scale,
-                    current_bounds,
-                    native_vertical_origin_offset,
-                    native_vertical_height,
-                );
-            let core_width_changed =
-                (current_bounds.size.width - spec.bounds.size.width).abs() > 0.5;
-            let core_height_changed =
-                (current_bounds.size.height - spec.bounds.size.height).abs() > 0.5;
-            let scale_changed = current_scale.is_some_and(|scale| {
-                previous_scale.is_none_or(|previous| (previous - scale).abs() > f32::EPSILON)
-            });
-
-            if current_bounds != target_bounds || native_bounds_dirty || scale_changed {
-                self.sync_column_window_bounds(
-                    native_window,
-                    target_bounds,
-                    "native_resize_sibling",
-                );
-                if let Some(entry) = self.registry.members.get_mut(&spec.member) {
-                    entry.bounds = target_bounds;
-                    if let Some(offset) = target_vertical_origin_offset {
-                        entry.native_vertical_origin_offset = offset;
-                    }
-                    entry.native_scale_factor = current_scale;
-                    entry.native_bounds_dirty = false;
-                }
-            }
-
-            if core_width_changed || core_height_changed {
-                window.refresh_bounds_later(cx);
-            }
-        }
-    }
-
     fn sync_column_window_bounds(
         &self,
         native_window: NativeWindowId,
@@ -5158,6 +5057,39 @@ impl FloatingWindowManager {
         self.registry.members.insert(member, entry);
     }
 
+    fn native_resize_followers(
+        &self,
+        group: FloatingGroupId,
+        member: WindowGridMember,
+    ) -> Vec<NativeWindowId> {
+        let Some(columns) = self.column_members_by_group.get(&group) else {
+            return Vec::new();
+        };
+        let Some(index) = columns.iter().position(|candidate| *candidate == member) else {
+            return Vec::new();
+        };
+        let Some(next_column) = columns.get(index + 1).copied() else {
+            return Vec::new();
+        };
+        if self.window_chains.direction_between(member, next_column)
+            != Some(WindowGridDirection::Right)
+        {
+            return Vec::new();
+        }
+
+        columns
+            .iter()
+            .skip(index + 1)
+            .filter_map(|sibling| {
+                self.registry.members.get(sibling).and_then(|entry| {
+                    (entry.visibility == PanelWindowVisibility::Visible)
+                        .then_some(entry.native_window)
+                        .flatten()
+                })
+            })
+            .collect()
+    }
+
     fn sync_native_column_resize(
         &self,
         entry: &mut PanelWindowEntry,
@@ -5184,6 +5116,19 @@ impl FloatingWindowManager {
         }
 
         let member = WindowGridMember::Column(column);
+        let resize_followers = self.native_resize_followers(group, member);
+        if let Err(error) = self
+            .native_ops
+            .set_window_resize_followers(native_window, &resize_followers)
+        {
+            tracing::debug!(
+                ?group,
+                ?column,
+                %error,
+                "could not configure native Floating Column resize followers"
+            );
+        }
+
         let (is_first_column, is_last_column, has_multiple_columns) =
             self.controller.update(cx, |controller, _| {
                 let root_columns = floating_root_columns(controller.layout(), group);
