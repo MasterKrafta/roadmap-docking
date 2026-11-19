@@ -120,20 +120,12 @@ pub(crate) fn floating_column_host_rect(
     )
 }
 
-fn floating_drag_source(
-    group: FloatingGroupId,
-    column: Option<NodeId>,
-) -> DragSourceHost {
-    match column {
-        Some(column) => DragSourceHost::FloatingColumn { group, column },
-        None => DragSourceHost::Floating { group },
-    }
+fn floating_drag_source(group: FloatingGroupId, column: NodeId) -> DragSourceHost {
+    DragSourceHost::FloatingColumn { group, column }
 }
 
-/// Installs the shared pointer/capture/drag pipeline on the legacy FloatingHost
-/// and typed Floating part hosts. point_origin is zero for the legacy host and the
-/// Core-space origin represented by the HWND client area. A Column HWND may be
-/// physically shifted left to collapse preceding root Axis::X splitter gaps.
+/// Installs the shared pointer/capture/drag pipeline on one Floating Column HWND.
+/// point_origin is the Core-space origin represented by the HWND client area.
 fn render_floating_pointer_input(
     group: FloatingGroupId,
     manager: WeakEntity<FloatingWindowManager>,
@@ -146,10 +138,10 @@ fn render_floating_pointer_input(
     tab_press: Rc<Cell<Option<FloatingTabPress>>>,
     group_press: Rc<Cell<Option<FloatingGroupPress>>>,
     pointer_capture: Rc<Cell<Option<HitboxId>>>,
-    source_column: Option<NodeId>,
+    source_column: NodeId,
     point_origin: Point,
 ) -> impl IntoElement {
-    let floating_column_for_resize = source_column.map(|column| (group, column));
+    let floating_column_for_resize = Some((group, source_column));
     let dock_component_tab_zones_for_down = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_move = dock_component_tab_zones.clone();
     let dock_component_tab_zones_for_up = dock_component_tab_zones;
@@ -287,11 +279,7 @@ fn render_floating_pointer_input(
                                 && let Some(manager) = manager_for_down.upgrade()
                             {
                                 manager.update(app, |manager, manager_cx| {
-                                    if let Some(column) = source_column {
-                                        manager.begin_existing_window_grid_move(group, column, point, manager_cx)
-                                    } else {
-                                        manager.begin_existing_window_move(group, point, manager_cx)
-                                    }
+                                    manager.begin_existing_window_grid_move(group, source_column, point, manager_cx)
                                 });
                             }
                             // The header owns this point, including the fixed controls.
@@ -342,6 +330,7 @@ fn render_floating_pointer_input(
                                 && manager.update(app, |manager, manager_cx| {
                                     manager.begin_single_tab_window_move(
                                         group,
+                                        source_column,
                                         point,
                                         manager_cx,
                                     )
