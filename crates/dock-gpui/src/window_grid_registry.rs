@@ -4,11 +4,11 @@ use super::{
     WindowGrid, WindowGridDirection, WindowGridLink, WindowGridMember, WindowGridPruneResult,
 };
 
-/// Registry of all linked Floating window components.
+/// Registry of links between physical Floating Column HWNDs.
 ///
-/// Standalone windows are intentionally implicit and are returned as
-/// one-member results from `members_for`. This mirrors the previous
-/// WindowChainRegistry behavior while allowing each component to hold 2D links.
+/// A short-lived `FloatingComposition` endpoint may participate while Core-level
+/// links are migrated to registered Columns, but it never owns a native HWND.
+/// Standalone Column HWNDs are implicit and returned as one-member results.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WindowGridRegistry {
     grids: HashMap<WindowGridMember, WindowGrid>,
