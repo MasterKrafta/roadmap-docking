@@ -1836,12 +1836,6 @@ impl Layout {
                 for (column_id, rendered_width) in
                     split.children.iter().copied().zip(rendered_widths.iter().copied())
                 {
-                    let minimum_width = match self.nodes.get(column_id) {
-                        Some(Node::Column(column)) if !column.mode.is_rail() => {
-                            Some(self.minimum_column_width(column_id, metrics)?)
-                        }
-                        _ => None,
-                    };
                     if let Some(Node::Column(column)) = self.nodes.get_mut(column_id)
                         && !column.mode.is_rail()
                     {
