@@ -826,6 +826,12 @@ mod windows_impl {
                 y: initial_cursor.y,
             });
             let initial_window_rect = window_rect_read.then_some(rect_from_native(initial_window_rect));
+            let initial_dpi = unsafe { GetDpiForWindow(window) };
+            let initial_scale_factor = if initial_dpi == 0 {
+                1.0
+            } else {
+                initial_dpi as f32 / 96.0
+            };
             let configured_followers = unsafe { (*state).resize_followers.clone() };
             let mut resize_follower_origins =
                 Vec::with_capacity(configured_followers.len());
@@ -854,6 +860,7 @@ mod windows_impl {
                 (*state).initial_window_rect = initial_window_rect;
                 (*state).initial_client_origin = initial_client_origin;
                 (*state).initial_client_size = initial_client_size;
+                (*state).initial_scale_factor = initial_scale_factor;
                 (*state).latest_resize_proposal = None;
             };
         }
@@ -1119,6 +1126,11 @@ mod windows_impl {
             client_origin,
             initial_client_size,
             client_size,
+            initial_scale_factor: state.initial_scale_factor,
+            scale_factor: {
+                let dpi = unsafe { GetDpiForWindow(window) };
+                if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+            },
         });
 
         // A normal paint wakes GPUI so its next frame consumes this exact proposal.
