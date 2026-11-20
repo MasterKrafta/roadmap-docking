@@ -790,7 +790,7 @@ impl Layout {
 
         self.normalize_photoshop_floating_roots(metrics)?;
 
-        self.normalize_floating_areas()?;
+        self.normalize_floating_areas(metrics)?;
 
         self.close_invalid_flyout();
 
@@ -961,7 +961,10 @@ impl Layout {
         Ok(())
     }
 
-    pub(super) fn normalize_floating_areas(&mut self) -> Result<(), Vec<ValidationError>> {
+    pub(super) fn normalize_floating_areas(
+        &mut self,
+        metrics: &DockMetrics,
+    ) -> Result<(), Vec<ValidationError>> {
         // Floating roots are normalized the same way. Empty floating roots
         // remove both the FloatingGroup and its associated DockArea.
         let floating_ids: Vec<_> = self.floating_groups.keys().collect();
@@ -976,8 +979,30 @@ impl Layout {
                 }]);
             };
 
+            let was_horizontal_composition = matches!(
+                self.nodes.get(area.root),
+                Some(Node::Split(split))
+                    if split.axis == Axis::X
+                        && split.children.iter().all(|child| {
+                            matches!(self.nodes.get(*child), Some(Node::Column(_)))
+                        })
+            );
+
             match self.normalize_node(area.root) {
                 Some(normalized_root) => {
+                    // When an empty Column is removed from a horizontal Floating
+                    // composition, normalize_node collapses Split(X) to its only
+                    // surviving Column. The old Floating bounds still describe
+                    // the entire composition, so shrink the window to that
+                    // Column's own effective width before GPUI reconciles its HWND.
+                    if was_horizontal_composition
+                        && normalized_root != area.root
+                        && let Some(Node::Column(column)) = self.nodes.get(normalized_root)
+                        && let Some(floating) = self.floating_groups.get_mut(group_id)
+                    {
+                        floating.bounds.size.width = column.effective_width(metrics);
+                    }
+
                     let Some(area) = self.dock_areas.get_mut(group.area) else {
                         return Err(vec![ValidationError::InvalidFloatingGroup {
                             group: group_id,
