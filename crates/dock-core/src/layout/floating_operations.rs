@@ -1842,19 +1842,6 @@ impl Layout {
                         }
                         _ => None,
                     };
-                    if let Some(minimum_width) = minimum_width
-                        && rendered_width < minimum_width
-                    {
-                        eprintln!(
-                            "[FLOATING_RESIZE_DIAG] event=rendered_column_below_minimum group={:?} column={:?} rendered_width={:.6} minimum_width={:.6} deficit={:.6} tolerance={:.6}",
-                            group,
-                            column_id,
-                            rendered_width,
-                            minimum_width,
-                            minimum_width - rendered_width,
-                            PIXEL_TOLERANCE,
-                        );
-                    }
                     if let Some(Node::Column(column)) = self.nodes.get_mut(column_id)
                         && !column.mode.is_rail()
                     {
