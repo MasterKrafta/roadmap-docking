@@ -17,6 +17,8 @@ pub struct NativeResizeProposal {
     pub client_origin: PhysicalPoint,
     pub initial_client_size: PhysicalSize,
     pub client_size: PhysicalSize,
+    pub initial_scale_factor: f32,
+    pub scale_factor: f32,
 }
 
 impl NativeResizeProposal {
