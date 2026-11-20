@@ -274,6 +274,20 @@ pub trait NativeWindowOps {
     ) -> Result<(), NativeError> {
         Ok(())
     }
+    /// Installs resize-message tracking without changing the HWND frame styles.
+    /// Main windows use this because GPUI already owns their resizable frame.
+    fn track_resize(&self, _window: NativeWindowId) -> Result<(), NativeError> {
+        Ok(())
+    }
+
+    /// Returns the latest cursor-derived WM_SIZING proposal for this HWND.
+    fn resize_proposal(
+        &self,
+        _window: NativeWindowId,
+    ) -> Result<Option<NativeResizeProposal>, NativeError> {
+        Ok(None)
+    }
+
     /// Reports whether this HWND is inside the OS modal move/resize loop.
     fn is_resizing(&self, window: NativeWindowId) -> Result<bool, NativeError>;
     /// Sets the minimum client-content size in physical pixels. The native
@@ -349,6 +363,9 @@ fn topmost_known_window_under_point(
 fn is_desktop_shell_class_name(class_name: &str) -> bool {
     matches!(class_name, "Progman" | "WorkerW")
 }
+
+mod native_resize_proposal;
+pub use native_resize_proposal::NativeResizeProposal;
 
 #[cfg(windows)]
 mod resize_loop_state;
@@ -785,12 +802,30 @@ mod windows_impl {
         let state = reference_data as *mut ResizeLoopState;
         if message == WM_ENTERSIZEMOVE {
             let mut initial_window_rect = RECT::default();
-            let resize_start_right =
-                if unsafe { GetWindowRect(window, &mut initial_window_rect) }.is_ok() {
-                    Some(initial_window_rect.right)
-                } else {
-                    None
-                };
+            let window_rect_read =
+                unsafe { GetWindowRect(window, &mut initial_window_rect) }.is_ok();
+            let resize_start_right = window_rect_read.then_some(initial_window_rect.right);
+            let mut initial_client_rect = RECT::default();
+            let client_rect_read =
+                unsafe { GetClientRect(window, &mut initial_client_rect) }.is_ok();
+            let mut initial_client_origin = POINT::default();
+            let client_origin_read =
+                unsafe { ClientToScreen(window, &mut initial_client_origin) }.is_ok();
+            let mut initial_cursor = POINT::default();
+            let cursor_read = unsafe { GetCursorPos(&mut initial_cursor) }.is_ok();
+            let initial_client_size = (client_rect_read).then_some(PhysicalSize {
+                width: initial_client_rect.right.saturating_sub(initial_client_rect.left),
+                height: initial_client_rect.bottom.saturating_sub(initial_client_rect.top),
+            }).filter(|size| size.is_valid());
+            let initial_client_origin = client_origin_read.then_some(PhysicalPoint {
+                x: initial_client_origin.x,
+                y: initial_client_origin.y,
+            });
+            let initial_cursor = cursor_read.then_some(PhysicalPoint {
+                x: initial_cursor.x,
+                y: initial_cursor.y,
+            });
+            let initial_window_rect = window_rect_read.then_some(rect_from_native(initial_window_rect));
             let configured_followers = unsafe { (*state).resize_followers.clone() };
             let mut resize_follower_origins =
                 Vec::with_capacity(configured_followers.len());
@@ -813,6 +848,13 @@ mod windows_impl {
                 (*state).horizontal_edge = None;
                 (*state).resize_start_right = resize_start_right;
                 (*state).resize_follower_origins = resize_follower_origins;
+                (*state).resize_sequence = (*state).resize_sequence.wrapping_add(1).max(1);
+                (*state).resize_revision = 0;
+                (*state).initial_cursor = initial_cursor;
+                (*state).initial_window_rect = initial_window_rect;
+                (*state).initial_client_origin = initial_client_origin;
+                (*state).initial_client_size = initial_client_size;
+                (*state).latest_resize_proposal = None;
             };
         }
         if message == WM_SIZING {
@@ -874,6 +916,18 @@ mod windows_impl {
             };
 
         if message == WM_SIZING
+            && lparam.0 != 0
+        {
+            let proposed = unsafe { &*(lparam.0 as *const RECT) };
+            capture_resize_proposal(
+                window,
+                unsafe { &mut *state },
+                rect_from_native(*proposed),
+                true,
+            );
+        }
+
+        if message == WM_SIZING
             && horizontal_resize_edge_from_sizing_code(wparam.0 as u32)
                 == Some(NativeHorizontalResizeEdge::Right)
             && lparam.0 != 0
@@ -912,6 +966,7 @@ mod windows_impl {
         }
 
         if message == WM_EXITSIZEMOVE {
+            finish_resize_proposal(window, unsafe { &mut *state });
             // SAFETY: The subclass owns this live state allocation.
             unsafe {
                 (*state).active = false;
@@ -1003,6 +1058,123 @@ mod windows_impl {
 
         collection.work_areas.push(rect_from_native(info.rcWork));
         BOOL(1)
+    }
+
+    fn capture_resize_proposal(
+        window: HWND,
+        state: &mut ResizeLoopState,
+        window_rect: PhysicalRect,
+        active: bool,
+    ) {
+        let (
+            Some(initial_cursor),
+            Some(initial_window_rect),
+            Some(initial_client_origin),
+            Some(initial_client_size),
+        ) = (
+            state.initial_cursor,
+            state.initial_window_rect,
+            state.initial_client_origin,
+            state.initial_client_size,
+        ) else {
+            return;
+        };
+
+        let mut cursor = POINT::default();
+        let cursor = if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+            PhysicalPoint { x: cursor.x, y: cursor.y }
+        } else {
+            initial_cursor
+        };
+        let client_size = PhysicalSize {
+            width: initial_client_size.width.saturating_add(
+                window_rect.width().saturating_sub(initial_window_rect.width()),
+            ),
+            height: initial_client_size.height.saturating_add(
+                window_rect.height().saturating_sub(initial_window_rect.height()),
+            ),
+        };
+        if !client_size.is_valid() {
+            return;
+        }
+        let client_origin = PhysicalPoint {
+            x: initial_client_origin.x.saturating_add(
+                window_rect.left.saturating_sub(initial_window_rect.left),
+            ),
+            y: initial_client_origin.y.saturating_add(
+                window_rect.top.saturating_sub(initial_window_rect.top),
+            ),
+        };
+
+        state.resize_revision = state.resize_revision.wrapping_add(1).max(1);
+        state.latest_resize_proposal = Some(NativeResizeProposal {
+            session_id: state.resize_sequence,
+            revision: state.resize_revision,
+            active,
+            initial_cursor,
+            cursor,
+            initial_window_rect,
+            window_rect,
+            initial_client_origin,
+            client_origin,
+            initial_client_size,
+            client_size,
+        });
+
+        // A normal paint wakes GPUI so its next frame consumes this exact proposal.
+        let _ = unsafe { InvalidateRect(Some(window), None, false) };
+    }
+
+    fn finish_resize_proposal(window: HWND, state: &mut ResizeLoopState) {
+        if let Some(mut proposal) = state.latest_resize_proposal {
+            let mut cursor = POINT::default();
+            if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
+                proposal.cursor = PhysicalPoint { x: cursor.x, y: cursor.y };
+            }
+            state.resize_revision = state.resize_revision.wrapping_add(1).max(1);
+            proposal.revision = state.resize_revision;
+            proposal.active = false;
+            state.latest_resize_proposal = Some(proposal);
+            let _ = unsafe { InvalidateRect(Some(window), None, false) };
+        }
+    }
+
+    fn install_resize_loop_tracking(native: HWND) -> Result<(), NativeError> {
+        let mut reference_data = 0usize;
+        // SAFETY: Query whether this HWND already owns the resize-loop state.
+        let tracking_installed = unsafe {
+            GetWindowSubclass(
+                native,
+                Some(resize_loop_subclass_proc),
+                RESIZE_LOOP_SUBCLASS_ID,
+                Some(&mut reference_data as *mut usize),
+            )
+        }
+        .as_bool();
+        if tracking_installed {
+            return Ok(());
+        }
+
+        let pointer = Box::into_raw(Box::new(ResizeLoopState::new()));
+        // SAFETY: The HWND subclass owns this allocation until it is detached
+        // or receives WM_NCDESTROY.
+        if !unsafe {
+            SetWindowSubclass(
+                native,
+                Some(resize_loop_subclass_proc),
+                RESIZE_LOOP_SUBCLASS_ID,
+                pointer as usize,
+            )
+        }
+        .as_bool()
+        {
+            let error = last_error("SetWindowSubclass(resize loop)");
+            // SAFETY: Registration failed, so the callback did not retain it.
+            unsafe { drop(Box::from_raw(pointer)) };
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     impl NativeWindowOps for SystemNativeWindowOps {
@@ -1414,54 +1586,16 @@ mod windows_impl {
                 return Err(error);
             }
 
-            let mut reference_data = 0usize;
-            // SAFETY: Query whether the resize-loop state is already attached.
-            let tracking_installed = unsafe {
-                GetWindowSubclass(
-                    native,
-                    Some(resize_loop_subclass_proc),
-                    RESIZE_LOOP_SUBCLASS_ID,
-                    Some(&mut reference_data as *mut usize),
-                )
-            }
-            .as_bool();
-            if !tracking_installed {
-                let pointer = Box::into_raw(Box::new(ResizeLoopState {
-                    active: false,
-                    horizontal_edge: None,
-                    left_resize_enabled: true,
-                    right_resize_enabled: true,
-                    top_resize_enabled: true,
-                    bottom_resize_enabled: true,
-                    chain_z_order: Vec::new(),
-                    resize_followers: Vec::new(),
-                    resize_follower_origins: Vec::new(),
-                    resize_start_right: None,
-                    left_min_client_width: 0,
-                    right_min_client_width: 0,
-                }));
-                // SAFETY: The window subclass owns this allocation until it is
-                // explicitly removed or WM_NCDESTROY is received.
-                if !unsafe {
-                    SetWindowSubclass(
-                        native,
-                        Some(resize_loop_subclass_proc),
-                        RESIZE_LOOP_SUBCLASS_ID,
-                        pointer as usize,
-                    )
-                }
-                .as_bool()
-                {
-                    let error = last_error("SetWindowSubclass(resize loop)");
-                    // SAFETY: Registration failed, so the callback did not
-                    // retain the allocation.
-                    unsafe { drop(Box::from_raw(pointer)) };
-                    restore_non_resizable_frame(native);
-                    return Err(error);
-                }
+            if let Err(error) = install_resize_loop_tracking(native) {
+                restore_non_resizable_frame(native);
+                return Err(error);
             }
 
             Ok(())
+        }
+
+        fn track_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
+            install_resize_loop_tracking(hwnd(window))
         }
 
         fn disable_resize(&self, window: NativeWindowId) -> Result<(), NativeError> {
@@ -1874,6 +2008,31 @@ mod windows_impl {
             // SAFETY: This state remains owned by the live HWND subclass.
             Ok(unsafe {
                 (*(reference_data as *const ResizeLoopState)).horizontal_edge
+            })
+        }
+
+        fn resize_proposal(
+            &self,
+            window: NativeWindowId,
+        ) -> Result<Option<NativeResizeProposal>, NativeError> {
+            let mut reference_data = 0usize;
+            // SAFETY: Query the resize-loop subclass installed for this HWND.
+            let installed = unsafe {
+                GetWindowSubclass(
+                    hwnd(window),
+                    Some(resize_loop_subclass_proc),
+                    RESIZE_LOOP_SUBCLASS_ID,
+                    Some(&mut reference_data as *mut usize),
+                )
+            }
+            .as_bool();
+            if !installed || reference_data == 0 {
+                return Ok(None);
+            }
+
+            // SAFETY: The proposal is copied from state owned by this live HWND.
+            Ok(unsafe {
+                (*(reference_data as *const ResizeLoopState)).latest_resize_proposal
             })
         }
 
