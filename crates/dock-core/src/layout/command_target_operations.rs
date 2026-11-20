@@ -1,6 +1,6 @@
 //! Insertion of nodes, groups, and columns into docking targets.
 
-use super::helpers::{equal_ratios, normalized_ratios, side_index, split_sibling_ratios};
+use super::helpers::{equal_ratios, geometry_error_reason, normalized_ratios, side_index, split_sibling_ratios};
 use super::*;
 use crate::{AllowedArea, ColumnDisplayItem};
 
