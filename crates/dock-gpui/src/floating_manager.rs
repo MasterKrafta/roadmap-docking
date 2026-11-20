@@ -1536,6 +1536,8 @@ impl FloatingWindowManager {
             return false;
         };
         let registry_width = entry.bounds.size.width;
+        let native_vertical_origin_offset = entry.native_vertical_origin_offset;
+        let native_vertical_height = entry.native_vertical_height;
         if entry.window_id != window_id || entry.host_group != Some(group) {
             return false;
         }
@@ -1579,8 +1581,33 @@ impl FloatingWindowManager {
             }
             return false;
         }
+        // Capture Core's content geometry before applying any cursor sample.
+        // This baseline is independent of the HWND's subsequent WM_SIZE reports.
+        let scale_factor = self.native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(1.0);
+        let Some((initial_group_bounds, mut initial_column_bounds)) =
+            self.controller.update(cx, |controller, _| {
+                floating_column_host_bounds(
+                    controller.layout(),
+                    &controller.metrics(),
+                    group,
+                    column,
+                    scale_factor,
+                )
+            })
+        else {
+            return false;
+        };
+        initial_column_bounds.origin.y += native_vertical_origin_offset;
+        if let Some(height) = native_vertical_height {
+            initial_column_bounds.size.height = height;
+        }
+
         // Protect metric updates from the moment Windows enters its modal sizing
-        // loop, even before the first size delta opens the Core history transaction.
+        // loop, even before the first cursor delta opens the Core history transaction.
         let session_started = self.controller.update(cx, |controller, _| {
             controller.begin_native_resize_session()
         });
@@ -1592,6 +1619,9 @@ impl FloatingWindowManager {
             member,
             window_id,
             transaction_started: false,
+            initial_group_bounds,
+            initial_column_bounds,
+            scale_factor,
         });
         
         if let Some(entry) = self.registry.members.get_mut(&member) {
