@@ -491,7 +491,6 @@ impl Layout {
                     column,
                     column_id,
                     zone,
-                    split_ratio,
                     metrics,
                 )
             }
