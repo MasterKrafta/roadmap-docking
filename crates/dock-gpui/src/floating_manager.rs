@@ -2122,7 +2122,7 @@ impl FloatingWindowManager {
         } else {
             state.scale_factor
         };
-        let size_delta = proposal.client_delta_from_cursor();
+        let (width_delta, height_delta) = proposal.client_delta_from_cursor();
         let origin_delta = proposal.origin_delta_from_cursor();
         let bounds = Rect::new(
             Point::new(
@@ -2130,8 +2130,8 @@ impl FloatingWindowManager {
                 state.initial_column_bounds.origin.y + origin_delta.y as f32,
             ),
             Size::new(
-                state.initial_column_bounds.size.width + size_delta.width as f32 / scale,
-                state.initial_column_bounds.size.height + size_delta.height as f32 / scale,
+                state.initial_column_bounds.size.width + width_delta as f32 / scale,
+                state.initial_column_bounds.size.height + height_delta as f32 / scale,
             ),
         );
         bounds.validate_non_empty().ok()?;
