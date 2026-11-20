@@ -1514,11 +1514,9 @@ impl FloatingWindowManager {
         }
     }
 
-    /// Samples the native client bounds of one Floating Column after GPUI reports
-    /// a window-bounds change. The manager translates that rectangle to the
-    /// containing Floating composition before dispatching a Core resize command.
-    /// Samples current native bounds after the GPUI window-bounds observer fires.
-    /// All geometry components are read from the HWND at deferred execution time.
+    /// Applies the latest cursor-derived native resize proposal to the Floating composition.
+    /// The proposal is captured by the shared platform resize loop and consumed
+    /// from the next GPUI host frame, without polling the current HWND dimensions.
     fn ensure_native_column_resize_session(
         &mut self,
         column: NodeId,
@@ -2056,12 +2054,15 @@ impl FloatingWindowManager {
         native_window: NativeWindowId,
         proposal: NativeResizeProposal,
     ) -> Option<Rect> {
-        let scale = self
-            .native_ops
-            .scale_factor(native_window)
-            .ok()
-            .filter(|scale| scale.is_finite() && *scale > 0.0)
-            .unwrap_or(proposal.scale_factor);
+        let scale = if proposal.scale_factor.is_finite() && proposal.scale_factor > 0.0 {
+            proposal.scale_factor
+        } else {
+            self.native_ops
+                .scale_factor(native_window)
+                .ok()
+                .filter(|scale| scale.is_finite() && *scale > 0.0)
+                .unwrap_or(1.0)
+        };
         DockGeometry::core_bounds_from_native(
             proposal.window_rect,
             proposal.client_size,
