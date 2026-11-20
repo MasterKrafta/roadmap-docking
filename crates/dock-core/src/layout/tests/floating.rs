@@ -2105,6 +2105,183 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
 }
 
 #[test]
+fn moving_a_main_column_into_floating_preserves_both_widths_and_expands_the_window() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let source_width = 300.0;
+    let target_width = 420.0;
+
+    let (_, source_panel) = builder.panel(
+        PanelKey::new("main-to-floating-source").unwrap(),
+        descriptors()[0].1,
+    );
+    let source_tabs = builder.tabs(vec![source_panel], 0, false);
+    let source_column = builder.column(
+        source_width,
+        crate::ColumnMode::Expanded,
+        vec![source_tabs],
+        vec![1.0],
+    );
+    builder.main_area(DockSide::Left, source_column);
+
+    let (_, target_panel) = builder.panel(
+        PanelKey::new("main-to-floating-target").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_tabs = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        target_width,
+        crate::ColumnMode::Expanded,
+        vec![target_tabs],
+        vec![1.0],
+    );
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(500.0, 80.0), Size::new(target_width, 320.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::MoveColumnToTarget {
+                column: source_column,
+                target: DropTarget::GroupEdge {
+                    group: target_tabs,
+                    zone: DropZone::Right,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    let floating = layout.floating_group(target_floating).unwrap();
+    assert_eq!(
+        floating.bounds,
+        Rect::new(
+            Point::new(500.0, 80.0),
+            Size::new(source_width + target_width + metrics.splitter_thickness, 320.0),
+        ),
+    );
+    let root = layout.dock_area(floating.area).unwrap().root;
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == vec![target_column, source_column]
+                && (split.ratios[0] - target_width / (source_width + target_width)).abs() < 1.0e-4
+                && (split.ratios[1] - source_width / (source_width + target_width)).abs() < 1.0e-4
+    ));
+
+    let rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
+    assert_eq!(rects.columns.len(), 2);
+    assert_eq!(rects.columns[0].column, target_column);
+    assert!((rects.columns[0].rect.size.width - target_width).abs() < 1.0e-4);
+    assert_eq!(rects.columns[1].column, source_column);
+    assert!((rects.columns[1].rect.size.width - source_width).abs() < 1.0e-4);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
+fn docking_a_main_composition_into_floating_preserves_each_column_width() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+    let source_widths = [300.0, 420.0];
+    let target_width = 260.0;
+    let mut source_columns = Vec::new();
+
+    for (index, width) in source_widths.into_iter().enumerate() {
+        let (_, panel) = builder.panel(
+            PanelKey::new(format!("main-composition-to-floating-{index}")).unwrap(),
+            descriptors()[0].1,
+        );
+        let tabs = builder.tabs(vec![panel], 0, false);
+        let column = builder.column(
+            width,
+            crate::ColumnMode::Expanded,
+            vec![tabs],
+            vec![1.0],
+        );
+        source_columns.push(column);
+    }
+    let source_root = builder.split(
+        Axis::X,
+        source_columns.clone(),
+        vec![
+            source_widths[0] / source_widths.iter().sum::<f32>(),
+            source_widths[1] / source_widths.iter().sum::<f32>(),
+        ],
+    );
+    builder.main_area(DockSide::Left, source_root);
+
+    let (_, target_panel) = builder.panel(
+        PanelKey::new("main-composition-to-floating-target").unwrap(),
+        descriptors()[0].1,
+    );
+    let target_tabs = builder.tabs(vec![target_panel], 0, false);
+    let target_column = builder.column(
+        target_width,
+        crate::ColumnMode::Expanded,
+        vec![target_tabs],
+        vec![1.0],
+    );
+    let target_floating = builder.floating_group(
+        target_column,
+        Rect::new(Point::new(700.0, 100.0), Size::new(target_width, 320.0)),
+        1,
+    );
+
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    layout
+        .apply(
+            DockCommand::DockMainArea {
+                side: DockSide::Left,
+                target: DropTarget::GroupEdge {
+                    group: target_tabs,
+                    zone: DropZone::Right,
+                },
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    assert!(layout.main_area(DockSide::Left).is_none());
+    let floating = layout.floating_group(target_floating).unwrap();
+    let total_width = source_widths.iter().sum::<f32>()
+        + target_width
+        + metrics.splitter_thickness * 2.0;
+    assert!((floating.bounds.size.width - total_width).abs() < 1.0e-4);
+
+    let root = layout.dock_area(floating.area).unwrap().root;
+    let mut expected_columns = vec![target_column];
+    expected_columns.extend(source_columns.iter().copied());
+    assert!(matches!(
+        layout.node(root),
+        Some(Node::Split(split))
+            if split.axis == Axis::X
+                && split.children == expected_columns
+                && split.ratios.len() == 3
+                && (split.ratios[0] - target_width / (target_width + source_widths.iter().sum::<f32>())).abs() < 1.0e-4
+                && (split.ratios[1] - source_widths[0] / (target_width + source_widths.iter().sum::<f32>())).abs() < 1.0e-4
+                && (split.ratios[2] - source_widths[1] / (target_width + source_widths.iter().sum::<f32>())).abs() < 1.0e-4
+    ));
+
+    let rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
+    assert_eq!(rects.columns.len(), 3);
+    for (column, expected_width) in rects.columns.iter().zip(
+        [target_width, source_widths[0], source_widths[1]],
+    ) {
+        assert!((column.rect.size.width - expected_width).abs() < 1.0e-4);
+    }
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
+
+#[test]
 fn dock_floating_column_to_the_right_appends_after_the_existing_composition() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
