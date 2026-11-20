@@ -1497,6 +1497,27 @@ impl FloatingWindowManager {
         true
     }
 
+    /// Reports whether Windows currently owns this Column's native resize gesture.
+    ///
+    /// FloatingColumnHost uses this to avoid replacing cursor-derived content
+    /// geometry with a fresh measurement of the already-resized HWND.
+    pub(crate) fn native_column_is_resizing(
+        &self,
+        column: NodeId,
+        group: FloatingGroupId,
+        window_id: WindowId,
+    ) -> bool {
+        let member = WindowGridMember::Column(column);
+        self.registry
+            .members
+            .get(&member)
+            .filter(|entry| entry.window_id == window_id && entry.host_group == Some(group))
+            .and_then(|entry| entry.native_window)
+            .is_some_and(|native_window| {
+                self.native_ops.is_resizing(native_window).unwrap_or(false)
+            })
+    }
+
     /// Starts native resize tracking for a permanent Floating Column HWND.
     pub(crate) fn observe_native_column_resize(
         &mut self,
