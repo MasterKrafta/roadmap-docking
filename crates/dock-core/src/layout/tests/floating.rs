@@ -3262,3 +3262,80 @@ fn floating_column_minimum_size_respects_the_column_width_floor() {
         layout.minimum_column_width(column, &metrics).unwrap(),
     );
 }
+
+#[test]
+fn removing_the_last_group_from_a_floating_column_keeps_the_surviving_column_width() {
+    let metrics = DockMetrics::default();
+    let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Photoshop);
+
+    let (_, left_panel) = builder.panel(
+        PanelKey::new("floating-collapse-left").unwrap(),
+        descriptors()[0].1,
+    );
+    let (_, right_panel) = builder.panel(
+        PanelKey::new("floating-collapse-right").unwrap(),
+        descriptors()[0].1,
+    );
+    let left_group = builder.tabs(vec![left_panel], 0, false);
+    let right_group = builder.tabs(vec![right_panel], 0, false);
+    let column_width = 280.0;
+    let left_column = builder.column(
+        column_width,
+        crate::ColumnMode::Expanded,
+        vec![left_group],
+        vec![1.0],
+    );
+    let right_column = builder.column(
+        column_width,
+        crate::ColumnMode::Expanded,
+        vec![right_group],
+        vec![1.0],
+    );
+    let composition = builder.split(
+        Axis::X,
+        vec![left_column, right_column],
+        vec![0.5, 0.5],
+    );
+    let floating = builder.floating_group(
+        composition,
+        Rect::new(
+            Point::new(120.0, 80.0),
+            Size::new(
+                column_width * 2.0 + metrics.splitter_thickness,
+                320.0,
+            ),
+        ),
+        1,
+    );
+    let mut layout = builder.build();
+    assert_eq!(layout.validate(&metrics), Ok(()));
+
+    let original_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    let surviving_width = original_rects
+        .columns
+        .iter()
+        .find(|column| column.column == left_column)
+        .unwrap()
+        .rect
+        .size
+        .width;
+
+    layout
+        .apply(
+            DockCommand::Float {
+                node: right_panel,
+                bounds: Rect::new(Point::new(760.0, 120.0), Size::new(320.0, 280.0)),
+            },
+            &metrics,
+        )
+        .unwrap();
+
+    let remaining = layout.floating_group(floating).unwrap();
+    assert!((remaining.bounds.size.width - surviving_width).abs() < 1.0e-4);
+    assert_eq!(layout.dock_area(remaining.area).unwrap().root, left_column);
+
+    let remaining_rects = layout.compute_floating_rects(floating, &metrics).unwrap();
+    assert_eq!(remaining_rects.columns.len(), 1);
+    assert!((remaining_rects.columns[0].rect.size.width - surviving_width).abs() < 1.0e-4);
+    assert_eq!(layout.validate(&metrics), Ok(()));
+}
