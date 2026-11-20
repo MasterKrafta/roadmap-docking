@@ -250,6 +250,29 @@ impl Layout {
         ))
     }
 
+    pub(super) fn effective_column_widths(
+        &self,
+        columns: &[NodeId],
+        metrics: &DockMetrics,
+    ) -> Result<Vec<f32>, CommandError> {
+        let widths = columns
+            .iter()
+            .map(|column_id| match self.nodes.get(*column_id) {
+                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
+                _ => Err(CommandError::InvalidTarget {
+                    reason: "horizontal composition must contain only Columns",
+                }),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if widths.iter().any(|width| !width.is_finite() || *width <= 0.0) {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "every Column width must be finite and positive",
+            });
+        }
+        Ok(widths)
+    }
+
     fn insert_floating_group(
         &mut self,
         root: NodeId,
@@ -1544,29 +1567,13 @@ impl Layout {
         // A native Floating window can be wider than its saved Column.
         // Keep each Column's effective width when joining compositions instead
         // of assigning half of the new window to each source composition.
-        let column_widths = children
-            .iter()
-            .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "floating composition contains a non-Column child",
-                }),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let column_widths = self.effective_column_widths(&children, metrics)?;
         let total_column_width = column_widths.iter().sum::<f32>();
         let ratios = normalized_ratios(column_widths.iter().copied().map(Some).collect());
         let splitter_width = metrics.splitter_thickness
             * children.len().saturating_sub(1) as f32;
         let required_width = total_column_width + splitter_width;
-        let source_column_widths = source_columns
-            .iter()
-            .map(|column_id| match self.nodes.get(*column_id) {
-                Some(Node::Column(column)) => Ok(column.effective_width(metrics)),
-                _ => Err(CommandError::InvalidTarget {
-                    reason: "source floating composition contains a non-Column child",
-                }),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let source_column_widths = self.effective_column_widths(&source_columns, metrics)?;
         let source_composition_width = source_column_widths.iter().sum::<f32>()
             + metrics.splitter_thickness
                 * source_columns.len().saturating_sub(1) as f32;
