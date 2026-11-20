@@ -1520,6 +1520,9 @@ impl FloatingWindowManager {
         self.schedule_native_resize(cx, group, window_id);
         true
     }
+    /// Bridges the native Floating-window resize loop to Core through periodic HWND sampling.
+    /// This polling path is the replacement point for the shared resize-proposal source
+    /// that should drive both Floating and Main window content from the same geometry.
     fn schedule_native_resize(
         &self,
         cx: &mut Context<Self>,
