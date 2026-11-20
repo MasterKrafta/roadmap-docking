@@ -810,7 +810,7 @@ mod windows_impl {
                 unsafe { GetClientRect(window, &mut initial_client_rect) }.is_ok();
             let mut initial_client_origin = POINT::default();
             let client_origin_read =
-                unsafe { ClientToScreen(window, &mut initial_client_origin) }.is_ok();
+                unsafe { ClientToScreen(window, &mut initial_client_origin) }.as_bool();
             let mut initial_cursor = POINT::default();
             let cursor_read = unsafe { GetCursorPos(&mut initial_cursor) }.is_ok();
             let initial_client_size = (client_rect_read).then_some(PhysicalSize {
