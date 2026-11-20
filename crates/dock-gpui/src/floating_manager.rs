@@ -1137,10 +1137,11 @@ impl FloatingWindowManager {
         } else {
             initial_scale
         };
-        let width_delta = proposal.client_size.width as f32 / current_scale
-            - proposal.initial_client_size.width as f32 / initial_scale;
-        let height_delta = proposal.client_size.height as f32 / current_scale
-            - proposal.initial_client_size.height as f32 / initial_scale;
+        // Main content receives the cursor delta directly. It does not wait
+        // for WM_SIZE or derive its viewport from the native window rectangle.
+        let cursor_size_delta = proposal.client_delta_from_cursor();
+        let width_delta = cursor_size_delta.width as f32 / current_scale;
+        let height_delta = cursor_size_delta.height as f32 / current_scale;
         let viewport = Rect::new(
             base_viewport.origin,
             Size::new(
