@@ -249,7 +249,22 @@ impl Render for FloatingColumnHost {
         });
 
         let floating_group = self.floating_group();
-        let column_viewport = Some((
+        let native_resize_active = self.manager.upgrade().is_some_and(|manager| {
+            manager
+                .update(cx, |manager, _| {
+                    manager.native_column_is_resizing(
+                        self.column,
+                        floating_group,
+                        window_id,
+                    )
+                })
+                .unwrap_or(false)
+        });
+        // Outside a native resize, adopt the measured client height so newly
+        // created/reused hosts start with the actual GPUI viewport. During
+        // WM_ENTERSIZEMOVE, the manager owns this value and updates it directly
+        // from the shared cursor proposal; never read it back from HWND bounds.
+        let column_viewport = (!native_resize_active).then_some((
             self.column,
             f32::from(window.bounds().size.height),
         ));
