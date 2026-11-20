@@ -1149,10 +1149,9 @@ mod windows_impl {
 
     fn finish_resize_proposal(window: HWND, state: &mut ResizeLoopState) {
         if let Some(mut proposal) = state.latest_resize_proposal {
-            let mut cursor = POINT::default();
-            if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
-                proposal.cursor = PhysicalPoint { x: cursor.x, y: cursor.y };
-            }
+            // Keep the final cursor sample paired with the exact WM_SIZING
+            // rectangle that produced it. Sampling again after mouse-up could
+            // move content without moving the native window.
             state.resize_revision = state.resize_revision.wrapping_add(1).max(1);
             proposal.revision = state.resize_revision;
             proposal.active = false;
