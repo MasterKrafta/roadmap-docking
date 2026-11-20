@@ -21,7 +21,8 @@ use gpui::{
 };
 use platform::{
     hide_from_taskbar, hide_system_close_button, NativeHorizontalResizeEdge, NativeKey,
-    NativeWindowAtPoint, NativeWindowId, NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
+    NativeResizeProposal, NativeWindowAtPoint, NativeWindowId, NativeWindowOps, PhysicalPoint,
+    SystemNativeWindowOps,
 };
 
 use crate::{
@@ -531,6 +532,8 @@ pub struct FloatingWindowManager {
     theme: DockTheme,
     main_native_window: Option<NativeWindowId>,
     main_host_origin: Point,
+    /// Main viewport captured at the beginning of the current native resize session.
+    main_resize_session: Option<(u64, Rect)>,
     native_move: Option<NativeMoveSession>,
     native_move_windows: Vec<NativeMoveWindow>,
     native_resize: Option<NativeResizeSession>,
@@ -560,6 +563,7 @@ impl FloatingWindowManager {
             theme,
             main_native_window: None,
             main_host_origin: Point::ZERO,
+            main_resize_session: None,
             native_move: None,
             native_move_windows: Vec::new(),
             native_resize: None,
@@ -1028,6 +1032,15 @@ impl FloatingWindowManager {
                 }
             }
         }
+
+        if let Some(native_window) = self.main_native_window
+            && let Err(error) = self.native_ops.track_resize(native_window)
+        {
+            tracing::debug!(
+                %error,
+                "main HWND resize proposal tracking is unavailable"
+            );
+        }
     }
 
     pub(crate) fn attach_main_window(
@@ -1079,6 +1092,70 @@ impl FloatingWindowManager {
         // FloatingGroup bounds already store virtual-desktop physical pixels.
         // This origin is used only to translate main-host input coordinates.
         self.main_host_origin = origin;
+    }
+
+    /// Applies the latest native resize proposal to the Main dock viewport.
+    ///
+    /// The starting viewport is captured once per OS sizing session. Both the
+    /// native HWND and Core then use the same cursor-derived client-size delta.
+    pub(crate) fn main_viewport_from_resize_proposal(
+        &mut self,
+        measured_viewport: Rect,
+        cx: &mut Context<Self>,
+    ) -> Rect {
+        let Some(native_window) = self.main_native_window else {
+            return measured_viewport;
+        };
+        let Some(proposal) = self
+            .native_ops
+            .resize_proposal(native_window)
+            .ok()
+            .flatten()
+        else {
+            return measured_viewport;
+        };
+
+        let base_viewport = match self.main_resize_session {
+            Some((session_id, viewport)) if session_id == proposal.session_id => viewport,
+            _ if proposal.active => {
+                let viewport = self.controller.update(cx, |controller, _| controller.viewport());
+                self.main_resize_session = Some((proposal.session_id, viewport));
+                viewport
+            }
+            _ => return measured_viewport,
+        };
+
+        let initial_scale = if proposal.initial_scale_factor.is_finite()
+            && proposal.initial_scale_factor > 0.0
+        {
+            proposal.initial_scale_factor
+        } else {
+            1.0
+        };
+        let current_scale = if proposal.scale_factor.is_finite() && proposal.scale_factor > 0.0 {
+            proposal.scale_factor
+        } else {
+            initial_scale
+        };
+        let width_delta = proposal.client_size.width as f32 / current_scale
+            - proposal.initial_client_size.width as f32 / initial_scale;
+        let height_delta = proposal.client_size.height as f32 / current_scale
+            - proposal.initial_client_size.height as f32 / initial_scale;
+        let viewport = Rect::new(
+            base_viewport.origin,
+            Size::new(
+                base_viewport.size.width + width_delta,
+                base_viewport.size.height + height_delta,
+            ),
+        );
+        if viewport.validate_non_empty().is_err() {
+            return measured_viewport;
+        }
+
+        if !proposal.active {
+            self.main_resize_session = None;
+        }
+        viewport
     }
 
     /// Converts a proposed main-host-local logical rectangle to the Core
@@ -1428,6 +1505,13 @@ impl FloatingWindowManager {
         cx: &mut Context<Self>,
     ) {
         self.ensure_native_column_resize_session(column, group, window_id, cx);
+        if self.native_resize.is_some_and(|state| {
+            state.group == group
+                && state.member == WindowGridMember::Column(column)
+                && state.window_id == window_id
+        }) {
+            self.tick_native_resize(group, window_id, cx);
+        }
     }
 
     /// Samples the native client bounds of one Floating Column after GPUI reports
@@ -1517,40 +1601,7 @@ impl FloatingWindowManager {
             entry.native_bounds_dirty = true;
         }
         self.sync_native_column_resize_constraints(column, group, window_id, cx);
-        self.schedule_native_resize(cx, group, window_id);
         true
-    }
-    /// Bridges the native Floating-window resize loop to Core through periodic HWND sampling.
-    /// This polling path is the replacement point for the shared resize-proposal source
-    /// that should drive both Floating and Main window content from the same geometry.
-    fn schedule_native_resize(
-        &self,
-        cx: &mut Context<Self>,
-        group: FloatingGroupId,
-        window_id: WindowId,
-    ) {
-        let manager = cx.entity().downgrade();
-        cx.spawn(async move |_, app| {
-            loop {
-                app.background_executor().timer(Duration::from_millis(8)).await;
-
-                match manager.update(app, |manager, manager_cx| {
-                    manager.tick_native_resize(group, window_id, manager_cx)
-                }) {
-                    Ok(keep_polling) => {
-                        
-                        if !keep_polling {
-                            break;
-                        }
-                    }
-                    Err(_) => {
-                        break;
-                    }
-                }
-            }
-            
-        })
-        .detach();
     }
 
     fn tick_native_resize(
@@ -1594,31 +1645,31 @@ impl FloatingWindowManager {
             return false;
         };
 
-        // Poll the native HWND directly because Windows can coalesce several
-        // WM_SIZE notifications inside its modal resize loop.
-        let resize_state = self.native_ops.is_resizing(native_window);
-        
-        if resize_state.unwrap_or(false) {
-            match self.core_bounds_from_native_window(native_window) {
-                Some(bounds) => {
-                    
-                    self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
-                }
-                None => {},
+        let proposal = self
+            .native_ops
+            .resize_proposal(native_window)
+            .ok()
+            .flatten();
+        let resize_is_active = proposal
+            .map(|proposal| proposal.active)
+            .unwrap_or_else(|| self.native_ops.is_resizing(native_window).unwrap_or(false));
+        let proposed_bounds = proposal
+            .and_then(|proposal| self.core_bounds_from_resize_proposal(native_window, proposal))
+            .or_else(|| self.core_bounds_from_native_window(native_window));
+
+        if resize_is_active {
+            if let Some(bounds) = proposed_bounds {
+                self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
             }
             self.sync_native_column_resize_constraints(column, group, window_id, cx);
             self.native_resize = Some(state);
             return true;
         }
 
-        match self.core_bounds_from_native_window(native_window) {
-            Some(bounds) => {
-                
-                self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
-            }
-            None => {},
+        if let Some(bounds) = proposed_bounds {
+            self.apply_native_column_resize_bounds(column, group, bounds, &mut state, cx);
         }
-        
+
         self.finish_native_resize_transaction(state, cx);
         false
     }
@@ -1998,6 +2049,24 @@ impl FloatingWindowManager {
         let client_size = self.native_ops.client_size(native_window).ok()?;
         let scale = self.native_ops.scale_factor(native_window).ok()?;
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
+    }
+
+    fn core_bounds_from_resize_proposal(
+        &self,
+        native_window: NativeWindowId,
+        proposal: NativeResizeProposal,
+    ) -> Option<Rect> {
+        let scale = self
+            .native_ops
+            .scale_factor(native_window)
+            .ok()
+            .filter(|scale| scale.is_finite() && *scale > 0.0)
+            .unwrap_or(proposal.scale_factor);
+        DockGeometry::core_bounds_from_native(
+            proposal.window_rect,
+            proposal.client_size,
+            scale,
+        )
     }
 
     /// A single-tab window moves natively only when it is not joined to other windows.
