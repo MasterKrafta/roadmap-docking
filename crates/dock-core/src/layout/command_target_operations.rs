@@ -168,8 +168,6 @@ impl Layout {
         }
     }
 
-    /// Inserts an unattached Column beside a target Column in either a Main dock
-    /// or a Floating horizontal composition.
     /// Inserts a Column beside a target Column in Main or in a Floating composition.
     ///
     /// Floating compositions grow to the sum of their effective Column widths;
