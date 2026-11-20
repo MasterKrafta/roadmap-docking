@@ -1711,7 +1711,7 @@ impl FloatingWindowManager {
             .map(|proposal| proposal.active)
             .unwrap_or_else(|| self.native_ops.is_resizing(native_window).unwrap_or(false));
         let proposed_bounds = proposal
-            .and_then(|proposal| self.core_bounds_from_resize_proposal(native_window, proposal))
+            .and_then(|proposal| self.floating_column_bounds_from_cursor(state, proposal))
             .or_else(|| self.core_bounds_from_native_window(native_window));
 
         if resize_is_active {
@@ -2108,25 +2108,30 @@ impl FloatingWindowManager {
         DockGeometry::core_bounds_from_native(rect, client_size, scale)
     }
 
-    fn core_bounds_from_resize_proposal(
+    fn floating_column_bounds_from_cursor(
         &self,
-        native_window: NativeWindowId,
+        state: NativeResizeSession,
         proposal: NativeResizeProposal,
     ) -> Option<Rect> {
         let scale = if proposal.scale_factor.is_finite() && proposal.scale_factor > 0.0 {
             proposal.scale_factor
         } else {
-            self.native_ops
-                .scale_factor(native_window)
-                .ok()
-                .filter(|scale| scale.is_finite() && *scale > 0.0)
-                .unwrap_or(1.0)
+            state.scale_factor
         };
-        DockGeometry::core_bounds_from_native(
-            proposal.window_rect,
-            proposal.client_size,
-            scale,
-        )
+        let size_delta = proposal.client_delta_from_cursor();
+        let origin_delta = proposal.origin_delta_from_cursor();
+        let bounds = Rect::new(
+            Point::new(
+                state.initial_column_bounds.origin.x + origin_delta.x as f32,
+                state.initial_column_bounds.origin.y + origin_delta.y as f32,
+            ),
+            Size::new(
+                state.initial_column_bounds.size.width + size_delta.width as f32 / scale,
+                state.initial_column_bounds.size.height + size_delta.height as f32 / scale,
+            ),
+        );
+        bounds.validate_non_empty().ok()?;
+        Some(bounds)
     }
 
     /// A single-tab window moves natively only when it is not joined to other windows.
