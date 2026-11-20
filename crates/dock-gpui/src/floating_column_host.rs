@@ -96,8 +96,6 @@ pub(crate) struct FloatingColumnHost {
     root_focus_handle: Option<FocusHandle>,
     focus_observed: bool,
     native_resize_observation_pending: bool,
-    /// Last sizes emitted by temporary Floating resize diagnostics.
-    last_resize_diagnostic: Option<(f32, f32, f32)>,
     close_button_visible: Rc<Cell<bool>>,
 }
 
@@ -169,7 +167,6 @@ impl FloatingColumnHost {
             root_focus_handle: None,
             focus_observed: false,
             native_resize_observation_pending: false,
-            last_resize_diagnostic: None,
             close_button_visible,
         }
     }
@@ -287,36 +284,6 @@ impl Render for FloatingColumnHost {
                 return div().id("invalid-floating-column").size_full().into_any_element();
             }
         };
-
-        let gpui_client_width = f32::from(window.bounds().size.width);
-        let core_column_rect_width = snapshot
-            .rects
-            .columns
-            .iter()
-            .find(|candidate| candidate.column == self.column)
-            .map(|candidate| candidate.rect.size.width)
-            .unwrap_or(0.0);
-        let core_composition_width = snapshot
-            .rects
-            .viewport
-            .map(|viewport| viewport.size.width)
-            .unwrap_or(0.0);
-        let diagnostic_widths = (
-            gpui_client_width,
-            core_column_rect_width,
-            core_composition_width,
-        );
-        if self.last_resize_diagnostic != Some(diagnostic_widths) {
-            eprintln!(
-                "[FLOATING_RESIZE_DIAG] event=gpui_render group={:?} column={:?} gpui_client_width={:.1} core_column_rect_width={:.1} core_composition_width={:.1}",
-                floating_group,
-                self.column,
-                gpui_client_width,
-                core_column_rect_width,
-                core_composition_width,
-            );
-            self.last_resize_diagnostic = Some(diagnostic_widths);
-        }
 
         div()
             .id(format!("floating-column-window-root-{:?}", self.column))
@@ -924,7 +891,6 @@ impl FloatingColumnHost {
 
         root
     }
-
 
 }
 
