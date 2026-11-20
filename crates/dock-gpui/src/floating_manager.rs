@@ -1599,7 +1599,35 @@ impl FloatingWindowManager {
             entry.native_bounds_dirty = true;
         }
         self.sync_native_column_resize_constraints(column, group, window_id, cx);
+        self.schedule_native_resize(cx, group, window_id);
         true
+    }
+
+    /// Delivers the newest WM_SIZING proposal to Core while Windows owns
+    /// the modal resize loop. The timer is only the delivery mechanism;
+    /// geometry always comes from the shared cursor-derived proposal.
+    fn schedule_native_resize(
+        &self,
+        cx: &mut Context<Self>,
+        group: FloatingGroupId,
+        window_id: WindowId,
+    ) {
+        let manager = cx.entity().downgrade();
+        cx.spawn(async move |_, app| {
+            loop {
+                app.background_executor()
+                    .timer(Duration::from_millis(8))
+                    .await;
+
+                match manager.update(app, |manager, manager_cx| {
+                    manager.tick_native_resize(group, window_id, manager_cx)
+                }) {
+                    Ok(keep_polling) if keep_polling => {}
+                    Ok(_) | Err(_) => break,
+                }
+            }
+        })
+        .detach();
     }
 
     fn tick_native_resize(
