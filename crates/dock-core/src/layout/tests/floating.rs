@@ -1974,6 +1974,9 @@ fn floating_column_starts_groups_below_its_own_header() {
 fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     let metrics = DockMetrics::default();
     let mut builder = crate::layout_builder::LayoutBuilder::new(Profile::Generic);
+    let source_width = 300.0;
+    let target_width = 420.0;
+    let total_column_width = source_width + target_width;
 
     let (source_panel, source_node) = builder.panel(
         PanelKey::new("floating-compose-source").unwrap(),
@@ -1981,14 +1984,14 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     );
     let source_tabs = builder.tabs(vec![source_node], 0, false);
     let source_column = builder.column(
-        metrics.default_column_width,
+        source_width,
         crate::ColumnMode::Expanded,
         vec![source_tabs],
         vec![1.0],
     );
     let source_floating = builder.floating_group(
         source_column,
-        Rect::new(Point::new(40.0, 60.0), Size::new(300.0, 280.0)),
+        Rect::new(Point::new(40.0, 60.0), Size::new(source_width, 280.0)),
         2,
     );
 
@@ -1998,14 +2001,14 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     );
     let target_tabs = builder.tabs(vec![target_node], 0, false);
     let target_column = builder.column(
-        metrics.default_column_width,
+        target_width,
         crate::ColumnMode::Expanded,
         vec![target_tabs],
         vec![1.0],
     );
     let target_floating = builder.floating_group(
         target_column,
-        Rect::new(Point::new(420.0, 60.0), Size::new(420.0, 280.0)),
+        Rect::new(Point::new(420.0, 60.0), Size::new(target_width, 280.0)),
         1,
     );
 
@@ -2031,11 +2034,11 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
         target.bounds,
         Rect::new(
             Point::new(
-                420.0 - metrics.default_column_width - metrics.splitter_thickness,
+                420.0 - source_width - metrics.splitter_thickness,
                 60.0,
             ),
             Size::new(
-                metrics.default_column_width * 2.0 + metrics.splitter_thickness,
+                total_column_width + metrics.splitter_thickness,
                 280.0,
             ),
         ),
@@ -2046,10 +2049,15 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
         Some(Node::Split(split))
             if split.axis == Axis::X
                 && split.children == vec![source_column, target_column]
-                && (split.ratios[0] - 0.5).abs() < 1.0e-4
-                && (split.ratios[1] - 0.5).abs() < 1.0e-4
+                && (split.ratios[0] - source_width / total_column_width).abs() < 1.0e-4
+                && (split.ratios[1] - target_width / total_column_width).abs() < 1.0e-4
     ));
     let rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
+    assert_eq!(rects.columns.len(), 2);
+    assert_eq!(rects.columns[0].column, source_column);
+    assert!((rects.columns[0].rect.size.width - source_width).abs() < 1.0e-4);
+    assert_eq!(rects.columns[1].column, target_column);
+    assert!((rects.columns[1].rect.size.width - target_width).abs() < 1.0e-4);
     assert_eq!(rects.splitters.len(), 1);
     assert_eq!(rects.splitters[0].owner, root);
     assert_eq!(rects.splitters[0].boundary_index, 0);
@@ -2071,13 +2079,13 @@ fn dock_floating_columns_side_by_side_builds_a_single_horizontal_composition() {
     let Some(Node::Column(right)) = layout.node(target_column) else {
         panic!("right split child remains a Column");
     };
-    assert_eq!(left.width, metrics.default_column_width + 24.0);
-    assert_eq!(right.width, metrics.default_column_width - 24.0);
+    assert_eq!(left.width, source_width + 24.0);
+    assert_eq!(right.width, target_width - 24.0);
     let resized_rects = layout.compute_floating_rects(target_floating, &metrics).unwrap();
     assert_eq!(resized_rects.splitters.len(), 1);
     assert_eq!(
         resized_rects.splitters[0].rect.origin.x,
-        metrics.default_column_width
+        source_width
             + 24.0
             + (metrics.splitter_thickness - metrics.splitter_hit_zone) * 0.5,
     );
