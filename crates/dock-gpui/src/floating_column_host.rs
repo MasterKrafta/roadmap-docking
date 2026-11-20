@@ -249,17 +249,12 @@ impl Render for FloatingColumnHost {
         });
 
         let floating_group = self.floating_group();
-        let native_resize_active = self.manager.upgrade().is_some_and(|manager| {
-            manager
-                .update(cx, |manager, _| {
-                    manager.native_column_is_resizing(
-                        self.column,
-                        floating_group,
-                        window_id,
-                    )
-                })
-                .unwrap_or(false)
-        });
+        let native_resize_active = self
+            .manager
+            .read_with(cx, |manager, _| {
+                manager.native_column_is_resizing(self.column, floating_group, window_id)
+            })
+            .unwrap_or(false);
         // Outside a native resize, adopt the measured client height so newly
         // created/reused hosts start with the actual GPUI viewport. During
         // WM_ENTERSIZEMOVE, the manager owns this value and updates it directly
