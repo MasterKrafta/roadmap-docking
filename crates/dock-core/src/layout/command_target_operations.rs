@@ -152,7 +152,6 @@ impl Layout {
                         *column,
                         target_column,
                         zone,
-                        0.5,
                         metrics,
                     )?;
                     self.remember_subtree_dock_locations(*column);
@@ -171,33 +170,27 @@ impl Layout {
 
     /// Inserts an unattached Column beside a target Column in either a Main dock
     /// or a Floating horizontal composition.
+    /// Inserts a Column beside a target Column in Main or in a Floating composition.
+    ///
+    /// Floating compositions grow to the sum of their effective Column widths;
+    /// sibling ratios are rebuilt from those widths instead of splitting the
+    /// existing target share equally.
     pub(super) fn insert_column_adjacent_to_target(
         &mut self,
         new_column: NodeId,
         target_column: NodeId,
         zone: DropZone,
-        ratio: f32,
         metrics: &DockMetrics,
     ) -> Result<(), CommandError> {
-        if !matches!(self.nodes.get(new_column), Some(Node::Column(_))) {
-            return Err(CommandError::InvalidTarget {
-                reason: "inserted node must be a Column",
-            });
-        }
-        if !matches!(
-            zone,
-            DropZone::Left | DropZone::Right | DropZone::FloatingColumnInsertion
-        ) {
-            return Err(CommandError::InvalidTarget {
-                reason: "column insertion requires an outer edge or an internal Floating splitter",
-            });
-        }
-        if !ratio.is_finite() || ratio <= 0.0 || ratio >= 1.0 {
+        let pair_widths = self.effective_column_widths(&[new_column, target_column], metrics)?;
+        let pair_width = pair_widths[0] + pair_widths[1];
+        if !pair_width.is_finite() || pair_width <= 0.0 {
             return Err(CommandError::InvalidValue {
-                field: "ratio",
-                reason: "split ratio must be between zero and one",
+                field: "width",
+                reason: "combined Column width must be finite and positive",
             });
         }
+        let moving_ratio = pair_widths[0] / pair_width;
 
         if let Some((side, target_index)) = self.main_column_position(target_column) {
             let insert_at = if zone == DropZone::Left {
@@ -209,7 +202,7 @@ impl Layout {
                 side,
                 insert_at,
                 new_column,
-                Some((ratio, target_index)),
+                Some((moving_ratio, target_index)),
                 metrics,
             );
         }
@@ -219,22 +212,29 @@ impl Layout {
                 reason: "target Column is not attached to a dock area",
             },
         )?;
-        match self.nodes.get(floating_root).cloned() {
+        let floating_group = self
+            .floating_groups
+            .iter()
+            .find_map(|(group, floating)| {
+                self.dock_areas
+                    .get(floating.area)
+                    .is_some_and(|area| area.root == floating_root)
+                    .then_some((group, floating.bounds))
+            })
+            .ok_or(CommandError::InvalidTarget {
+                reason: "Floating composition has no registered window bounds",
+            })?;
+
+        let (mut children, insert_at, replace_root) = match self.nodes.get(floating_root).cloned() {
             Some(Node::Column(_))
                 if floating_root == target_column
                     && matches!(zone, DropZone::Left | DropZone::Right) =>
             {
-                let (children, ratios) = if zone == DropZone::Left {
-                    (vec![new_column, target_column], vec![ratio, 1.0 - ratio])
+                if zone == DropZone::Left {
+                    (vec![new_column, target_column], 0, true)
                 } else {
-                    (vec![target_column, new_column], vec![1.0 - ratio, ratio])
-                };
-                let split = self.nodes.insert(Node::Split(crate::Split {
-                    axis: Axis::X,
-                    children,
-                    ratios,
-                }));
-                self.set_area_root(target_column, split)
+                    (vec![target_column, new_column], 1, true)
+                }
             }
             Some(Node::Split(split))
                 if split.axis == Axis::X
@@ -258,7 +258,7 @@ impl Layout {
                 };
                 if !is_valid_boundary {
                     return Err(CommandError::InvalidTarget {
-                        reason: "Floating column insertion must target an existing outer edge or internal splitter",
+                        reason: "Floating column insertion must target an outer edge or internal splitter",
                     });
                 }
                 let insert_at = match zone {
@@ -266,26 +266,76 @@ impl Layout {
                     DropZone::Right => target_index + 1,
                     _ => unreachable!("validated horizontal insertion zone"),
                 };
-                let ratios = split_sibling_ratios(
-                    &split.ratios,
-                    split.children.len(),
-                    target_index,
-                    insert_at,
-                    ratio,
-                );
-                let Some(Node::Split(current)) = self.nodes.get_mut(floating_root) else {
-                    return Err(CommandError::InvalidTarget {
-                        reason: "Floating composition changed unexpectedly",
-                    });
-                };
-                current.children.insert(insert_at, new_column);
-                current.ratios = ratios;
-                Ok(())
+                let mut children = split.children;
+                children.insert(insert_at, new_column);
+                (children, insert_at, false)
             }
-            _ => Err(CommandError::InvalidTarget {
-                reason: "horizontal insertion target must belong to a Floating Column composition",
-            }),
+            _ => {
+                return Err(CommandError::InvalidTarget {
+                    reason: "horizontal insertion target must belong to a Floating Column composition",
+                });
+            }
+        };
+
+        let widths = self.effective_column_widths(&children, metrics)?;
+        let total_column_width = widths.iter().sum::<f32>();
+        let splitter_width =
+            metrics.splitter_thickness * children.len().saturating_sub(1) as f32;
+        let required_width = total_column_width + splitter_width;
+        if !total_column_width.is_finite()
+            || total_column_width <= 0.0
+            || !splitter_width.is_finite()
+            || !required_width.is_finite()
+            || required_width <= 0.0
+        {
+            return Err(CommandError::InvalidValue {
+                field: "width",
+                reason: "combined Floating composition width must be finite and positive",
+            });
         }
+
+        let current_bounds = floating_group.1;
+        let next_origin_x = if insert_at == 0 {
+            current_bounds.origin.x + current_bounds.size.width - required_width
+        } else {
+            current_bounds.origin.x
+        };
+        let next_bounds = Rect::new(
+            Point::new(next_origin_x, current_bounds.origin.y),
+            Size::new(required_width, current_bounds.size.height),
+        );
+        next_bounds
+            .validate_non_empty()
+            .map_err(|error| CommandError::InvalidValue {
+                field: "bounds",
+                reason: geometry_error_reason(error),
+            })?;
+        let ratios = normalized_ratios(widths.into_iter().map(Some).collect());
+
+        if replace_root {
+            let split = self.nodes.insert(Node::Split(crate::Split {
+                axis: Axis::X,
+                children,
+                ratios,
+            }));
+            self.set_area_root(floating_root, split)?;
+        } else {
+            let Some(Node::Split(split)) = self.nodes.get_mut(floating_root) else {
+                return Err(CommandError::InvalidTarget {
+                    reason: "Floating composition changed unexpectedly",
+                });
+            };
+            split.children = children;
+            split.ratios = ratios;
+        }
+
+        let Some(floating) = self.floating_groups.get_mut(floating_group.0) else {
+            return Err(CommandError::InvalidTarget {
+                reason: "Floating composition disappeared during Column insertion",
+            });
+        };
+        floating.bounds = next_bounds;
+        Ok(())
     }
 
     fn reorder_main_column(
