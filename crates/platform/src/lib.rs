@@ -427,14 +427,33 @@ mod windows_impl {
     /// border even though their title bar is hidden.
     pub(super) fn hide_system_close_button(window: NativeWindowId) -> Result<(), NativeError> {
         let native = hwnd(window);
+        let (_, client_origin, client_size) = client_geometry_for_frame_change(native)?;
         // SAFETY: The HWND belongs to the GPUI Floating window passed by the caller.
         let style = unsafe { GetWindowLongPtrW(native, GWL_STYLE) as u32 };
         if style & WS_SYSMENU.0 == 0 {
             return Ok(());
         }
         let extended_style = unsafe { GetWindowLongPtrW(native, GWL_EXSTYLE) as u32 };
-        write_window_frame_styles(native, style & !WS_SYSMENU.0, extended_style)?;
-        notify_native_frame_change(native)
+        let updated_style = style & !WS_SYSMENU.0;
+
+        if let Err(error) = write_window_frame_styles(native, updated_style, extended_style) {
+            let _ = write_window_frame_styles(native, style, extended_style);
+            return Err(error);
+        }
+        if let Err(error) = notify_native_frame_change(native) {
+            let _ = write_window_frame_styles(native, style, extended_style);
+            let _ = notify_native_frame_change(native);
+            return Err(error);
+        }
+        if let Err(error) =
+            preserve_client_geometry_after_frame_change(native, client_origin, client_size)
+        {
+            let _ = write_window_frame_styles(native, style, extended_style);
+            let _ = notify_native_frame_change(native);
+            return Err(error);
+        }
+
+        Ok(())
     }
 
     fn platform_error(operation: &'static str, error: windows::core::Error) -> NativeError {
