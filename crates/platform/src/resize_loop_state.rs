@@ -4,6 +4,7 @@ use windows::Win32::Foundation::{HWND, POINT};
 pub(super) struct ResizeLoopState {
     pub(super) active: bool,
     pub(super) horizontal_edge: Option<crate::NativeHorizontalResizeEdge>,
+    pub(super) sizing_edge: u32,
     pub(super) left_resize_enabled: bool,
     pub(super) right_resize_enabled: bool,
     pub(super) top_resize_enabled: bool,
@@ -29,6 +30,7 @@ impl ResizeLoopState {
         Self {
             active: false,
             horizontal_edge: None,
+            sizing_edge: 0,
             left_resize_enabled: true,
             right_resize_enabled: true,
             top_resize_enabled: true,
