@@ -26,21 +26,21 @@ pub struct NativeResizeProposal {
 impl NativeResizeProposal {
     /// Cursor-derived change in the client dimensions, in physical pixels.
     /// This is independent of the native HWND's measured or proposed bounds.
-    pub const fn client_delta_from_cursor(self) -> PhysicalSize {
+    /// Returns (client width delta, client height delta) in physical pixels.
+    pub const fn client_delta_from_cursor(self) -> (i32, i32) {
         let dx = self.cursor.x.saturating_sub(self.initial_cursor.x);
         let dy = self.cursor.y.saturating_sub(self.initial_cursor.y);
-        PhysicalSize {
-            width: match self.sizing_edge {
-                1 | 4 | 7 => 0_i32.saturating_sub(dx),
-                2 | 5 | 8 => dx,
-                _ => 0,
-            },
-            height: match self.sizing_edge {
-                3 | 4 | 5 => 0_i32.saturating_sub(dy),
-                6 | 7 | 8 => dy,
-                _ => 0,
-            },
-        }
+        let width = match self.sizing_edge {
+            1 | 4 | 7 => 0_i32.saturating_sub(dx),
+            2 | 5 | 8 => dx,
+            _ => 0,
+        };
+        let height = match self.sizing_edge {
+            3 | 4 | 5 => 0_i32.saturating_sub(dy),
+            6 | 7 | 8 => dy,
+            _ => 0,
+        };
+        (width, height)
     }
 
     /// Cursor-derived movement of the outer window's top-left corner.
