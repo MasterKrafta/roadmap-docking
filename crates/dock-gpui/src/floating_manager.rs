@@ -20,9 +20,8 @@ use gpui::{
     WindowHandle, WindowId, WindowKind, WindowOptions, point, px, size,
 };
 use platform::{
-    hide_from_taskbar, NativeHorizontalResizeEdge, NativeKey, NativeWindowAtPoint,
-    NativeWindowId,
-    NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
+    hide_from_taskbar, hide_system_close_button, NativeHorizontalResizeEdge, NativeKey,
+    NativeWindowAtPoint, NativeWindowId, NativeWindowOps, PhysicalPoint, SystemNativeWindowOps,
 };
 
 use crate::{
@@ -4203,6 +4202,13 @@ impl FloatingWindowManager {
             tracing::warn!(
                 ?spec.member,
                 "could not hide a Floating Column window from the taskbar"
+            );
+        }
+        if let Err(error) = hide_system_close_button(native_window) {
+            tracing::warn!(
+                ?spec.member,
+                %error,
+                "could not hide the native close button on a Floating Column window"
             );
         }
 
