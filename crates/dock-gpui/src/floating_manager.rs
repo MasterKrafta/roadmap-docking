@@ -4570,7 +4570,7 @@ impl FloatingWindowManager {
                 .ok()
                 .filter(|scale| scale.is_finite() && *scale > 0.0)
                 .unwrap_or(1.0);
-            let core_column_bounds = self.controller.update(cx, |controller, _| {
+            let core_geometry = self.controller.update(cx, |controller, _| {
                 floating_column_host_bounds(
                     controller.layout(),
                     &controller.metrics(),
@@ -4578,9 +4578,8 @@ impl FloatingWindowManager {
                     column,
                     scale_factor,
                 )
-                .map(|(_, bounds)| bounds)
             });
-            let Some(core_column_bounds) = core_column_bounds else {
+            let Some((core_group_bounds, core_column_bounds)) = core_geometry else {
                 continue;
             };
 
@@ -4624,6 +4623,9 @@ impl FloatingWindowManager {
                 member: WindowGridMember::Column(column),
                 window_id,
                 transaction_started: false,
+                initial_group_bounds: core_group_bounds,
+                initial_column_bounds: core_column_bounds,
+                scale_factor,
             };
             self.apply_native_column_resize_bounds(
                 column,
