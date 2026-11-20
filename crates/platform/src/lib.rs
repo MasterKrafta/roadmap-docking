@@ -765,10 +765,26 @@ mod windows_impl {
         };
 
         match sizing_edge {
-            1 | 4 | 7 => rect.left = rect.left.saturating_add(delta_x),
-            2 | 5 | 8 => rect.right = rect.right.saturating_add(delta_x),
-            3 | 4 | 5 => rect.top = rect.top.saturating_add(delta_y),
-            6 | 7 | 8 => rect.bottom = rect.bottom.saturating_add(delta_y),
+            1 => rect.left = rect.left.saturating_add(delta_x),
+            2 => rect.right = rect.right.saturating_add(delta_x),
+            3 => rect.top = rect.top.saturating_add(delta_y),
+            4 => {
+                rect.left = rect.left.saturating_add(delta_x);
+                rect.top = rect.top.saturating_add(delta_y);
+            }
+            5 => {
+                rect.right = rect.right.saturating_add(delta_x);
+                rect.top = rect.top.saturating_add(delta_y);
+            }
+            6 => rect.bottom = rect.bottom.saturating_add(delta_y),
+            7 => {
+                rect.left = rect.left.saturating_add(delta_x);
+                rect.bottom = rect.bottom.saturating_add(delta_y);
+            }
+            8 => {
+                rect.right = rect.right.saturating_add(delta_x);
+                rect.bottom = rect.bottom.saturating_add(delta_y);
+            }
             _ => return None,
         }
 
