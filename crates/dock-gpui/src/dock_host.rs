@@ -762,9 +762,12 @@ impl Render for DockHost {
                     }
                 };
 
-                manager_for_measurement.update(app, |manager, _| {
-                    manager.set_main_host_origin(window_origin);
-                });
+                let viewport = manager_for_measurement
+                    .update(app, |manager, manager_cx| {
+                        manager.set_main_host_origin(window_origin);
+                        manager.main_viewport_from_resize_proposal(viewport, manager_cx)
+                    })
+                    .unwrap_or(viewport);
                 controller_for_measurement.update(app, |controller, controller_cx| {
                     match controller.set_viewport(viewport) {
                         Ok(true) => {
