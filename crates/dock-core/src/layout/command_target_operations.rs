@@ -210,7 +210,7 @@ impl Layout {
                 reason: "target Column is not attached to a dock area",
             },
         )?;
-        let floating_group = self
+        let (floating_group_id, current_bounds) = self
             .floating_groups
             .iter()
             .find_map(|(group, floating)| {
@@ -223,7 +223,7 @@ impl Layout {
                 reason: "Floating composition has no registered window bounds",
             })?;
 
-        let (mut children, insert_at, replace_root) = match self.nodes.get(floating_root).cloned() {
+        let (children, insert_at, replace_root) = match self.nodes.get(floating_root).cloned() {
             Some(Node::Column(_))
                 if floating_root == target_column
                     && matches!(zone, DropZone::Left | DropZone::Right) =>
@@ -292,7 +292,6 @@ impl Layout {
             });
         }
 
-        let current_bounds = floating_group.1;
         let next_origin_x = if insert_at == 0 {
             current_bounds.origin.x + current_bounds.size.width - required_width
         } else {
@@ -327,7 +326,7 @@ impl Layout {
             split.ratios = ratios;
         }
 
-        let Some(floating) = self.floating_groups.get_mut(floating_group.0) else {
+        let Some(floating) = self.floating_groups.get_mut(floating_group_id) else {
             return Err(CommandError::InvalidTarget {
                 reason: "Floating composition disappeared during Column insertion",
             });
