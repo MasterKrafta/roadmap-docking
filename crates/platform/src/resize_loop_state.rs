@@ -20,6 +20,7 @@ pub(super) struct ResizeLoopState {
     pub(super) initial_window_rect: Option<PhysicalRect>,
     pub(super) initial_client_origin: Option<PhysicalPoint>,
     pub(super) initial_client_size: Option<PhysicalSize>,
+    pub(super) initial_scale_factor: f32,
     pub(super) latest_resize_proposal: Option<NativeResizeProposal>,
 }
 
@@ -44,6 +45,7 @@ impl ResizeLoopState {
             initial_window_rect: None,
             initial_client_origin: None,
             initial_client_size: None,
+            initial_scale_factor: 1.0,
             latest_resize_proposal: None,
         }
     }
