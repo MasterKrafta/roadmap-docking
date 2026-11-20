@@ -524,7 +524,7 @@ mod windows_impl {
         }
 
         // SAFETY: Keep Z-order and activation unchanged while restoring the saved client rectangle.
-        with_windowpos_call_source("preserve_client_geometry_after_frame_change", || unsafe {
+        unsafe {
             SetWindowPos(
                 native,
                 None,
@@ -534,7 +534,7 @@ mod windows_impl {
                 outer_height,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             )
-        })
+        }
         .map_err(|error| platform_error("SetWindowPos(preserve client geometry)", error))
     }
 
@@ -604,108 +604,6 @@ mod windows_impl {
     fn left_button_is_down() -> bool {
         // SAFETY: GetAsyncKeyState has no pointer arguments.
         unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16) & 0x8000 != 0 }
-    }
-
-    std::thread_local! {
-        static WINDOWPOS_CALL_SOURCE: std::cell::Cell<&'static str> =
-            const { std::cell::Cell::new("untracked") };
-    }
-
-    fn with_windowpos_call_source<T>(
-        source: &'static str,
-        call: impl FnOnce() -> T,
-    ) -> T {
-        WINDOWPOS_CALL_SOURCE.with(|current| {
-            let previous = current.replace(source);
-            let result = call();
-            current.set(previous);
-            result
-        })
-    }
-
-    fn trace_window_position(
-        event: &'static str,
-        window: HWND,
-        position: &WINDOWPOS,
-        state: &ResizeLoopState,
-    ) {
-        if position.flags & SWP_NOSIZE != SET_WINDOW_POS_FLAGS(0) {
-            return;
-        }
-
-        let mut outer_rect = RECT::default();
-        let observed_outer = if unsafe { GetWindowRect(window, &mut outer_rect) }.is_ok() {
-            (
-                outer_rect.right.saturating_sub(outer_rect.left),
-                outer_rect.bottom.saturating_sub(outer_rect.top),
-            )
-        } else {
-            (-1, -1)
-        };
-
-        let mut client_rect = RECT::default();
-        let observed_client = if unsafe { GetClientRect(window, &mut client_rect) }.is_ok() {
-            (
-                client_rect.right.saturating_sub(client_rect.left),
-                client_rect.bottom.saturating_sub(client_rect.top),
-            )
-        } else {
-            (-1, -1)
-        };
-
-        let dpi = unsafe { GetDpiForWindow(window) };
-        let scale = if dpi == 0 { 0.0 } else { dpi as f32 / 96.0 };
-        let logical_client = if scale > 0.0 {
-            (
-                observed_client.0 as f32 / scale,
-                observed_client.1 as f32 / scale,
-            )
-        } else {
-            (-1.0, -1.0)
-        };
-        let frame = (
-            observed_outer.0.saturating_sub(observed_client.0).max(0),
-            observed_outer.1.saturating_sub(observed_client.1).max(0),
-        );
-        let requested_client = (
-            position.cx.saturating_sub(frame.0),
-            position.cy.saturating_sub(frame.1),
-        );
-        let requested_logical = if scale > 0.0 {
-            (
-                requested_client.0 as f32 / scale,
-                requested_client.1 as f32 / scale,
-            )
-        } else {
-            (-1.0, -1.0)
-        };
-        let source = WINDOWPOS_CALL_SOURCE.with(|current| current.get());
-
-        eprintln!(
-            "[NATIVE_WINDOW_GEOMETRY_DIAG] event={} hwnd={:?} source={} resizing={} horizontal_edge={:?} dpi={} scale={:.3} flags=0x{:X} requested_origin=({}, {}) requested_outer={}x{} requested_client_estimate={}x{} requested_client_logical_estimate={:.1}x{:.1} observed_outer={}x{} observed_client={}x{} observed_client_logical={:.1}x{:.1}",
-            event,
-            window,
-            source,
-            state.active,
-            state.horizontal_edge,
-            dpi,
-            scale,
-            position.flags.0,
-            position.x,
-            position.y,
-            position.cx,
-            position.cy,
-            requested_client.0,
-            requested_client.1,
-            requested_logical.0,
-            requested_logical.1,
-            observed_outer.0,
-            observed_outer.1,
-            observed_client.0,
-            observed_client.1,
-            logical_client.0,
-            logical_client.1,
-        );
     }
 
     /// The input order is front-to-back. Raising in reverse leaves the first
@@ -887,27 +785,8 @@ mod windows_impl {
             unsafe { (*state).horizontal_edge = edge };
         }
 
-        if message == WM_WINDOWPOSCHANGING && lparam.0 != 0 {
-            // SAFETY: WM_WINDOWPOSCHANGING supplies a readable WINDOWPOS pointer.
-            let position = unsafe { &*(lparam.0 as *const WINDOWPOS) };
-            // SAFETY: The subclass owns this live state allocation.
-            trace_window_position("windowpos_changing_input", window, position, unsafe { &*state });
-        }
-
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
         let result = unsafe { DefSubclassProc(window, message, wparam, lparam) };
-
-        if message == WM_WINDOWPOSCHANGING && lparam.0 != 0 {
-            // SAFETY: The WINDOWPOS pointer remains valid for the duration of this message.
-            let position = unsafe { &*(lparam.0 as *const WINDOWPOS) };
-            // SAFETY: The subclass owns this live state allocation.
-            trace_window_position("windowpos_changing_final", window, position, unsafe { &*state });
-        } else if message == WM_WINDOWPOSCHANGED && lparam.0 != 0 {
-            // SAFETY: WM_WINDOWPOSCHANGED supplies a readable WINDOWPOS pointer.
-            let position = unsafe { &*(lparam.0 as *const WINDOWPOS) };
-            // SAFETY: The subclass owns this live state allocation.
-            trace_window_position("windowpos_changed", window, position, unsafe { &*state });
-        }
 
         if message == WM_ACTIVATE && (wparam.0 & 0xffff) != WA_INACTIVE as usize {
             // Windows normally raises the activated HWND above its siblings.
@@ -977,7 +856,7 @@ mod windows_impl {
             if let Some(resize_start_right) = resize_start_right {
                 let delta_x = proposed.right.saturating_sub(resize_start_right);
                 for (follower, origin) in follower_origins {
-                    let result = unsafe {
+                    let _ = unsafe {
                         SetWindowPos(
                             follower,
                             None,
@@ -991,12 +870,7 @@ mod windows_impl {
                                 | SWP_NOOWNERZORDER,
                         )
                     };
-                    if let Err(error) = result {
-                        eprintln!(
-                            "[NATIVE_RESIZE_FOLLOWER] hwnd={:?} delta_x={} error={}",
-                            follower, delta_x, error,
-                        );
-                    }
+                    
                 }
             }
         }
@@ -1279,7 +1153,7 @@ mod windows_impl {
             // Core sizes describe the client area. SetWindowPos expects the
             // complete outer HWND size, so preserve the current non-client frame.
             // SAFETY: Resize only; preserve position, Z-order and activation.
-            with_windowpos_call_source("SystemNativeWindowOps::resize_window", || unsafe {
+            unsafe {
                 SetWindowPos(
                     native,
                     None,
@@ -1289,7 +1163,7 @@ mod windows_impl {
                     outer_height,
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
                 )
-            })
+            }
             .map_err(|error| platform_error("SetWindowPos(resize)", error))
         }
 
@@ -1332,7 +1206,7 @@ mod windows_impl {
             // Set position and full outer size together. The requested size is
             // client-content size; preserve the existing non-client frame.
             // SAFETY: One SetWindowPos updates both edges while preserving Z-order and activation.
-            with_windowpos_call_source("SystemNativeWindowOps::set_window_bounds", || unsafe {
+            unsafe {
                 SetWindowPos(
                     native,
                     None,
@@ -1342,7 +1216,7 @@ mod windows_impl {
                     outer_height,
                     SWP_NOZORDER | SWP_NOACTIVATE,
                 )
-            })
+            }
             .map_err(|error| platform_error("SetWindowPos(bounds)", error))
         }
 
@@ -2354,7 +2228,6 @@ pub fn hide_from_taskbar(window: NativeWindowId) -> bool {
 pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
     false
 }
-
 
 #[cfg(test)]
 mod drop_window_target_tests {
