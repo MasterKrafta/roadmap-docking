@@ -1469,9 +1469,9 @@ impl Layout {
             },
         )?;
 
-        let (source_columns, source_ratios, source_was_split) =
+        let (source_columns, source_was_split) =
             match self.nodes.get(source_root) {
-                Some(Node::Column(_)) => (vec![source_root], vec![1.0], false),
+                Some(Node::Column(_)) => (vec![source_root], false),
                 Some(Node::Split(split))
                     if split.axis == Axis::X
                         && split
@@ -1479,11 +1479,7 @@ impl Layout {
                             .iter()
                             .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
                 {
-                    (
-                        split.children.clone(),
-                        normalized_ratios(split.ratios.iter().copied().map(Some).collect()),
-                        true,
-                    )
+                    (split.children.clone(), true)
                 }
                 _ => {
                     return Err(CommandError::InvalidTarget {
@@ -1491,9 +1487,9 @@ impl Layout {
                     });
                 }
             };
-        let (target_columns, target_ratios, target_was_split) =
+        let (target_columns, target_was_split) =
             match self.nodes.get(target_root) {
-                Some(Node::Column(_)) => (vec![target_root], vec![1.0], false),
+                Some(Node::Column(_)) => (vec![target_root], false),
                 Some(Node::Split(split))
                     if split.axis == Axis::X
                         && split
@@ -1501,11 +1497,7 @@ impl Layout {
                             .iter()
                             .all(|child| matches!(self.nodes.get(*child), Some(Node::Column(_)))) =>
                 {
-                    (
-                        split.children.clone(),
-                        normalized_ratios(split.ratios.iter().copied().map(Some).collect()),
-                        true,
-                    )
+                    (split.children.clone(), true)
                 }
                 _ => {
                     return Err(CommandError::InvalidTarget {
@@ -1539,24 +1531,19 @@ impl Layout {
         };
 
         let mut children = Vec::with_capacity(source_columns.len() + target_columns.len());
-        let mut ratios = Vec::with_capacity(children.capacity());
         for (index, target_column) in target_columns.iter().copied().enumerate() {
             if index == insertion_index {
                 children.extend(source_columns.iter().copied());
-                ratios.extend(source_ratios.iter().copied().map(|ratio| ratio * 0.5));
             }
             children.push(target_column);
-            ratios.push(target_ratios[index] * 0.5);
         }
         if insertion_index == target_columns.len() {
             children.extend(source_columns.iter().copied());
-            ratios.extend(source_ratios.iter().copied().map(|ratio| ratio * 0.5));
         }
-        let ratios = normalized_ratios(ratios.into_iter().map(Some).collect());
 
         // A native Floating window can be wider than its saved Column.
-        // Keep the requested effective widths when joining windows so spare
-        // client-area space does not become part of the new composition.
+        // Keep each Column's effective width when joining compositions instead
+        // of assigning half of the new window to each source composition.
         let column_widths = children
             .iter()
             .map(|column_id| match self.nodes.get(*column_id) {
@@ -1567,6 +1554,7 @@ impl Layout {
             })
             .collect::<Result<Vec<_>, _>>()?;
         let total_column_width = column_widths.iter().sum::<f32>();
+        let ratios = normalized_ratios(column_widths.iter().copied().map(Some).collect());
         let splitter_width = metrics.splitter_thickness
             * children.len().saturating_sub(1) as f32;
         let required_width = total_column_width + splitter_width;
