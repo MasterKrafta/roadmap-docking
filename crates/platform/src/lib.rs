@@ -420,6 +420,23 @@ mod windows_impl {
         .is_ok()
     }
 
+    /// Removes the native system-menu style so Windows does not draw its
+    /// caption close button over the client area during a resize.
+    ///
+    /// Keep `WS_THICKFRAME`: GPUI Floating windows still need the native resize
+    /// border even though their title bar is hidden.
+    pub(super) fn hide_system_close_button(window: NativeWindowId) -> Result<(), NativeError> {
+        let native = hwnd(window);
+        // SAFETY: The HWND belongs to the GPUI Floating window passed by the caller.
+        let style = unsafe { GetWindowLongPtrW(native, GWL_STYLE) as u32 };
+        if style & WS_SYSMENU.0 == 0 {
+            return Ok(());
+        }
+        let extended_style = unsafe { GetWindowLongPtrW(native, GWL_EXSTYLE) as u32 };
+        write_window_frame_styles(native, style & !WS_SYSMENU.0, extended_style)?;
+        notify_native_frame_change(native)
+    }
+
     fn platform_error(operation: &'static str, error: windows::core::Error) -> NativeError {
         NativeError::Platform {
             operation,
@@ -2227,6 +2244,18 @@ pub fn hide_from_taskbar(window: NativeWindowId) -> bool {
 #[cfg(not(windows))]
 pub fn hide_from_taskbar(_: NativeWindowId) -> bool {
     false
+}
+
+/// Removes the system close button from a border-resizable Floating window.
+#[cfg(windows)]
+pub fn hide_system_close_button(window: NativeWindowId) -> Result<(), NativeError> {
+    windows_impl::hide_system_close_button(window)
+}
+
+/// Native system close-button styling is only available on Windows.
+#[cfg(not(windows))]
+pub fn hide_system_close_button(_: NativeWindowId) -> Result<(), NativeError> {
+    Err(NativeError::Unsupported)
 }
 
 #[cfg(test)]
