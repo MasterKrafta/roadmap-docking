@@ -1710,9 +1710,11 @@ impl FloatingWindowManager {
         let resize_is_active = proposal
             .map(|proposal| proposal.active)
             .unwrap_or_else(|| self.native_ops.is_resizing(native_window).unwrap_or(false));
-        let proposed_bounds = proposal
-            .and_then(|proposal| self.floating_column_bounds_from_cursor(state, proposal))
-            .or_else(|| self.core_bounds_from_native_window(native_window));
+        let proposed_bounds = match proposal {
+            Some(proposal) => self.floating_column_bounds_from_cursor(state, proposal),
+            None if !resize_is_active => self.core_bounds_from_native_window(native_window),
+            None => None,
+        };
 
         if resize_is_active {
             if let Some(bounds) = proposed_bounds {
@@ -1774,6 +1776,8 @@ impl FloatingWindowManager {
             .flatten();
         let width_delta =
             native_column_bounds.size.width - current_column_bounds.size.width;
+        let total_width_delta =
+            native_column_bounds.size.width - state.initial_column_bounds.size.width;
         let width_changed = width_delta.abs() > 0.5;
         let left_edge_moved =
             (native_column_bounds.origin.x - current_column_bounds.origin.x).abs() > 0.5;
@@ -1827,10 +1831,10 @@ impl FloatingWindowManager {
         }
 
         let target_group_bounds = floating_column_resize_target_bounds(
-            current_group_bounds,
+            state.initial_group_bounds,
             native_column_bounds,
             edge,
-            width_delta,
+            total_width_delta,
         );
         if target_group_bounds == current_group_bounds {
             
