@@ -749,48 +749,6 @@ mod windows_impl {
         true
     }
 
-    fn resize_rect_from_cursor(
-        initial_window_rect: PhysicalRect,
-        initial_cursor: PhysicalPoint,
-        cursor: PhysicalPoint,
-        sizing_edge: u32,
-    ) -> Option<RECT> {
-        let delta_x = cursor.x.saturating_sub(initial_cursor.x);
-        let delta_y = cursor.y.saturating_sub(initial_cursor.y);
-        let mut rect = RECT {
-            left: initial_window_rect.left,
-            top: initial_window_rect.top,
-            right: initial_window_rect.right,
-            bottom: initial_window_rect.bottom,
-        };
-
-        match sizing_edge {
-            1 => rect.left = rect.left.saturating_add(delta_x),
-            2 => rect.right = rect.right.saturating_add(delta_x),
-            3 => rect.top = rect.top.saturating_add(delta_y),
-            4 => {
-                rect.left = rect.left.saturating_add(delta_x);
-                rect.top = rect.top.saturating_add(delta_y);
-            }
-            5 => {
-                rect.right = rect.right.saturating_add(delta_x);
-                rect.top = rect.top.saturating_add(delta_y);
-            }
-            6 => rect.bottom = rect.bottom.saturating_add(delta_y),
-            7 => {
-                rect.left = rect.left.saturating_add(delta_x);
-                rect.bottom = rect.bottom.saturating_add(delta_y);
-            }
-            8 => {
-                rect.right = rect.right.saturating_add(delta_x);
-                rect.bottom = rect.bottom.saturating_add(delta_y);
-            }
-            _ => return None,
-        }
-
-        (rect.right > rect.left && rect.bottom > rect.top).then_some(rect)
-    }
-
     unsafe fn clamp_native_sizing_rect(
         window: HWND,
         sizing_edge: u32,
@@ -894,6 +852,7 @@ mod windows_impl {
             unsafe {
                 (*state).active = true;
                 (*state).horizontal_edge = None;
+                (*state).sizing_edge = 0;
                 (*state).resize_start_right = resize_start_right;
                 (*state).resize_follower_origins = resize_follower_origins;
                 (*state).resize_sequence = (*state).resize_sequence.wrapping_add(1).max(1);
@@ -909,7 +868,10 @@ mod windows_impl {
         if message == WM_SIZING {
             let edge = horizontal_resize_edge_from_sizing_code(wparam.0 as u32);
             // SAFETY: The subclass owns this live state allocation.
-            unsafe { (*state).horizontal_edge = edge };
+            unsafe {
+                (*state).horizontal_edge = edge;
+                (*state).sizing_edge = wparam.0 as u32;
+            };
         }
 
         // SAFETY: Forward the message to GPUI/the remaining subclass chain.
@@ -956,44 +918,10 @@ mod windows_impl {
             }
         }
 
-        // Derive the accepted outer rectangle from the cursor sample captured
-        // for this exact WM_SIZING message. The same rectangle is then consumed
-        // by Windows and by the GPUI/Core resize proposal.
-        let cursor_for_resize = if message == WM_SIZING && lparam.0 != 0 {
-            let mut cursor = POINT::default();
-            let cursor_read = unsafe { GetCursorPos(&mut cursor) }.is_ok();
-            if cursor_read {
-                let cursor = PhysicalPoint {
-                    x: cursor.x,
-                    y: cursor.y,
-                };
-                let (initial_window_rect, initial_cursor) = unsafe {
-                    ((*state).initial_window_rect, (*state).initial_cursor)
-                };
-                initial_window_rect
-                    .zip(initial_cursor)
-                    .and_then(|(initial_rect, initial_cursor)| {
-                        resize_rect_from_cursor(
-                            initial_rect,
-                            initial_cursor,
-                            cursor,
-                            wparam.0 as u32,
-                        )
-                    })
-                    .map(|cursor_rect| {
-                        // SAFETY: WM_SIZING supplies a writable RECT through lParam.
-                        unsafe { *(lparam.0 as *mut RECT) = cursor_rect };
-                        cursor
-                    })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Clamp only after deriving the cursor-owned rectangle so native and
-        // content geometry share the same accepted minimum-constrained result.
+        // Windows already owns the outer resize operation and applies the
+        // cursor to this WM_SIZING rectangle. Keep its accepted rectangle for
+        // the native window, while capturing the same cursor independently for
+        // the GPUI/Core content path.
         let sizing_was_clamped = message == WM_SIZING
             // SAFETY: This subclass owns the live ResizeLoopState until WM_NCDESTROY.
             && unsafe {
@@ -1007,7 +935,6 @@ mod windows_impl {
                 unsafe { &mut *state },
                 rect_from_native(*proposed),
                 true,
-                cursor_for_resize,
             );
         }
 
@@ -1055,6 +982,7 @@ mod windows_impl {
             unsafe {
                 (*state).active = false;
                 (*state).horizontal_edge = None;
+                (*state).sizing_edge = 0;
                 (*state).resize_start_right = None;
                 (*state).resize_follower_origins.clear();
             };
@@ -1067,7 +995,7 @@ mod windows_impl {
             }
         }
 
-        if sizing_was_clamped || cursor_for_resize.is_some() {
+        if sizing_was_clamped {
             LRESULT(1)
         } else {
             result
@@ -1149,7 +1077,6 @@ mod windows_impl {
         state: &mut ResizeLoopState,
         window_rect: PhysicalRect,
         active: bool,
-        cursor: Option<PhysicalPoint>,
     ) {
         let (
             Some(initial_cursor),
@@ -1165,17 +1092,16 @@ mod windows_impl {
             return;
         };
 
-        let cursor = cursor.unwrap_or_else(|| {
-            let mut current_cursor = POINT::default();
-            if unsafe { GetCursorPos(&mut current_cursor) }.is_ok() {
-                PhysicalPoint {
-                    x: current_cursor.x,
-                    y: current_cursor.y,
-                }
-            } else {
-                initial_cursor
+        let mut current_cursor = POINT::default();
+        let cursor = if unsafe { GetCursorPos(&mut current_cursor) }.is_ok() {
+            PhysicalPoint {
+                x: current_cursor.x,
+                y: current_cursor.y,
             }
-        });
+        } else {
+            initial_cursor
+        };
+        let sizing_edge = state.sizing_edge;
         let client_size = PhysicalSize {
             width: initial_client_size.width.saturating_add(
                 window_rect.width().saturating_sub(initial_window_rect.width()),
@@ -1201,6 +1127,7 @@ mod windows_impl {
             session_id: state.resize_sequence,
             revision: state.resize_revision,
             active,
+            sizing_edge,
             initial_cursor,
             cursor,
             initial_window_rect,
